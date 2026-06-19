@@ -15,7 +15,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.main.json && tsc --noEmit -p tsconfig.renderer.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:main": "tsc -p tsconfig.main.json && node --test dist/main/overview-traversal.test.js"
+    "test:main": "tsc -p tsconfig.main.json && node --test dist/main/overview-traversal.test.js",
+    "install:local": "npm run build && electron-builder --mac --dir && rm -rf '/Applications/Notepad AI.app' && ditto 'release/mac-arm64/Notepad AI.app' '/Applications/Notepad AI.app' && echo 'installed to /Applications'"
   },
   "keywords": [
     "markdown",
