@@ -139,6 +139,10 @@ const api = {
   sessionGet: (): Promise<any> => ipcRenderer.invoke('session:get'),
   sessionWrite: (snap: any): Promise<void> => ipcRenderer.invoke('session:write', snap),
   sessionClear: (): Promise<void> => ipcRenderer.invoke('session:clear'),
+
+  checkForUpdate: (): Promise<{ updateAvailable: boolean; currentVersion: string; latestVersion: string; url: string } | null> =>
+    ipcRenderer.invoke('update:check'),
+  openExternal: (url: string): Promise<void> => ipcRenderer.invoke('shell:open-external', url),
 };
 
 contextBridge.exposeInMainWorld('api', api);

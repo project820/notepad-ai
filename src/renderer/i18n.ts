@@ -86,6 +86,10 @@ const DICTS: Record<Locale, Dict> = {
     'restore.title': 'Restore your previous session?',
     'restore.yes': 'Restore',
     'restore.no': 'Dismiss',
+    // Update banner
+    'update.title': 'Update available',
+    'update.download': 'Download',
+    'update.dismiss': 'Later',
     // Status
     'status.ready': 'Ready',
     'status.signedOut': 'Signed out',
@@ -198,6 +202,10 @@ const DICTS: Record<Locale, Dict> = {
     'restore.title': '이전 작업을 복구하시겠어요?',
     'restore.yes': '복구',
     'restore.no': '무시',
+    // Update banner
+    'update.title': '업데이트 있음',
+    'update.download': '다운로드',
+    'update.dismiss': '나중에',
     'status.ready': '준비됨',
     'status.signedOut': '로그아웃됨',
     'login.lead': 'AI 기능을 사용하려면 본인의 <strong>ChatGPT</strong> 계정으로 로그인하세요. 회사 정책상 개인 ChatGPT Plus 구독이 필요합니다.',

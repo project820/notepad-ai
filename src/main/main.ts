@@ -17,6 +17,7 @@ import {
 } from './project-wizard/service';
 import { nowInSeoulIso } from './project-wizard/time';
 import { isAllowedExternalUrl } from './safe-external';
+import { checkForUpdate } from './update-check';
 
 const APP_DISPLAY_NAME = 'Notepad AI';
 const APP_STORAGE_NAME = 'notepad-ai';
@@ -560,6 +561,11 @@ ipcMain.handle('prompt:assembly-context', async () => {
 ipcMain.handle('session:get', async () => readSession());
 ipcMain.handle('session:write', async (_e, snap: SessionSnapshot) => writeSession(snap));
 ipcMain.handle('session:clear', async () => clearSession());
+
+ipcMain.handle('update:check', async () => checkForUpdate(app.getVersion()));
+ipcMain.handle('shell:open-external', async (_e, url: string) => {
+  if (isAllowedExternalUrl(url)) await shell.openExternal(url);
+});
 
 app.on('before-quit', () => {
   // Best-effort: mark current snapshot as clean exit
