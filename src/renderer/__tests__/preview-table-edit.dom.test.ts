@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { wirePreviewTables } from '../preview-table-edit';
+import { wirePreviewTables, cellHtmlToInlineMarkdown } from '../preview-table-edit';
 
 const MD = ['| a | b |', '| --- | --- |', '| 1 | 2 |', '| 3 | 4 |'].join('\n');
 
@@ -28,17 +28,18 @@ beforeEach(() => {
 });
 afterEach(() => {
   document.body.innerHTML = '';
+  document.querySelectorAll('.table-ctx-menu').forEach((m) => m.remove());
   vi.restoreAllMocks();
 });
 
 function cells(root: HTMLElement): HTMLTableCellElement[] {
   return Array.from(root.querySelectorAll<HTMLTableCellElement>('th,td'));
 }
-function clickAct(root: HTMLElement, act: string) {
-  root.querySelector<HTMLButtonElement>(`button[data-act="${act}"]`)!.click();
-}
-function focusCell(cell: HTMLTableCellElement) {
-  cell.dispatchEvent(new Event('focusin', { bubbles: true }));
+/** Right-click a cell to open the context menu, then click the given action. */
+function ctxAct(cell: HTMLTableCellElement, act: string) {
+  cell.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 20, clientY: 20 }));
+  const menu = document.querySelector('.table-ctx-menu')!;
+  menu.querySelector<HTMLButtonElement>(`button[data-act="${act}"]`)!.click();
 }
 
 describe('wirePreviewTables — DOM integration (Turndown isolation)', () => {
@@ -54,54 +55,87 @@ describe('wirePreviewTables — DOM integration (Turndown isolation)', () => {
     const spy = vi.fn();
     root.addEventListener('input', spy);
     root.addEventListener('keydown', spy);
-    const cell = cells(root)[2]; // first body cell
+    const cell = cells(root)[2];
     cell.dispatchEvent(new Event('input', { bubbles: true }));
     cell.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'a' }));
     expect(spy).not.toHaveBeenCalled();
   });
+
+  it('does not render an always-visible toolbar (right-click only)', () => {
+    const { root } = buildPreview();
+    expect(root.querySelector('.table-toolbar')).toBeNull();
+    expect(document.querySelector('.table-ctx-menu')).toBeNull();
+  });
 });
 
-describe('wirePreviewTables — cell edit syncs to MD source', () => {
+describe('cellHtmlToInlineMarkdown (AC4: formatting persists)', () => {
+  it('converts bold/italic/code to inline markdown', () => {
+    const cell = document.createElement('td');
+    cell.innerHTML = 'plain <strong>bold</strong> <em>it</em> <code>x</code>';
+    expect(cellHtmlToInlineMarkdown(cell)).toBe('plain **bold** *it* `x`');
+  });
+  it('handles <b>/<i> and span style-based formatting', () => {
+    const cell = document.createElement('td');
+    cell.innerHTML = '<b>B</b> <span style="font-style: italic">I</span> <span style="font-weight:700">W</span>';
+    expect(cellHtmlToInlineMarkdown(cell)).toBe('**B** *I* **W**');
+  });
+  it('flattens to plain text when there is no formatting', () => {
+    const cell = document.createElement('td');
+    cell.textContent = 'just text';
+    expect(cellHtmlToInlineMarkdown(cell)).toBe('just text');
+  });
+});
+
+describe('wirePreviewTables — cell edit syncs to MD source (with formatting)', () => {
   it('patches the correct cell on blur', () => {
     const { root, getDoc } = buildPreview();
     const bodyCell = cells(root).find((c) => c.textContent === '1')!;
     bodyCell.textContent = '9';
-    (bodyCell as unknown as { innerText: string }).innerText = '9';
     bodyCell.dispatchEvent(new Event('blur', { bubbles: false }));
     expect(getDoc().split('\n')[2]).toBe('| 9 | 2 |');
   });
+
+  it('persists inline bold formatting into the MD cell', () => {
+    const { root, getDoc } = buildPreview();
+    const bodyCell = cells(root).find((c) => c.textContent === '1')!;
+    bodyCell.innerHTML = '<strong>9</strong>';
+    bodyCell.dispatchEvent(new Event('blur', { bubbles: false }));
+    expect(getDoc().split('\n')[2]).toBe('| **9** | 2 |');
+  });
 });
 
-describe('wirePreviewTables — cell-relative toolbar', () => {
-  it('row-below inserts a blank row after the focused body row', () => {
+describe('wirePreviewTables — right-click context menu', () => {
+  it('row-below inserts a blank row after the right-clicked body row', () => {
     const { root, getDoc } = buildPreview();
-    focusCell(cells(root).find((c) => c.textContent === '1')!); // row 1
-    clickAct(root, 'row-below');
+    ctxAct(cells(root).find((c) => c.textContent === '1')!, 'row-below');
     const lines = getDoc().split('\n');
     expect(lines).toHaveLength(5);
     expect(lines[3]).toBe('|    |    |');
   });
 
-  it('col-right inserts a blank column to the right of the focused column', () => {
+  it('col-right inserts a blank column to the right of the right-clicked column', () => {
     const { root, getDoc } = buildPreview();
-    focusCell(cells(root).find((c) => c.textContent === 'a')!); // col 0
-    clickAct(root, 'col-right');
+    ctxAct(cells(root).find((c) => c.textContent === 'a')!, 'col-right');
     expect(getDoc().split('\n')[0]).toBe('| a |  | b |');
     expect(getDoc().split('\n')[1]).toBe('| --- | --- | --- |');
   });
 
   it('row-del removes a data row after confirm', () => {
     const { root, getDoc } = buildPreview();
-    focusCell(cells(root).find((c) => c.textContent === '1')!);
-    clickAct(root, 'row-del');
-    expect(getDoc().split('\n')).toHaveLength(3); // header + sep + 1 body
+    ctxAct(cells(root).find((c) => c.textContent === '1')!, 'row-del');
+    expect(getDoc().split('\n')).toHaveLength(3);
   });
 
   it('row-del is cancelled when confirm returns false (data-loss guard)', () => {
     (globalThis as { confirm?: () => boolean }).confirm = () => false;
     const { root, getDoc } = buildPreview();
-    focusCell(cells(root).find((c) => c.textContent === '1')!);
-    clickAct(root, 'row-del');
-    expect(getDoc().split('\n')).toHaveLength(4); // unchanged
+    ctxAct(cells(root).find((c) => c.textContent === '1')!, 'row-del');
+    expect(getDoc().split('\n')).toHaveLength(4);
+  });
+
+  it('closes the menu after an action', () => {
+    const { root } = buildPreview();
+    ctxAct(cells(root).find((c) => c.textContent === '1')!, 'row-below');
+    expect(document.querySelector('.table-ctx-menu')).toBeNull();
   });
 });

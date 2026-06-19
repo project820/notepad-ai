@@ -677,6 +677,8 @@ function paintAuthPill(auth: AuthSnapshot) {
 const unifiedChatHost = document.getElementById('unified-chat') as HTMLDivElement;
 const contentRow = document.querySelector('.content-row') as HTMLElement;
 const ucResizer = document.querySelector('.uc-resizer') as HTMLDivElement;
+const aiFab = document.getElementById('ai-fab') as HTMLButtonElement;
+aiFab.addEventListener('click', () => toggleUnifiedChat());
 function applyAiOutput(action: 'replace' | 'insert', md: string) {
   if (action === 'replace') {
     suppressEditorChange = true;
@@ -711,6 +713,7 @@ function setUnifiedChatOpen(open: boolean) {
   contentRow.classList.toggle('uc-open', open);
   unifiedChatHost.hidden = !open;
   ucResizer.hidden = !open;
+  aiFab.classList.toggle('hidden', open);
   if (open) setTimeout(() => unifiedChatHost.querySelector<HTMLTextAreaElement>('.uc-input')?.focus(), 60);
 }
 

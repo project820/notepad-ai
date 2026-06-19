@@ -2052,3 +2052,61 @@ body.sc-open .bottom-chat-host { right: calc(min(420px, 50vw) + 24px); }
 .update-download:hover { background: var(--color-primary-deep); }
 .update-dismiss { background: var(--color-surface-bone); color: var(--color-body); }
 .update-dismiss:hover { border-color: var(--color-primary); }
+/* =============================================================
+ * AI FLOATING BUTTON — bottom-right quick entry to unified chat
+ * ============================================================= */
+.ai-fab {
+  position: fixed;
+  right: 22px;
+  bottom: 46px;
+  z-index: 180;
+  width: 52px;
+  height: 52px;
+  border-radius: 999px;
+  border: none;
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(234, 40, 4, 0.34);
+  transition: transform 0.12s, background 0.15s, opacity 0.15s;
+}
+.ai-fab:hover { background: var(--color-primary-deep); transform: translateY(-1px); }
+.ai-fab:active { transform: scale(0.95); }
+.ai-fab.hidden { opacity: 0; pointer-events: none; transform: scale(0.8); }
+
+/* =============================================================
+ * TABLE CELL CONTEXT MENU (right-click) — replaces the old toolbar
+ * ============================================================= */
+.table-ctx-menu {
+  position: fixed;
+  z-index: 260;
+  min-width: 160px;
+  padding: 5px;
+  background: var(--color-surface-card);
+  border: 1px solid var(--color-hairline-strong);
+  border-radius: var(--r-md, 10px);
+  box-shadow: 0 10px 30px rgba(32, 32, 32, 0.22);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  animation: lm-fade 0.12s ease-out;
+}
+.table-ctx-menu button {
+  text-align: left;
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 12px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-ink);
+  cursor: pointer;
+}
+.table-ctx-menu button:hover { background: var(--color-surface-bone); }
+.table-ctx-menu button.danger { color: var(--color-primary); }
+.table-ctx-menu button.danger:hover { background: rgba(234, 40, 4, 0.08); }
+.table-ctx-sep { height: 1px; margin: 4px 6px; background: var(--color-hairline); }

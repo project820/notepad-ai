@@ -1,6 +1,6 @@
 {
   "name": "notepad-ai",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Friendly Mac markdown editor for non-technical writers, Korean-centric.",
   "main": "dist/main/main.js",
   "scripts": {
@@ -16,7 +16,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:main": "tsc -p tsconfig.main.json && node --test dist/main/overview-traversal.test.js",
-    "install:local": "npm run build && electron-builder --mac --dir && rm -rf '/Applications/Notepad AI.app' && ditto 'release/mac-arm64/Notepad AI.app' '/Applications/Notepad AI.app' && echo 'installed to /Applications'"
+    "install:local": "npm run build && electron-builder --mac --dir && rm -rf '/Applications/Notepad AI.app' && ditto 'release/mac-arm64/Notepad AI.app' '/Applications/Notepad AI.app' && rm -rf release/mac-arm64 && echo 'installed to /Applications (build staging removed)'"
   },
   "keywords": [
     "markdown",
