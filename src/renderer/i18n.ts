@@ -196,9 +196,9 @@ const DICTS: Record<Locale, Dict> = {
     'he.error.save': 'Could not save the file. Please try again.',
     // v0.2 — settings: default .md editor
     'settings.mdHandler.title': 'Default .md editor',
-    'settings.mdHandler.desc': 'Open Markdown files with Notepad AI by default.',
+    'settings.mdHandler.desc': 'Register Notepad AI as a Markdown opener. An unsigned app cannot be set as the system default automatically — register here, then set it once in Finder.',
     'settings.mdHandler.button': 'Set as default .md editor',
-    'settings.mdHandler.registered': 'Notepad AI is your default .md editor',
+    'settings.mdHandler.registered': 'Registered. To make it the default: in Finder, right-click any .md → Get Info → "Open with" → Notepad AI → "Change All".',
     'settings.mdHandler.unsupported': 'Not supported on this OS/build',
   },
   ko: {
@@ -377,9 +377,9 @@ const DICTS: Record<Locale, Dict> = {
     'he.error.save': '파일을 저장하지 못했습니다. 다시 시도해주세요.',
     // v0.2 — settings: default .md editor
     'settings.mdHandler.title': '기본 .md 편집기',
-    'settings.mdHandler.desc': '마크다운 파일을 Notepad AI로 기본 실행합니다.',
+    'settings.mdHandler.desc': 'Notepad AI를 마크다운 열기 앱으로 등록합니다. 무서명 앱은 macOS가 자동 기본 지정을 막아서, 등록 후 Finder에서 한 번만 지정하면 됩니다.',
     'settings.mdHandler.button': '기본 .md 편집기로 설정',
-    'settings.mdHandler.registered': 'Notepad AI가 기본 .md 편집기입니다',
+    'settings.mdHandler.registered': '등록됨. 기본으로 쓰려면 Finder에서 .md 파일 우클릭 → 정보 가져오기 → "다음으로 열기" → Notepad AI → "모두 변경".',
     'settings.mdHandler.unsupported': '이 OS/빌드에서는 지원되지 않습니다',
   },
   'zh-Hans': {
@@ -435,7 +435,7 @@ const DICTS: Record<Locale, Dict> = {
     'he.back': '返回', 'he.cancel': '取消', 'he.continue': '继续', 'he.generate': '生成', 'he.fetching': '正在获取设计…',
     'he.design.galleryLink': '打开 getdesign.md', 'he.error.open': '无法打开已保存的文件。文件仍保存在磁盘上。', 'he.error.save': '无法保存文件。请重试。',
     // v0.2 — settings: default .md editor
-    'settings.mdHandler.title': '默认 .md 编辑器', 'settings.mdHandler.desc': '默认使用 Notepad AI 打开 Markdown 文件。', 'settings.mdHandler.button': '设为默认 .md 编辑器', 'settings.mdHandler.registered': 'Notepad AI 已是你的默认 .md 编辑器', 'settings.mdHandler.unsupported': '此操作系统/版本不支持',
+    'settings.mdHandler.title': '默认 .md 编辑器', 'settings.mdHandler.desc': '将 Notepad AI 注册为 Markdown 打开方式。未签名应用无法自动设为系统默认——先注册，再在访达中手动设置一次。', 'settings.mdHandler.button': '设为默认 .md 编辑器', 'settings.mdHandler.registered': '已注册。设为默认：在访达中右键任意 .md → 显示简介 → “打开方式” → Notepad AI → “全部更改”。', 'settings.mdHandler.unsupported': '此操作系统/版本不支持',
   },
   'zh-Hant': {
     'tip.model': 'AI 模型', 'tip.font': '字級', 'tip.theme': '主題', 'tip.account': '帳戶', 'tip.language': '語言',
@@ -490,7 +490,7 @@ const DICTS: Record<Locale, Dict> = {
     'he.back': '返回', 'he.cancel': '取消', 'he.continue': '繼續', 'he.generate': '產生', 'he.fetching': '正在取得設計…',
     'he.design.galleryLink': '開啟 getdesign.md', 'he.error.open': '無法開啟已儲存的檔案。檔案仍儲存在磁碟上。', 'he.error.save': '無法儲存檔案。請重試。',
     // v0.2 — settings: default .md editor
-    'settings.mdHandler.title': '預設 .md 編輯器', 'settings.mdHandler.desc': '預設使用 Notepad AI 開啟 Markdown 檔案。', 'settings.mdHandler.button': '設為預設 .md 編輯器', 'settings.mdHandler.registered': 'Notepad AI 已是你的預設 .md 編輯器', 'settings.mdHandler.unsupported': '此作業系統/版本不支援',
+    'settings.mdHandler.title': '預設 .md 編輯器', 'settings.mdHandler.desc': '將 Notepad AI 註冊為 Markdown 開啟方式。未簽署應用無法自動設為系統預設——先註冊，再在 Finder 手動設定一次。', 'settings.mdHandler.button': '設為預設 .md 編輯器', 'settings.mdHandler.registered': '已註冊。設為預設：在 Finder 右鍵任一 .md → 顯示簡介 → 「開啟方式」→ Notepad AI →「全部變更」。', 'settings.mdHandler.unsupported': '此作業系統/版本不支援',
   },
   ja: {
     'tip.model': 'AI モデル', 'tip.font': '文字サイズ', 'tip.theme': 'テーマ', 'tip.account': 'アカウント', 'tip.language': '言語',
@@ -545,7 +545,7 @@ const DICTS: Record<Locale, Dict> = {
     'he.back': '戻る', 'he.cancel': 'キャンセル', 'he.continue': '続ける', 'he.generate': '生成', 'he.fetching': 'デザインを取得中…',
     'he.design.galleryLink': 'getdesign.md を開く', 'he.error.open': '保存したファイルを開けませんでした。ファイルはディスクに保存されています。', 'he.error.save': 'ファイルを保存できませんでした。もう一度お試しください。',
     // v0.2 — settings: default .md editor
-    'settings.mdHandler.title': '既定の .md エディター', 'settings.mdHandler.desc': 'Markdown ファイルを既定で Notepad AI で開きます。', 'settings.mdHandler.button': '既定の .md エディターに設定', 'settings.mdHandler.registered': 'Notepad AI が既定の .md エディターです', 'settings.mdHandler.unsupported': 'この OS/ビルドでは未対応',
+    'settings.mdHandler.title': '既定の .md エディター', 'settings.mdHandler.desc': 'Notepad AI を Markdown を開くアプリとして登録します。未署名アプリは自動で既定にできないため、登録後 Finder で一度設定してください。', 'settings.mdHandler.button': '既定の .md エディターに設定', 'settings.mdHandler.registered': '登録しました。既定にするには Finder で .md を右クリック → 情報を見る →「このアプリケーションで開く」→ Notepad AI →「すべてを変更」。', 'settings.mdHandler.unsupported': 'この OS/ビルドでは未対応',
   },
 };
 

@@ -112,6 +112,14 @@ export function installBlockAi(deps: BlockAiDeps) {
   function hidePill() { pill.style.display = 'none'; }
 
   function positionPill(anchorRect: { right: number; bottom: number }) {
+    // Clamp to the active editing surface: hide rather than float over the
+    // header / status bar when the selection scrolls out of the visible area.
+    const surface = active?.kind === 'preview' ? deps.previewEl : deps.view.scrollDOM;
+    const sr = surface?.getBoundingClientRect();
+    if (sr && (anchorRect.bottom < sr.top || anchorRect.bottom > sr.bottom)) {
+      hidePill();
+      return;
+    }
     const top = anchorRect.bottom + 6;
     const left = Math.min(window.innerWidth - 120, Math.max(8, anchorRect.right - 60));
     pill.style.top = `${top}px`;
