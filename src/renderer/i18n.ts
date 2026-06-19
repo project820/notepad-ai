@@ -90,6 +90,12 @@ const DICTS: Record<Locale, Dict> = {
     'update.title': 'Update available',
     'update.download': 'Download',
     'update.dismiss': 'Later',
+    // Display / typography
+    'type.title': 'Display',
+    'type.letterSpacing': 'Letter spacing',
+    'type.charWidth': 'Character width',
+    'type.lineHeight': 'Line spacing',
+    'footnote.back': '← Back',
     // Status
     'status.ready': 'Ready',
     'status.signedOut': 'Signed out',
@@ -206,6 +212,12 @@ const DICTS: Record<Locale, Dict> = {
     'update.title': '업데이트 있음',
     'update.download': '다운로드',
     'update.dismiss': '나중에',
+    // Display / typography
+    'type.title': '표시',
+    'type.letterSpacing': '자간',
+    'type.charWidth': '장평',
+    'type.lineHeight': '줄간격',
+    'footnote.back': '← 돌아가기',
     'status.ready': '준비됨',
     'status.signedOut': '로그아웃됨',
     'login.lead': 'AI 기능을 사용하려면 본인의 <strong>ChatGPT</strong> 계정으로 로그인하세요. 회사 정책상 개인 ChatGPT Plus 구독이 필요합니다.',

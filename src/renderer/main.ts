@@ -16,6 +16,8 @@ import { buildUnifiedChatInstructions } from './unified-chat-prompt-handler';
 import { styleDirective, detectLanguage, type Naturalness } from './humanize-engine';
 import { guardVerdict } from './humanize-guards';
 import type { Quality } from './quality';
+import { typographyCssVars, clampTypography, type TypographyPref } from './typography';
+import { wirePreviewLinks } from './preview-links';
 import type { AiProviderId, ModelRef, ProviderAuthStatus } from '../main/ai/types';
 import {
   renderEditableDraft,
@@ -143,6 +145,12 @@ setLocale((prefs.locale as Locale) ?? 'en');
 applyTheme(prefs.theme);
 applyFontSize(prefs.fontSize);
 
+function applyTypography(p: TypographyPref) {
+  const vars = typographyCssVars(p);
+  for (const [k, v] of Object.entries(vars)) document.documentElement.style.setProperty(k, v);
+}
+applyTypography(prefs.typography ?? { letterSpacing: 0, charScaleX: 1, lineHeight: 1 });
+
 if (prefs.splitRatio != null) {
   workspace.style.setProperty('--split-left', `${prefs.splitRatio}fr`);
   workspace.style.setProperty('--split-right', `${1 - prefs.splitRatio}fr`);
@@ -266,6 +274,11 @@ preview.onAfterRender(() => {
     updateWordCount(newDoc);
     scheduleAutosave();
   });
+});
+wirePreviewLinks(preview.el, {
+  openExternal: (url) => void window.api.openExternal(url),
+  backLabel: t('footnote.back'),
+  scroller: previewHost,
 });
 preview.setDoc(initialDoc);
 updateWordCount(initialDoc);
@@ -754,6 +767,12 @@ function openSettings() {
       if (provider === 'chatgpt') prefs.model = modelId;
       savePrefs(prefs);
       statusEl.textContent = `Model · ${provider} · ${modelId}`;
+    },
+    getTypography: () => clampTypography(prefs.typography),
+    onTypographyChange: (next) => {
+      prefs.typography = clampTypography(next);
+      savePrefs(prefs);
+      applyTypography(prefs.typography);
     },
   });
 }

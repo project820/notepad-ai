@@ -1,6 +1,7 @@
 import type { Theme, FontSize } from './toolbar';
 import type { Quality } from './quality';
 import type { Naturalness } from './humanize-engine';
+import { clampTypography, type TypographyPref } from './typography';
 
 export type SelectedModel = { provider: 'chatgpt' | 'claude' | 'openrouter'; id: string };
 export type StylePref = { difficulty: Quality; naturalness: Naturalness };
@@ -19,6 +20,8 @@ export type Prefs = {
   blockSelectedModel?: SelectedModel;
   /** v1 unified style setting (difficulty + always-on humanize). Migrated from `quality`. */
   style?: StylePref;
+  /** v1.1 global typography view-settings (letter-spacing / char scale / line-height). */
+  typography?: TypographyPref;
   locale?: 'en' | 'ko';
   quality?: 'elementary' | 'highschool' | 'college' | 'professor' | 'professional';
 };
@@ -56,6 +59,7 @@ export function migratePrefs(parsed: Partial<Prefs> | null | undefined): Prefs {
   if (!merged.style) {
     merged.style = { difficulty: merged.quality ?? 'college', naturalness: 'balanced' };
   }
+  merged.typography = clampTypography(merged.typography);
   return merged;
 }
 
