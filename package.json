@@ -1,6 +1,6 @@
 {
   "name": "notepad-ai",
-  "version": "0.1.7",
+  "version": "0.2.0",
   "description": "Friendly Mac markdown editor for non-technical writers, Korean-centric.",
   "main": "dist/main/main.js",
   "scripts": {
@@ -48,7 +48,22 @@
       "hardenedRuntime": false,
       "gatekeeperAssess": false,
       "extendInfo": {
-        "NSHumanReadableCopyright": "© 2026 Notepad AI contributors — MIT, unsigned build"
+        "NSHumanReadableCopyright": "© 2026 Notepad AI contributors — MIT, unsigned build",
+        "CFBundleDocumentTypes": [
+          {
+            "CFBundleTypeName": "Markdown Document",
+            "CFBundleTypeRole": "Editor",
+            "LSHandlerRank": "Alternate",
+            "CFBundleTypeExtensions": [
+              "md",
+              "markdown",
+              "mdx"
+            ],
+            "LSItemContentTypes": [
+              "net.daringfireball.markdown"
+            ]
+          }
+        ]
       }
     },
     "dmg": {

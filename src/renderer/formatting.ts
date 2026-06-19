@@ -15,6 +15,7 @@ export type FormatAction =
   | 'task'
   | 'link'
   | 'image'
+  | 'footnote'
   | 'codeblock'
   | 'hr';
 
@@ -160,6 +161,52 @@ function insertHr(view: EditorView) {
   view.focus();
 }
 
+/**
+ * Pure footnote computation (testable, no editor dependency).
+ *
+ * Given the current Markdown document and a selection range, returns the doc
+ * with a `[^n]` reference inserted at the selection end and a matching
+ * `[^n]: ` definition appended at the very end of the document. `n` is one
+ * greater than the highest existing numeric footnote, scanning BOTH references
+ * and definitions (they share the `[^n]` token). The returned cursor sits right
+ * after the appended `[^n]: ` marker, ready for the user to type the note body.
+ */
+export function computeFootnoteInsert(
+  doc: string,
+  from: number,
+  to: number,
+): { doc: string; selection: { anchor: number; head: number }; n: number; ref: string } {
+  const used = [...doc.matchAll(/\[\^(\d+)\]/g)].map((m) => Number(m[1]));
+  const n = (used.length ? Math.max(...used) : 0) + 1;
+  const ref = `[^${n}]`;
+  const def = `[^${n}]: `;
+  // Insert the reference at the end of the selection (after the selected text,
+  // like a citation marker); for a collapsed cursor this is the cursor itself.
+  const at = Math.max(from, to);
+  const withRef = doc.slice(0, at) + ref + doc.slice(at);
+  // Separate the appended definition from the body with a blank line.
+  let sep: string;
+  if (withRef.length === 0) sep = '';
+  else if (withRef.endsWith('\n\n')) sep = '';
+  else if (withRef.endsWith('\n')) sep = '\n';
+  else sep = '\n\n';
+  const finalDoc = withRef + sep + def;
+  const cursor = finalDoc.length;
+  return { doc: finalDoc, selection: { anchor: cursor, head: cursor }, n, ref };
+}
+
+function insertFootnote(view: EditorView) {
+  const { state } = view;
+  const sel = state.selection.main;
+  const r = computeFootnoteInsert(state.doc.toString(), sel.from, sel.to);
+  view.dispatch({
+    changes: { from: 0, to: state.doc.length, insert: r.doc },
+    selection: EditorSelection.cursor(r.selection.head),
+    scrollIntoView: true,
+  });
+  view.focus();
+}
+
 export function applyToEditor(view: EditorView, action: FormatAction) {
   switch (action) {
     case 'bold': return wrap(view, '**');
@@ -177,6 +224,7 @@ export function applyToEditor(view: EditorView, action: FormatAction) {
     case 'image': return insertImage(view);
     case 'codeblock': return insertCodeBlock(view);
     case 'hr': return insertHr(view);
+    case 'footnote': return insertFootnote(view);
   }
 }
 
@@ -257,5 +305,7 @@ export function applyToPreview(action: FormatAction): boolean {
       }
     }
     case 'hr': return exec('insertHorizontalRule');
+    // Footnotes are inserted into the MD source by the caller, not via execCommand.
+    case 'footnote': return false;
   }
 }

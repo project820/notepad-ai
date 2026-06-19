@@ -24,6 +24,8 @@ export type Prefs = {
   typography?: TypographyPref;
   locale?: 'en' | 'ko' | 'zh-Hans' | 'zh-Hant' | 'ja';
   quality?: 'elementary' | 'highschool' | 'college' | 'professor' | 'professional';
+  /** v0.2 preview line-number gutter toggle (default off; back-filled by migratePrefs). */
+  previewLineNumbers?: boolean;
 };
 
 const KEY = 'notepad-ai:prefs:v1';
@@ -45,7 +47,7 @@ function detectLocale(): 'en' | 'ko' | 'zh-Hans' | 'zh-Hant' | 'ja' {
   return 'en';
 }
 
-const DEFAULTS: Prefs = { theme: 'system', fontSize: 'md', model: 'gpt-5.4-mini', blockModel: 'gpt-5.4-mini', locale: detectLocale(), quality: 'college' };
+const DEFAULTS: Prefs = { theme: 'system', fontSize: 'md', model: 'gpt-5.4-mini', blockModel: 'gpt-5.4-mini', locale: detectLocale(), quality: 'college', previewLineNumbers: false };
 
 /**
  * Pure prefs migration: merges defaults + stored prefs, then back-fills the v1

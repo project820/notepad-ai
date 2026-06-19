@@ -1,6 +1,8 @@
 import { app, BrowserWindow, Menu, dialog, ipcMain, shell } from 'electron';
 import { existsSync, promises as fs } from 'node:fs';
+import { execFile } from 'node:child_process';
 import path from 'node:path';
+import https from 'node:https';
 import { startLogin, cancelLogin, getStatus, logout, type LoginUpdate } from './codex-auth';
 import type { ChatTurn } from './codex-client';
 import { getRegistry } from './ai/provider-registry';
@@ -16,8 +18,14 @@ import {
   isSafeAbsoluteProjectFolderPath,
 } from './project-wizard/service';
 import { nowInSeoulIso } from './project-wizard/time';
-import { isAllowedExternalUrl } from './safe-external';
+import {
+  isAllowedExternalUrl,
+  isAllowedDesignFetchUrl,
+  isOpenableSavedPath,
+  normalizeDesignMdUrl,
+} from './safe-external';
 import { checkForUpdate } from './update-check';
+import { mdHandlerStatus, buildLsRegisterTarget, bundlePathFromExecPath } from './md-handler';
 
 const APP_DISPLAY_NAME = 'Notepad AI';
 const APP_STORAGE_NAME = 'notepad-ai';
@@ -40,6 +48,25 @@ function configureAppIdentity() {
 }
 
 configureAppIdentity();
+
+// ---------- macOS "Open With" / double-click handoff (⑥ os-integration, AC9) ----------
+// `open-file` can fire BEFORE `whenReady` when the app is launched by opening a
+// document in Finder, so the listener is registered at module load. Paths that
+// arrive before the window exists are queued and flushed after createWindow().
+const pendingOpenFiles: string[] = [];
+
+app.on('open-file', (event, filePath) => {
+  event.preventDefault();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    void openFilePath(filePath);
+  } else {
+    pendingOpenFiles.push(filePath);
+  }
+});
+
+function flushPendingOpenFiles() {
+  for (const filePath of pendingOpenFiles.splice(0)) void openFilePath(filePath);
+}
 
 async function createWindow() {
   const windowOptions: Electron.BrowserWindowConstructorOptions = {
@@ -308,7 +335,11 @@ async function handleOpen() {
     ],
   });
   if (result.canceled || result.filePaths.length === 0) return;
-  const filePath = result.filePaths[0];
+  await openFilePath(result.filePaths[0]);
+}
+
+async function openFilePath(filePath: string) {
+  if (!mainWindow) return;
   const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
   if (CONVERTIBLE_EXTS.has(ext)) {
     console.log(`[kordoc] converting ${ext.toUpperCase()}: ${filePath}`);
@@ -563,8 +594,123 @@ ipcMain.handle('session:write', async (_e, snap: SessionSnapshot) => writeSessio
 ipcMain.handle('session:clear', async () => clearSession());
 
 ipcMain.handle('update:check', async () => checkForUpdate(app.getVersion()));
+ipcMain.handle('app:version', () => app.getVersion());
 ipcMain.handle('shell:open-external', async (_e, url: string) => {
   if (isAllowedExternalUrl(url)) await shell.openExternal(url);
+});
+
+// ---------- OS integration IPC (⑥ os-integration, AC9 — default .md editor) ----------
+
+ipcMain.handle('os:md-handler-status', async () => {
+  // Reports only whether *this* build can register. We never probe Launch
+  // Services for the current default handler (fragile); the renderer reflects a
+  // "registered" state only after a successful, user-initiated registration.
+  const { supported } = mdHandlerStatus({ isPackaged: app.isPackaged, platform: process.platform });
+  return { supported };
+});
+
+ipcMain.handle('os:register-md-handler', async () => {
+  // User-initiated ONLY (never on boot, never in a loop). Idempotent:
+  // `lsregister -f` updates the existing registration in place. Gated to
+  // packaged darwin so dev / non-darwin returns an explicit unsupported state.
+  const { supported } = mdHandlerStatus({ isPackaged: app.isPackaged, platform: process.platform });
+  if (!supported) return { ok: false, error: 'unsupported' };
+  const target = buildLsRegisterTarget(bundlePathFromExecPath(app.getPath('exe')));
+  if (!target) return { ok: false, error: 'bundle-not-found' };
+  try {
+    await new Promise<void>((resolve, reject) => {
+      execFile(target.command, target.args, (err) => (err ? reject(err) : resolve()));
+    });
+    return { ok: true, registered: true };
+  } catch (e: any) {
+    return { ok: false, error: e?.message ?? String(e) };
+  }
+});
+
+// ---------- HTML export IPC (⑤ html-export) ----------
+
+/** GET a small text resource with a hard timeout and body cap (never throws past the promise). */
+function fetchTextLimited(url: string, opts: { timeoutMs: number; maxBytes: number }): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const req = https.get(
+      url,
+      { headers: { 'User-Agent': 'Notepad-AI', Accept: 'text/plain, text/markdown, */*' } },
+      (res) => {
+        const status = res.statusCode ?? 0;
+        if (status < 200 || status >= 300) {
+          res.resume();
+          reject(new Error(`Design fetch failed (HTTP ${status}).`));
+          return;
+        }
+        let bytes = 0;
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk: Buffer) => {
+          bytes += chunk.length;
+          if (bytes > opts.maxBytes) {
+            req.destroy(new Error('Design file is too large.'));
+            return;
+          }
+          chunks.push(chunk);
+        });
+        res.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')));
+        res.on('error', reject);
+      },
+    );
+    req.setTimeout(opts.timeoutMs, () => req.destroy(new Error('Design fetch timed out.')));
+    req.on('error', reject);
+  });
+}
+
+ipcMain.handle('design:fetch', async (_e, input: unknown) => {
+  const rawUrl = normalizeDesignMdUrl(input);
+  if (!rawUrl || !isAllowedDesignFetchUrl(rawUrl)) {
+    return {
+      ok: false as const,
+      error: 'That design source is not supported. Paste a getdesign.md name or its DESIGN.md link.',
+    };
+  }
+  try {
+    const designMd = await fetchTextLimited(rawUrl, { timeoutMs: 8000, maxBytes: 200 * 1024 });
+    return { ok: true as const, designMd, rawUrl };
+  } catch (err) {
+    return { ok: false as const, error: err instanceof Error ? err.message : 'Could not fetch the design.' };
+  }
+});
+
+/** Force a safe `.html` basename for the save dialog default. */
+function htmlSaveFileName(name: unknown): string {
+  const fallback = 'notepad-ai-export.html';
+  if (typeof name !== 'string') return fallback;
+  const base = name.trim().replace(/[/\\]/g, '').slice(0, 120);
+  if (!base) return fallback;
+  return /\.html?$/i.test(base) ? base : `${base}.html`;
+}
+
+ipcMain.handle('html:save', async (_e, args: { html?: string; defaultName?: string }) => {
+  if (!mainWindow || typeof args?.html !== 'string') return { saved: false as const };
+  const result = await dialog.showSaveDialog(mainWindow, {
+    filters: [{ name: 'HTML', extensions: ['html'] }],
+    defaultPath: htmlSaveFileName(args.defaultName),
+  });
+  if (result.canceled || !result.filePath) return { saved: false as const };
+  let target = result.filePath;
+  if (!/\.html?$/i.test(target)) target += '.html';
+  await fs.writeFile(target, args.html, 'utf-8');
+  return { saved: true as const, filePath: target };
+});
+
+ipcMain.handle('html:open-saved', async (_e, filePath: unknown) => {
+  if (!isOpenableSavedPath(filePath)) {
+    return { opened: false as const, error: 'Not an openable HTML file.' };
+  }
+  const target = (filePath as string).trim();
+  if (!existsSync(target)) {
+    return { opened: false as const, error: 'The saved file no longer exists.' };
+  }
+  // shell.openPath resolves to '' on success or an error message string.
+  const result = await shell.openPath(target);
+  if (result) return { opened: false as const, error: result };
+  return { opened: true as const };
 });
 
 app.on('before-quit', () => {
@@ -580,6 +726,10 @@ app.whenReady().then(async () => {
 
   buildMenu();
   await createWindow();
+
+  // Replay any Finder "Open With" / double-click paths that arrived before the
+  // window existed (⑥ os-integration).
+  flushPendingOpenFiles();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

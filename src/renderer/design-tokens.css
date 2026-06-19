@@ -69,6 +69,10 @@
   --color-hairline-strong: #202020;
   --color-divider-dark: rgba(255, 255, 255, 0.2);
   --color-link: var(--color-primary);
+  /* Menu/dropdown/context-menu hover & selected fill. Light keeps the bone
+   * surface; the dark scopes below override with a primary-tinted mix so hover
+   * rows stay legible on the low-contrast dark card (AC4). */
+  --color-menu-hover: var(--color-surface-bone);
 }
 
 /* ============ DARK — system preference (no explicit override) ============ */
@@ -88,6 +92,7 @@
     --color-hairline: rgba(245, 239, 229, 0.12);
     --color-hairline-strong: rgba(245, 239, 229, 0.55);
     --color-link: var(--color-hero-glow);
+    --color-menu-hover: color-mix(in srgb, var(--color-primary) 16%, var(--color-surface-card));
   }
 }
 
@@ -107,6 +112,7 @@ html[data-theme='dark'] {
   --color-hairline: rgba(245, 239, 229, 0.12);
   --color-hairline-strong: rgba(245, 239, 229, 0.55);
   --color-link: var(--color-hero-glow);
+  --color-menu-hover: color-mix(in srgb, var(--color-primary) 16%, var(--color-surface-card));
   color-scheme: dark;
 }
 

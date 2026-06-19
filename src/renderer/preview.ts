@@ -8,6 +8,8 @@ export type PreviewHandle = {
   el: HTMLDivElement;
   setDoc: (md: string) => void;
   onAfterRender: (cb: () => void) => void;
+  /** Toggle the reading-only line-number gutter (CSS-counter based). */
+  setLineNumbers: (enabled: boolean) => void;
 };
 
 export function createPreview(parent: HTMLElement): PreviewHandle {
@@ -49,6 +51,9 @@ export function createPreview(parent: HTMLElement): PreviewHandle {
     },
     onAfterRender: (cb: () => void) => {
       callbacks.push(cb);
+    },
+    setLineNumbers: (enabled: boolean) => {
+      el.classList.toggle('preview-line-numbers', enabled);
     },
   };
 }

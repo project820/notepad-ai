@@ -27,6 +27,10 @@ import {
   type ManualExplanationQuestion,
 } from './project-wizard-panel';
 import { installBlockAi } from './block-ai';
+import { installTooltips } from './tooltips';
+import { wireWordmark } from './header-wordmark';
+import { installSelectionFormatMenu } from './selection-format-menu';
+import { mountHtmlExportWizard, type HtmlExportWizardHandle } from './html-export-wizard';
 import { EditorSelection } from '@codemirror/state';
 
 type AuthSnapshot = {
@@ -102,6 +106,12 @@ type Api = {
   sessionClear: () => Promise<void>;
   checkForUpdate: () => Promise<{ updateAvailable: boolean; currentVersion: string; latestVersion: string; url: string } | null>;
   openExternal: (url: string) => Promise<void>;
+  appVersion: () => Promise<string>;
+  fetchDesignMd: (input: string) => Promise<{ ok: boolean; designMd?: string; rawUrl?: string; error?: string }>;
+  saveHtml: (args: { html: string; defaultName?: string }) => Promise<{ saved: boolean; filePath?: string }>;
+  openSavedHtml: (filePath: string) => Promise<{ opened: boolean; error?: string }>;
+  mdHandlerStatus: () => Promise<{ supported: boolean; registered?: boolean }>;
+  registerMdHandler: () => Promise<{ ok: boolean; registered?: boolean; error?: string }>;
 };
 
 declare global {
@@ -300,32 +310,38 @@ function toggleLeftPanel() {
 }
 setLeftPanelOpen(true);
 preview.setDoc(initialDoc);
+preview.setLineNumbers(prefs.previewLineNumbers ?? false);
 updateWordCount(initialDoc);
 applyPreviewMode();
 editor.applyTheme(resolvedDark(prefs.theme));
 
 // ----- Preview live-editing: sync HTML -> MD on input (debounced) -----
+function flushPreviewToSource(): boolean {
+  // innerHTML serializes ATTRIBUTES not properties — checkbox toggles change
+  // the .checked property but the attribute is stale. Sync them so turndown
+  // sees the correct state.
+  preview.el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach((el) => {
+    el.toggleAttribute('checked', el.checked);
+  });
+  const md = htmlToMarkdown(preview.el.innerHTML);
+  if (md.trim() === editor.getDoc().trim()) return false;
+  suppressEditorChange = true;
+  editor.setDoc(md);
+  suppressEditorChange = false;
+  if (!dirty) {
+    dirty = true;
+    setTitle();
+  }
+  updateWordCount(md);
+  scheduleAutosave();
+  return true;
+}
+
 function syncPreviewToSource() {
   if (previewSyncTimer) clearTimeout(previewSyncTimer);
   previewSyncTimer = setTimeout(() => {
     if (!editingInPreview) return;
-    // innerHTML serializes ATTRIBUTES not properties — checkbox toggles
-    // change the .checked property but the attribute is stale. Sync them
-    // so turndown sees the correct state.
-    preview.el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach((el) => {
-      el.toggleAttribute('checked', el.checked);
-    });
-    const md = htmlToMarkdown(preview.el.innerHTML);
-    if (md.trim() === editor.getDoc().trim()) return;
-    suppressEditorChange = true;
-    editor.setDoc(md);
-    suppressEditorChange = false;
-    if (!dirty) {
-      dirty = true;
-      setTitle();
-    }
-    updateWordCount(md);
-    scheduleAutosave();
+    flushPreviewToSource();
   }, 350);
 }
 
@@ -379,6 +395,18 @@ editorHost.addEventListener('focusin', () => {
 function dispatchFormat(action: FormatAction) {
   if (previewMode === 'preview-only') activeSurface = 'preview';
   if (previewMode === 'editor-only') activeSurface = 'editor';
+  // Footnotes are a MD-source construct (inline [^n] reference + an end-of-doc
+  // [^n] definition). Insert them into the editor doc on BOTH surfaces — never
+  // via raw DOM — then re-render the preview from the canonical source.
+  if (action === 'footnote') {
+    if (activeSurface === 'preview' && editingInPreview) flushPreviewToSource();
+    applyToEditor(editor.view, 'footnote');
+    if (activeSurface === 'preview') {
+      editingInPreview = false;
+      preview.setDoc(editor.getDoc());
+    }
+    return;
+  }
   if (activeSurface === 'preview') {
     // A format inside a table cell must keep the cell's selection (focusing the
     // preview root would collapse it) and must NOT trigger the global Turndown
@@ -434,6 +462,13 @@ createToolbar(toolbarHost, {
   },
   onToggleSideChat: () => toggleUnifiedChat(),
   onToggleOutline: () => toggleLeftPanel(),
+  onTogglePreviewLines: () => {
+    const next = !(prefs.previewLineNumbers ?? false);
+    prefs.previewLineNumbers = next;
+    savePrefs(prefs);
+    preview.setLineNumbers(next);
+  },
+  getPreviewLines: () => prefs.previewLineNumbers ?? false,
   onOpenSettings: () => openSettings(),
   onSignIn: () => openLoginModal({ onAfterLogin: (a) => { cachedAuth = a; paintAuthPill(a); } }),
   onSignOut: async () => {
@@ -667,6 +702,18 @@ setTitle();
 editor.focus();
 installKeyboardNav();
 
+installTooltips();
+
+// ----- Brand wordmark: version tooltip + GitHub star link (AC2) -----
+const wordmarkEl = document.getElementById('wordmark');
+if (wordmarkEl) {
+  const wordmark = wireWordmark(wordmarkEl, {
+    openExternal: (url) => void window.api.openExternal(url),
+    getVersion: () => window.api.appVersion(),
+  });
+  onLocaleChange(() => wordmark.relabel());
+}
+
 // ---------------- Block AI (F3) -----------------
 installBlockAi({
   view: editor.view,
@@ -681,6 +728,17 @@ installBlockAi({
   // When toggle is off the IPC returns empty strings so the handler falls back
   // to the v1.0 legacy path — byte-identical to pre-v1.1 behaviour.
   getPromptAssemblyContext: () => window.api.getPromptAssemblyContext(),
+});
+
+// ---------------- Selection right-click format menu (#5) -----------------
+installSelectionFormatMenu({
+  editorEl: editorHost,
+  previewEl: preview.el,
+  hasEditorSelection: () => !editor.view.state.selection.main.empty,
+  dispatchFormat: (action, surface) => {
+    activeSurface = surface;
+    dispatchFormat(action);
+  },
 });
 
 // Re-render preview (and its embedded table toolbar buttons) on locale change
@@ -908,7 +966,79 @@ const unifiedChat = mountUnifiedChat(unifiedChatHost, {
   },
   onCopy: (md) => void navigator.clipboard.writeText(md),
   onProjectSetup: () => void startProjectWizard(),
+  onHtmlExport: () => void startHtmlExportWizard(),
 });
+
+let htmlExportWizard: HtmlExportWizardHandle | null = null;
+
+const HTML_EXPORT_INSTRUCTIONS =
+  'You are an expert front-end engineer. You output a single, complete, self-contained HTML5 document with inline CSS and no remote or raster assets. Output only the HTML document — no Markdown and no code fences.';
+
+/** Run one HTML generation over the streaming aiChat IPC, resolving with the full reply. */
+function runHtmlGeneration(prompt: string): { result: Promise<string>; cancel: () => void } {
+  const id = ucId();
+  let buffer = '';
+  let cleanup = () => {};
+  const result = new Promise<string>((resolve, reject) => {
+    cleanup = window.api.onAiChatEvent(id, (e) => {
+      if (e.kind === 'delta' && e.text) {
+        buffer += e.text;
+      } else if (e.kind === 'done') {
+        const final = e.text ?? buffer;
+        cleanup();
+        resolve(final);
+      } else if (e.kind === 'error') {
+        cleanup();
+        reject(new Error(e.message ?? 'AI error'));
+      }
+    });
+    window.api.aiChat(id, HTML_EXPORT_INSTRUCTIONS, [], prompt, currentModelArg()).catch((err) => {
+      cleanup();
+      reject(err instanceof Error ? err : new Error(String(err)));
+    });
+  });
+  return {
+    result,
+    cancel: () => {
+      void window.api.aiCancel(id);
+      cleanup();
+    },
+  };
+}
+
+/** Open the HTML-export wizard inside the unified chat panel (⑤). */
+async function startHtmlExportWizard() {
+  const hasAuth = await window.api.aiHasAnyAuth().catch(() => true);
+  if (!hasAuth) {
+    setUnifiedChatOpen(true);
+    unifiedChat.addMessage(
+      'assistant',
+      'No AI provider is connected. Open Settings to sign in with ChatGPT or add a Claude / OpenRouter API key.',
+    );
+    statusEl.textContent = 'Connect an AI provider to use AI.';
+    openSettings();
+    return;
+  }
+  setUnifiedChatOpen(true);
+  unifiedChat.showPanel('<div class="he-host"></div>');
+  const host = unifiedChatHost.querySelector<HTMLElement>('.he-host');
+  if (!host) return;
+  htmlExportWizard?.destroy();
+  htmlExportWizard = mountHtmlExportWizard(host, {
+    getMarkdown: () => editor.getDoc(),
+    getCurrentPath: () => currentPath,
+    getPendingTitle: () => pendingTitle,
+    fetchDesignMd: (input) => window.api.fetchDesignMd(input),
+    saveHtml: (args) => window.api.saveHtml(args),
+    openSavedHtml: (filePath) => window.api.openSavedHtml(filePath),
+    aiGenerate: (prompt) => runHtmlGeneration(prompt),
+    openExternal: (url) => void window.api.openExternal(url),
+    onCancel: () => {
+      statusEl.textContent = 'HTML export canceled.';
+    },
+    t,
+  });
+}
 
 // ----- Unified chat resize (AC8: freely resizable, capped at 50% window) -----
 let ucResizing = false;

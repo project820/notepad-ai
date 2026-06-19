@@ -29,6 +29,8 @@ export type UnifiedChatHandlers = {
   onCopy: (text: string) => void;
   /** Start the relocated Project Wizard ('project' mode). */
   onProjectSetup?: () => void;
+  /** Open the HTML-export wizard (⑤). */
+  onHtmlExport?: () => void;
 };
 
 /** Live streaming handle for one assistant turn. */
@@ -80,6 +82,7 @@ export function renderUnifiedChat(): string {
     <button class="uc-mode" data-mode="write" aria-selected="true" type="button">${t('uc.write')}</button>
     <button class="uc-mode" data-mode="advise" aria-selected="false" type="button">${t('uc.advise')}</button>
     <button class="uc-mode" data-mode="project" aria-selected="false" type="button">${t('uc.project')}</button>
+    <button class="uc-html-export" type="button">${t('he.button')}</button>
   </div>
   <div class="uc-thread" role="log"></div>
   <div class="uc-composer">
@@ -197,6 +200,10 @@ export function mountUnifiedChat(parent: HTMLElement, handlers: UnifiedChatHandl
   }
 
   const onModeClick = (e: Event) => {
+    if ((e.target as HTMLElement).closest('.uc-html-export')) {
+      handlers.onHtmlExport?.();
+      return;
+    }
     const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('.uc-mode');
     if (!btn) return;
     mode = (btn.dataset.mode as ChatMode) ?? 'write';

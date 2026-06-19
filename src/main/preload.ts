@@ -143,6 +143,23 @@ const api = {
   checkForUpdate: (): Promise<{ updateAvailable: boolean; currentVersion: string; latestVersion: string; url: string } | null> =>
     ipcRenderer.invoke('update:check'),
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke('shell:open-external', url),
+  appVersion: (): Promise<string> => ipcRenderer.invoke('app:version'),
+
+  // HTML export (⑤)
+  fetchDesignMd: (
+    input: string,
+  ): Promise<{ ok: boolean; designMd?: string; rawUrl?: string; error?: string }> =>
+    ipcRenderer.invoke('design:fetch', input),
+  saveHtml: (args: { html: string; defaultName?: string }): Promise<{ saved: boolean; filePath?: string }> =>
+    ipcRenderer.invoke('html:save', args),
+  openSavedHtml: (filePath: string): Promise<{ opened: boolean; error?: string }> =>
+    ipcRenderer.invoke('html:open-saved', filePath),
+
+  // OS integration (⑥) — default .md editor handler
+  mdHandlerStatus: (): Promise<{ supported: boolean; registered?: boolean }> =>
+    ipcRenderer.invoke('os:md-handler-status'),
+  registerMdHandler: (): Promise<{ ok: boolean; registered?: boolean; error?: string }> =>
+    ipcRenderer.invoke('os:register-md-handler'),
 };
 
 contextBridge.exposeInMainWorld('api', api);

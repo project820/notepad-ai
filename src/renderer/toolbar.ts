@@ -26,6 +26,10 @@ export type ToolbarHandlers = {
   onOpenSettings?: () => void;
   /** Toggle the left outline/footnote panel. */
   onToggleOutline?: () => void;
+  /** Toggle the preview line-number gutter. */
+  onTogglePreviewLines?: () => void;
+  /** Current preview line-number state (drives aria-pressed). */
+  getPreviewLines?: () => boolean;
 };
 
 // ---- SVG glyphs (no emoji) ----
@@ -54,6 +58,8 @@ export const ICONS = {
   lang: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.2"/><ellipse cx="8" cy="8" rx="3" ry="6.2"/><line x1="1.8" y1="8" x2="14.2" y2="8"/></svg>`,
   consultant: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4.5 a2 2 0 0 1 2 -2 h7 a2 2 0 0 1 2 2 v5 a2 2 0 0 1 -2 2 h-4 l-3 2.2 v-2.2 h-0 a2 2 0 0 1 -2 -2 Z"/><line x1="5.5" y1="6" x2="10.5" y2="6"/><line x1="5.5" y1="8.2" x2="9" y2="8.2"/></svg>`,
   outline: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="12" height="10" rx="2"/><line x1="6" y1="3.5" x2="6" y2="12.5"/></svg>`,
+  footnote: `<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><text x="1.5" y="12" font-family="-apple-system,sans-serif" font-weight="700" font-size="9.5" fill="currentColor">A</text><text x="9" y="6.6" font-family="-apple-system,sans-serif" font-weight="700" font-size="5.5" fill="currentColor">1</text></svg>`,
+  lineNumbers: `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><text x="0.4" y="5.4" font-family="monospace" font-size="4" fill="currentColor" stroke="none">1</text><text x="0.4" y="9.6" font-family="monospace" font-size="4" fill="currentColor" stroke="none">2</text><text x="0.4" y="13.8" font-family="monospace" font-size="4" fill="currentColor" stroke="none">3</text><line x1="5" y1="2.5" x2="5" y2="13.5"/><line x1="7" y1="4" x2="13.5" y2="4"/><line x1="7" y1="8" x2="13.5" y2="8"/><line x1="7" y1="12" x2="13.5" y2="12"/></svg>`,
 } as const;
 
 type ButtonSpec =
@@ -76,6 +82,7 @@ const BUTTONS: ButtonSpec[] = [
   { kind: 'action', id: 'fmt-task', html: ICONS.task, tipKey: 'tip.task', action: 'task' },
   { kind: 'sep' },
   { kind: 'action', id: 'fmt-link', html: ICONS.link, tipKey: 'tip.link', action: 'link' },
+  { kind: 'action', id: 'fmt-footnote', html: ICONS.footnote, tipKey: 'tip.footnote', action: 'footnote' },
   { kind: 'action', id: 'fmt-codeblock', html: ICONS.codeblock, tipKey: 'tip.codeblock', action: 'codeblock' },
   { kind: 'action', id: 'fmt-hr', html: ICONS.hr, tipKey: 'tip.hr', action: 'hr' },
 ];
@@ -93,10 +100,17 @@ export function createToolbar(parent: HTMLElement, h: ToolbarHandlers) {
 
     parent.innerHTML = `
       <div class="tb-row">
+        <div class="tb-lead">
+          <button class="tb-icbtn" id="tb-toggle-outline" data-tooltip="${t('tip.outline')}" aria-label="${t('tip.outline')}">${ICONS.outline}</button>
+        </div>
+        <div class="tb-sep" aria-hidden="true"></div>
         <div class="tb-format">${formatGroup}</div>
         <div class="tb-trail">
           <button class="tb-icbtn" id="tb-insert-table" data-tooltip="${t('tip.table')}" aria-label="${t('tip.table')}">
             ${ICONS.table}
+          </button>
+          <button class="tb-icbtn" id="tb-preview-lines" data-tooltip="${t('tip.previewLines')}" aria-label="${t('tip.previewLines')}" aria-pressed="${h.getPreviewLines?.() ? 'true' : 'false'}">
+            ${ICONS.lineNumbers}
           </button>
           <button class="tb-icbtn" id="tb-toggle-preview" data-tooltip="${t('tip.view')}" aria-label="${t('tip.view')}">
             ${ICONS.eye}
@@ -121,6 +135,12 @@ export function createToolbar(parent: HTMLElement, h: ToolbarHandlers) {
     insertBtn.addEventListener('mousedown', (e) => e.preventDefault());
     insertBtn.addEventListener('click', () => openTablePicker(insertBtn, h.onInsertTable));
     togglePreviewBtn.addEventListener('click', () => h.onTogglePreview());
+    parent.querySelector<HTMLButtonElement>('#tb-toggle-outline')?.addEventListener('click', () => h.onToggleOutline?.());
+    const previewLinesBtn = parent.querySelector<HTMLButtonElement>('#tb-preview-lines');
+    previewLinesBtn?.addEventListener('click', () => {
+      h.onTogglePreviewLines?.();
+      previewLinesBtn.setAttribute('aria-pressed', h.getPreviewLines?.() ? 'true' : 'false');
+    });
   }
   renderToolbar();
 
@@ -128,7 +148,6 @@ export function createToolbar(parent: HTMLElement, h: ToolbarHandlers) {
   const controls = document.getElementById('navbar-controls') as HTMLDivElement;
   function renderControls() {
     controls.innerHTML = `
-      <button class="hdr-icbtn" id="hdr-outline" data-tooltip="${t('tip.outline')}" aria-label="${t('tip.outline')}">${ICONS.outline}</button>
       <button class="hdr-icbtn" id="hdr-sidechat" data-tooltip="${t('tip.sidechat')}" aria-label="${t('tip.sidechat')}">${ICONS.consultant}</button>
       <button class="hdr-icbtn" id="hdr-model" data-tooltip="${t('tip.model')}" aria-label="${t('tip.model')}">${ICONS.sparkle}</button>
       <button class="hdr-icbtn" id="hdr-lang" data-tooltip="${t('tip.language')}" aria-label="${t('tip.language')}">${ICONS.lang}</button>
@@ -143,8 +162,6 @@ export function createToolbar(parent: HTMLElement, h: ToolbarHandlers) {
   function wireControls() {
     const sideChatBtn = controls.querySelector<HTMLButtonElement>('#hdr-sidechat')!;
     sideChatBtn.addEventListener('click', () => h.onToggleSideChat());
-
-    controls.querySelector<HTMLButtonElement>('#hdr-outline')?.addEventListener('click', () => h.onToggleOutline?.());
 
     const modelBtn = controls.querySelector<HTMLButtonElement>('#hdr-model')!;
     const fontBtn = controls.querySelector<HTMLButtonElement>('#hdr-font')!;
@@ -281,6 +298,10 @@ export function paintAccountState(signedIn: boolean) {
   const btn = document.getElementById('hdr-account');
   if (!btn) return;
   btn.classList.toggle('hdr-account-signed-in', signedIn);
+  // The green status dot needs a meaning — surface it on the button tooltip (AC3).
+  const tip = signedIn ? t('tip.accountSignedIn') : t('tip.account');
+  btn.setAttribute('data-tooltip', tip);
+  btn.setAttribute('aria-label', tip);
 }
 
 // ============ Excel-style table picker ============

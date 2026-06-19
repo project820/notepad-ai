@@ -56,6 +56,7 @@ export function openSettingsModal(deps: SettingsModalDeps): void {
         <div class="settings-section" id="settings-providers"></div>
         <div class="settings-section" id="settings-style"></div>
         <div class="settings-section" id="settings-typography"></div>
+        <div class="settings-section" id="settings-md-handler"></div>
       </div>
     </div>
   `;
@@ -64,6 +65,7 @@ export function openSettingsModal(deps: SettingsModalDeps): void {
   const provHost = root.querySelector('#settings-providers') as HTMLElement;
   const styleHost = root.querySelector('#settings-style') as HTMLElement;
   const typoHost = root.querySelector('#settings-typography') as HTMLElement;
+  const mdHandlerHost = root.querySelector('#settings-md-handler') as HTMLElement;
   let provHandle: ProviderSettingsHandle | null = null;
   let styleHandle: StyleSettingHandle | null = null;
 
@@ -126,8 +128,74 @@ export function openSettingsModal(deps: SettingsModalDeps): void {
   });
 
   mountTypographySection(typoHost, deps.getTypography, deps.onTypographyChange);
+  mountMdHandlerSection(mdHandlerHost);
 
   void renderProviders();
+}
+
+/**
+ * "Default .md editor" section (⑥ os-integration, AC9). Reuses the provider-panel
+ * title/button/status classes. Registration is user-initiated and idempotent —
+ * the button only fires `registerMdHandler` on an explicit click. Unsupported
+ * builds (dev / non-darwin) show an explicit unsupported state with the button
+ * disabled rather than a silent no-op.
+ */
+function mountMdHandlerSection(host: HTMLElement) {
+  host.innerHTML = `
+    <h2 class="prov-title">${t('settings.mdHandler.title')}</h2>
+    <p class="md-handler-desc">${t('settings.mdHandler.desc')}</p>
+    <div class="md-handler-controls">
+      <button class="prov-btn prov-btn-primary" id="md-handler-set" type="button">${t('settings.mdHandler.button')}</button>
+      <span class="prov-status" id="md-handler-status"></span>
+    </div>
+  `;
+
+  const btn = host.querySelector('#md-handler-set') as HTMLButtonElement;
+  const statusEl = host.querySelector('#md-handler-status') as HTMLElement;
+
+  const setStatus = (text: string, on: boolean) => {
+    statusEl.textContent = text;
+    statusEl.classList.toggle('prov-status-on', on);
+    statusEl.classList.toggle('prov-status-off', !on);
+  };
+  const showUnsupported = () => {
+    btn.disabled = true;
+    setStatus(t('settings.mdHandler.unsupported'), false);
+  };
+  const showRegistered = () => {
+    btn.disabled = true;
+    setStatus(t('settings.mdHandler.registered'), true);
+  };
+
+  void (async () => {
+    try {
+      const s = await window.api.mdHandlerStatus();
+      if (!s.supported) showUnsupported();
+      else if (s.registered) showRegistered();
+    } catch {
+      showUnsupported();
+    }
+  })();
+
+  btn.addEventListener('click', () => {
+    void (async () => {
+      btn.disabled = true;
+      try {
+        const r = await window.api.registerMdHandler();
+        if (r.ok && r.registered) {
+          showRegistered();
+        } else if (r.error === 'unsupported') {
+          showUnsupported();
+        } else {
+          setStatus(r.error ?? t('settings.mdHandler.unsupported'), false);
+          btn.disabled = false;
+        }
+      } catch {
+        setStatus(t('settings.mdHandler.unsupported'), false);
+        btn.disabled = false;
+      }
+    })();
+  });
 }
 
 function mountTypographySection(
