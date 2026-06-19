@@ -1771,12 +1771,15 @@ body.sc-open .bottom-chat-host { right: calc(min(420px, 50vw) + 24px); }
 
 .left-panel {
   min-width: 0;
-  overflow-y: auto;
+  /* When closed, the grid column is 0px; keep the element IN the grid (do NOT
+   * display:none — it is the first grid child, so removing it would shift the
+   * workspace into the 0px column and blank the screen). overflow clips it. */
+  overflow: hidden auto;
   background: var(--color-surface-bone);
   border-right: 1px solid var(--color-hairline);
   padding: 10px 6px;
 }
-.content-row:not(.left-open) .left-panel { display: none; }
+.content-row:not(.left-open) .left-panel { padding: 0; border-right: none; }
 .lp-section { margin-bottom: 14px; }
 .lp-title {
   font-size: 11px;

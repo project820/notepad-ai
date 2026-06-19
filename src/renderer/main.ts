@@ -380,10 +380,16 @@ function dispatchFormat(action: FormatAction) {
   if (previewMode === 'preview-only') activeSurface = 'preview';
   if (previewMode === 'editor-only') activeSurface = 'editor';
   if (activeSurface === 'preview') {
-    preview.el.focus({ preventScroll: true });
+    // A format inside a table cell must keep the cell's selection (focusing the
+    // preview root would collapse it) and must NOT trigger the global Turndown
+    // re-sync — the table's own cell-blur handler persists it via table-md (#4).
+    const inTableCell = !!(document.activeElement as HTMLElement | null)?.closest('.preview-table-wrap');
+    if (!preview.el.contains(document.activeElement)) preview.el.focus({ preventScroll: true });
     applyToPreview(action);
-    editingInPreview = true;
-    syncPreviewToSource();
+    if (!inTableCell) {
+      editingInPreview = true;
+      syncPreviewToSource();
+    }
   } else {
     applyToEditor(editor.view, action);
   }
