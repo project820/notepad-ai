@@ -22,18 +22,23 @@ export type Prefs = {
   style?: StylePref;
   /** v1.1 global typography view-settings (letter-spacing / char scale / line-height). */
   typography?: TypographyPref;
-  locale?: 'en' | 'ko';
+  locale?: 'en' | 'ko' | 'zh-Hans' | 'zh-Hant' | 'ja';
   quality?: 'elementary' | 'highschool' | 'college' | 'professor' | 'professional';
 };
 
 const KEY = 'notepad-ai:prefs:v1';
 
-function detectLocale(): 'en' | 'ko' {
+function detectLocale(): 'en' | 'ko' | 'zh-Hans' | 'zh-Hant' | 'ja' {
   try {
     const langs = (navigator.languages?.length ? navigator.languages : [navigator.language]) ?? ['en'];
     for (const l of langs) {
       const tag = (l || '').toLowerCase();
       if (tag.startsWith('ko')) return 'ko';
+      if (tag.startsWith('zh')) {
+        // Traditional for TW/HK/MO, otherwise Simplified.
+        return /-(tw|hk|mo)|hant/.test(tag) ? 'zh-Hant' : 'zh-Hans';
+      }
+      if (tag.startsWith('ja')) return 'ja';
       if (tag.startsWith('en')) return 'en';
     }
   } catch { /* ignore */ }

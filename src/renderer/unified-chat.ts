@@ -13,6 +13,7 @@
  */
 
 import MarkdownIt from 'markdown-it';
+import { t } from './i18n';
 // @ts-expect-error — no types
 import taskLists from 'markdown-it-task-lists';
 import { restoreUnifiedThread, type UnifiedChatItem, type UnifiedThreadSnapshot } from './unified-chat-history';
@@ -76,14 +77,14 @@ md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
 export function renderUnifiedChat(): string {
   return `<div class="uc-root">
   <div class="uc-modes" role="tablist">
-    <button class="uc-mode" data-mode="write" aria-selected="true" type="button">Write</button>
-    <button class="uc-mode" data-mode="advise" aria-selected="false" type="button">Advise</button>
-    <button class="uc-mode" data-mode="project" aria-selected="false" type="button">Project setup</button>
+    <button class="uc-mode" data-mode="write" aria-selected="true" type="button">${t('uc.write')}</button>
+    <button class="uc-mode" data-mode="advise" aria-selected="false" type="button">${t('uc.advise')}</button>
+    <button class="uc-mode" data-mode="project" aria-selected="false" type="button">${t('uc.project')}</button>
   </div>
   <div class="uc-thread" role="log"></div>
   <div class="uc-composer">
-    <textarea class="uc-input" rows="2" placeholder="Write, ask, or revise…" aria-label="Message"></textarea>
-    <button class="uc-send" type="button">Send</button>
+    <textarea class="uc-input" rows="2" placeholder="${t('uc.placeholder')}" aria-label="${t('uc.write')}"></textarea>
+    <button class="uc-send" type="button">${t('uc.send')}</button>
   </div>
 </div>`;
 }
@@ -93,9 +94,9 @@ function bubbleShell(role: 'user' | 'assistant'): string {
   const apply =
     role === 'assistant'
       ? `<div class="uc-actions">
-        <button class="uc-act" data-act="insert" type="button">Insert</button>
-        <button class="uc-act" data-act="replace" type="button">Replace</button>
-        <button class="uc-act" data-act="copy" type="button">Copy</button>
+        <button class="uc-act" data-act="insert" type="button">${t('uc.insert')}</button>
+        <button class="uc-act" data-act="replace" type="button">${t('uc.replace')}</button>
+        <button class="uc-act" data-act="copy" type="button">${t('uc.copy')}</button>
       </div>`
       : '';
   return `<div class="uc-msg uc-${role}"><div class="uc-body"></div>${apply}</div>`;

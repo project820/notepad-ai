@@ -24,6 +24,8 @@ export type ToolbarHandlers = {
   loadModels: () => Promise<{ id: string; label?: string; provider?: string }[]>;
   /** Open the AI providers + style settings modal. */
   onOpenSettings?: () => void;
+  /** Toggle the left outline/footnote panel. */
+  onToggleOutline?: () => void;
 };
 
 // ---- SVG glyphs (no emoji) ----
@@ -51,6 +53,7 @@ export const ICONS = {
   account: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="6" r="2.6"/><path d="M2.6 13.4 C 3.8 10.6, 12.2 10.6, 13.4 13.4"/></svg>`,
   lang: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.2"/><ellipse cx="8" cy="8" rx="3" ry="6.2"/><line x1="1.8" y1="8" x2="14.2" y2="8"/></svg>`,
   consultant: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4.5 a2 2 0 0 1 2 -2 h7 a2 2 0 0 1 2 2 v5 a2 2 0 0 1 -2 2 h-4 l-3 2.2 v-2.2 h-0 a2 2 0 0 1 -2 -2 Z"/><line x1="5.5" y1="6" x2="10.5" y2="6"/><line x1="5.5" y1="8.2" x2="9" y2="8.2"/></svg>`,
+  outline: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="2.5" y1="4" x2="3" y2="4"/><line x1="5.5" y1="4" x2="13.5" y2="4"/><line x1="2.5" y1="8" x2="3" y2="8"/><line x1="5.5" y1="8" x2="13.5" y2="8"/><line x1="2.5" y1="12" x2="3" y2="12"/><line x1="5.5" y1="12" x2="13.5" y2="12"/></svg>`,
 } as const;
 
 type ButtonSpec =
@@ -125,6 +128,7 @@ export function createToolbar(parent: HTMLElement, h: ToolbarHandlers) {
   const controls = document.getElementById('navbar-controls') as HTMLDivElement;
   function renderControls() {
     controls.innerHTML = `
+      <button class="hdr-icbtn" id="hdr-outline" data-tooltip="${t('tip.outline')}" aria-label="${t('tip.outline')}">${ICONS.outline}</button>
       <button class="hdr-icbtn" id="hdr-sidechat" data-tooltip="${t('tip.sidechat')}" aria-label="${t('tip.sidechat')}">${ICONS.consultant}</button>
       <button class="hdr-icbtn" id="hdr-model" data-tooltip="${t('tip.model')}" aria-label="${t('tip.model')}">${ICONS.sparkle}</button>
       <button class="hdr-icbtn" id="hdr-lang" data-tooltip="${t('tip.language')}" aria-label="${t('tip.language')}">${ICONS.lang}</button>
@@ -139,6 +143,8 @@ export function createToolbar(parent: HTMLElement, h: ToolbarHandlers) {
   function wireControls() {
     const sideChatBtn = controls.querySelector<HTMLButtonElement>('#hdr-sidechat')!;
     sideChatBtn.addEventListener('click', () => h.onToggleSideChat());
+
+    controls.querySelector<HTMLButtonElement>('#hdr-outline')?.addEventListener('click', () => h.onToggleOutline?.());
 
     const modelBtn = controls.querySelector<HTMLButtonElement>('#hdr-model')!;
     const fontBtn = controls.querySelector<HTMLButtonElement>('#hdr-font')!;
@@ -208,6 +214,9 @@ export function createToolbar(parent: HTMLElement, h: ToolbarHandlers) {
         items: [
           { value: 'en', label: t('menu.lang.en'), selected: cur === 'en' },
           { value: 'ko', label: t('menu.lang.ko'), selected: cur === 'ko' },
+          { value: 'zh-Hans', label: t('menu.lang.zhHans'), selected: cur === 'zh-Hans' },
+          { value: 'zh-Hant', label: t('menu.lang.zhHant'), selected: cur === 'zh-Hant' },
+          { value: 'ja', label: t('menu.lang.ja'), selected: cur === 'ja' },
         ],
         onSelect: (v) => h.onLocaleChange(v),
         minWidth: 170,

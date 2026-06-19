@@ -18,6 +18,7 @@ import { guardVerdict } from './humanize-guards';
 import type { Quality } from './quality';
 import { typographyCssVars, clampTypography, type TypographyPref } from './typography';
 import { wirePreviewLinks } from './preview-links';
+import { mountLeftPanel } from './left-panel';
 import type { AiProviderId, ModelRef, ProviderAuthStatus } from '../main/ai/types';
 import {
   renderEditableDraft,
@@ -280,6 +281,24 @@ wirePreviewLinks(preview.el, {
   backLabel: t('footnote.back'),
   scroller: previewHost,
 });
+
+// ----- Left panel: outline + footnotes (#7) -----
+const leftPanelHost = document.getElementById('left-panel') as HTMLDivElement;
+const leftPanel = mountLeftPanel(leftPanelHost, {
+  getPreviewRoot: () => preview.el,
+  onJump: (el) => el.scrollIntoView({ block: 'center' }),
+});
+preview.onAfterRender(() => leftPanel.refresh());
+let leftPanelOpen = true;
+function setLeftPanelOpen(open: boolean) {
+  leftPanelOpen = open;
+  document.querySelector('.content-row')?.classList.toggle('left-open', open);
+  if (open) leftPanel.refresh();
+}
+function toggleLeftPanel() {
+  setLeftPanelOpen(!leftPanelOpen);
+}
+setLeftPanelOpen(true);
 preview.setDoc(initialDoc);
 updateWordCount(initialDoc);
 applyPreviewMode();
@@ -408,6 +427,7 @@ createToolbar(toolbarHost, {
     setLocale(l);
   },
   onToggleSideChat: () => toggleUnifiedChat(),
+  onToggleOutline: () => toggleLeftPanel(),
   onOpenSettings: () => openSettings(),
   onSignIn: () => openLoginModal({ onAfterLogin: (a) => { cachedAuth = a; paintAuthPill(a); } }),
   onSignOut: async () => {
