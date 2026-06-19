@@ -649,11 +649,12 @@ themeMql.addEventListener('change', (e) => {
   if (prefs.theme === 'system') editor.applyTheme(e.matches);
 });
 
-window.addEventListener('beforeunload', (e) => {
-  if (dirty) {
-    e.preventDefault();
-    e.returnValue = '';
-  }
+window.addEventListener('beforeunload', () => {
+  // Best-effort flush on quit. We must NOT call preventDefault()/returnValue here:
+  // in Electron that silently cancels the quit (no dialog), so the app would only
+  // close via force-quit. Autosave + the session snapshot already preserve work.
+  if (dirty) void save();
+  scheduleSessionSnapshot();
 });
 
 setTitle();
