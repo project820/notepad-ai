@@ -1,0 +1,105 @@
+{
+  "name": "notepad-ai",
+  "version": "0.1.1",
+  "description": "Friendly Mac markdown editor for non-technical writers, Korean-centric.",
+  "main": "dist/main/main.js",
+  "scripts": {
+    "dev:main": "tsc -p tsconfig.main.json",
+    "dev:main:watch": "tsc -p tsconfig.main.json --watch",
+    "dev:renderer": "vite",
+    "dev:electron": "wait-on http://localhost:5173 && cross-env NODE_ENV=development electron .",
+    "dev": "npm run dev:main && concurrently -k -n renderer,main,electron -c green,yellow,cyan \"npm:dev:renderer\" \"npm:dev:main:watch\" \"npm:dev:electron\"",
+    "build": "tsc -p tsconfig.main.json && vite build",
+    "build:dmg": "npm run build && electron-builder --mac dmg",
+    "start": "electron .",
+    "typecheck": "tsc --noEmit -p tsconfig.main.json && tsc --noEmit -p tsconfig.renderer.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:main": "tsc -p tsconfig.main.json && node --test dist/main/overview-traversal.test.js"
+  },
+  "keywords": [
+    "markdown",
+    "editor",
+    "mac",
+    "electron"
+  ],
+  "author": "Notepad AI contributors",
+  "license": "MIT",
+  "build": {
+    "appId": "com.notepad-ai.app",
+    "productName": "Notepad AI",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "asar": true,
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "category": "public.app-category.productivity",
+      "identity": null,
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "extendInfo": {
+        "NSHumanReadableCopyright": "© 2026 Notepad AI contributors — MIT, unsigned build"
+      }
+    },
+    "dmg": {
+      "title": "Notepad AI ${version}",
+      "window": {
+        "width": 540,
+        "height": 360
+      },
+      "contents": [
+        {
+          "x": 140,
+          "y": 180,
+          "type": "file"
+        },
+        {
+          "x": 400,
+          "y": 180,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ]
+  },
+  "devDependencies": {
+    "@types/markdown-it": "^14.1.2",
+    "@types/node": "^22.9.0",
+    "concurrently": "^9.1.0",
+    "cross-env": "^7.0.3",
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
+    "happy-dom": "^20.10.6",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11",
+    "vitest": "^4.1.6",
+    "wait-on": "^8.0.1"
+  },
+  "dependencies": {
+    "@codemirror/commands": "^6.7.1",
+    "@codemirror/lang-markdown": "^6.3.1",
+    "@codemirror/state": "^6.4.1",
+    "@codemirror/theme-one-dark": "^6.1.2",
+    "@codemirror/view": "^6.35.0",
+    "@types/turndown": "^5.0.6",
+    "kordoc": "^2.7.1",
+    "markdown-it": "^14.1.0",
+    "markdown-it-footnote": "^4.0.0",
+    "markdown-it-task-lists": "^2.1.1",
+    "turndown": "^7.2.4",
+    "turndown-plugin-gfm": "^1.0.2"
+  }
+}

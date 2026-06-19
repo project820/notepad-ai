@@ -1,0 +1,692 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Notepad AI 설치 가이드</title>
+<style>
+  :root {
+    --bg: #f5f5f7;
+    --card: #ffffff;
+    --fg: #1d1d1f;
+    --muted: #6e6e73;
+    --accent: #0a84ff;
+    --warn: #ff9f0a;
+    --ok: #34c759;
+    --border: #d2d2d7;
+    --shadow: 0 20px 60px rgba(0, 0, 0, 0.12);
+    --font: -apple-system, BlinkMacSystemFont, 'SF Pro', 'Helvetica Neue', system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1c1c1e;
+      --card: #2c2c2e;
+      --fg: #f5f5f7;
+      --muted: #98989d;
+      --accent: #0a84ff;
+      --border: #3a3a3c;
+      --shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 40px 24px 80px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .stage {
+    width: min(960px, 100%);
+  }
+  .progress {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 24px;
+    justify-content: center;
+  }
+  .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--border);
+    transition: background 0.2s, transform 0.2s;
+    cursor: pointer;
+  }
+  .dot.active { background: var(--accent); transform: scale(1.3); }
+  .dot.done { background: var(--ok); }
+
+  .slide {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    box-shadow: var(--shadow);
+    padding: 56px 56px 40px;
+    display: none;
+    animation: fadeIn 0.25s ease-out;
+  }
+  .slide.active { display: block; }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .slide h1 {
+    margin: 0 0 12px;
+    font-size: 34px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+  .slide h2 { font-size: 24px; font-weight: 600; margin: 32px 0 12px; }
+  .slide p { font-size: 17px; line-height: 1.55; color: var(--fg); margin: 0 0 12px; }
+  .slide .sub { color: var(--muted); font-size: 17px; }
+
+  .step-num {
+    display: inline-block;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--accent);
+    margin-bottom: 8px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .visual {
+    margin: 28px 0;
+    padding: 28px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 200px;
+  }
+
+  .callout {
+    margin: 20px 0;
+    padding: 14px 18px;
+    border-radius: 10px;
+    border-left: 4px solid var(--accent);
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+    font-size: 15px;
+    line-height: 1.5;
+  }
+  .callout.warn { border-color: var(--warn); background: color-mix(in srgb, var(--warn) 10%, transparent); }
+  .callout.ok { border-color: var(--ok); background: color-mix(in srgb, var(--ok) 10%, transparent); }
+
+  kbd {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 5px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-bottom-width: 2px;
+    font-family: 'SF Mono', Menlo, monospace;
+    font-size: 13px;
+  }
+
+  code {
+    font-family: 'SF Mono', Menlo, monospace;
+    font-size: 14px;
+    background: var(--bg);
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+
+  pre {
+    margin: 16px 0;
+    padding: 16px 20px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow-x: auto;
+    font-family: 'SF Mono', Menlo, monospace;
+    font-size: 13.5px;
+    line-height: 1.55;
+  }
+  pre code { background: transparent; padding: 0; }
+
+  .nav {
+    margin-top: 36px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+  }
+  .btn {
+    appearance: none;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 10px;
+    background: var(--accent);
+    color: white;
+    font-family: inherit;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.1s, opacity 0.15s;
+  }
+  .btn:hover { opacity: 0.9; }
+  .btn:active { transform: scale(0.97); }
+  .btn.ghost {
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid var(--border);
+  }
+  .btn[disabled] { opacity: 0.4; cursor: not-allowed; }
+
+  .icon-img {
+    width: 96px; height: 96px;
+    border-radius: 22px;
+    background: linear-gradient(135deg, #2364e8, #1e8c75 55%, #151922);
+    color: white;
+    font-size: 48px;
+    font-weight: 800;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 10px 30px rgba(21, 25, 34, 0.28);
+    margin: 0 auto;
+  }
+
+  /* DMG visual */
+  .dmg-window {
+    width: 380px;
+    height: 220px;
+    border-radius: 12px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    box-shadow: 0 14px 40px rgba(0,0,0,0.18);
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: space-around;
+    padding: 20px;
+  }
+  .dmg-window::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 26px;
+    background: linear-gradient(to bottom, #e8e8ed, #d8d8dd);
+    border-radius: 12px 12px 0 0;
+    border-bottom: 1px solid var(--border);
+  }
+  @media (prefers-color-scheme: dark) {
+    .dmg-window::before { background: linear-gradient(to bottom, #3a3a3c, #2c2c2e); }
+  }
+  .dmg-window .dots {
+    position: absolute; top: 8px; left: 10px;
+    display: flex; gap: 6px;
+  }
+  .dmg-window .dots span { width: 10px; height: 10px; border-radius: 50%; background: #ff5f57; }
+  .dmg-window .dots span:nth-child(2) { background: #febc2e; }
+  .dmg-window .dots span:nth-child(3) { background: #28c840; }
+  .dmg-app { display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 11px; }
+  .dmg-app .icon-img { width: 72px; height: 72px; font-size: 32px; border-radius: 16px; box-shadow: 0 4px 12px rgba(21,25,34,0.24); }
+  .dmg-arrow {
+    font-size: 32px;
+    color: var(--muted);
+  }
+  .applications-icon {
+    width: 72px; height: 72px;
+    border-radius: 16px;
+    background: linear-gradient(135deg, #999, #555);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 32px;
+  }
+
+  /* Right-click mock */
+  .rclick-mock {
+    width: 220px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+    font-size: 13.5px;
+  }
+  .rclick-mock .item { padding: 6px 12px; border-radius: 4px; }
+  .rclick-mock .item:hover, .rclick-mock .item.hilite { background: var(--accent); color: white; }
+  .rclick-mock .sep { height: 1px; background: var(--border); margin: 4px 0; }
+
+  /* Gatekeeper alert mock */
+  .gk-alert {
+    width: 380px;
+    background: var(--card);
+    border-radius: 12px;
+    box-shadow: 0 14px 40px rgba(0,0,0,0.2);
+    padding: 24px;
+    text-align: center;
+    font-size: 13px;
+  }
+  .gk-alert .title { font-size: 15px; font-weight: 700; margin: 8px 0; }
+  .gk-alert .body { color: var(--muted); margin-bottom: 16px; line-height: 1.4; }
+  .gk-alert .row { display: flex; gap: 8px; justify-content: center; }
+  .gk-alert .row button { font-family: inherit; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+  .gk-alert .row .primary { background: var(--accent); color: white; border: none; }
+  .gk-alert .row .secondary { background: var(--bg); border: 1px solid var(--border); color: var(--fg); }
+
+  .feature-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin: 24px 0;
+  }
+  .feature {
+    padding: 18px;
+    background: var(--bg);
+    border-radius: 12px;
+    border: 1px solid var(--border);
+  }
+  .feature .emoji { font-size: 28px; margin-bottom: 8px; }
+  .feature .name { font-weight: 600; margin-bottom: 4px; }
+  .feature .desc { font-size: 13.5px; color: var(--muted); line-height: 1.4; }
+
+  .keys {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 10px 20px;
+    margin: 16px 0;
+  }
+  .keys .k { font-family: 'SF Mono', Menlo, monospace; color: var(--accent); }
+
+  /* Login flow mock */
+  .login-flow {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    padding: 24px;
+  }
+  .login-step {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 15px;
+  }
+  .login-step .num {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: white;
+    font-size: 13px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .code-box {
+    background: var(--bg);
+    border: 2px solid var(--accent);
+    border-radius: 10px;
+    padding: 12px 24px;
+    font-family: 'SF Mono', Menlo, monospace;
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: 0.15em;
+    color: var(--accent);
+  }
+
+  /* Import formats */
+  .format-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 20px 0;
+  }
+  .fmt-chip {
+    padding: 8px 16px;
+    border-radius: 8px;
+    border: 1.5px solid var(--border);
+    font-size: 14px;
+    font-weight: 600;
+    background: var(--bg);
+  }
+  .fmt-chip.primary { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+
+  /* AI feature cards */
+  .ai-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin: 20px 0;
+  }
+  .ai-card {
+    padding: 18px;
+    background: var(--bg);
+    border-radius: 12px;
+    border: 1px solid var(--border);
+  }
+  .ai-card .shortcut { font-size: 12px; color: var(--accent); font-family: 'SF Mono', Menlo, monospace; margin-bottom: 6px; }
+  .ai-card .title { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+  .ai-card .desc { font-size: 13px; color: var(--muted); line-height: 1.4; }
+
+  footer {
+    margin-top: 32px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+<div class="stage">
+  <div class="progress" id="progress"></div>
+
+  <!-- Slide 1: Hello -->
+  <section class="slide active" data-slide="1">
+    <div style="text-align: center; padding: 24px 0;">
+      <div class="icon-img">AI</div>
+      <h1 style="margin-top: 24px;">Notepad AI 설치 가이드</h1>
+      <p class="sub">오픈소스 마크다운 편집기 · 열 단계면 끝납니다</p>
+    </div>
+    <div class="feature-grid">
+      <div class="feature"><div class="emoji">📝</div><div class="name">한 번 클릭 서식</div><div class="desc">B / I / H1 등 툴바로 워드처럼 편집. 리치 프리뷰에서 직접 수정도 OK.</div></div>
+      <div class="feature"><div class="emoji">📂</div><div class="name">HWP / DOCX 가져오기</div><div class="desc">HWP·HWPX·DOCX·PDF·XLSX를 마크다운으로 자동 변환</div></div>
+      <div class="feature"><div class="emoji">✦</div><div class="name">AI 글쓰기 도우미</div><div class="desc">개인 ChatGPT Plus 계정으로 문장 교정·요약·문서 작성 보조</div></div>
+      <div class="feature"><div class="emoji">🍎</div><div class="name">Mac 전용 (Apple Silicon)</div><div class="desc">macOS 13 이상에서 동작. M1/M2/M3/M4 최적화.</div></div>
+    </div>
+    <div class="callout">
+      ⏱ 설치 약 <strong>2분</strong>, AI 로그인 약 <strong>1분</strong>. 처음 한 번만 수고가 필요합니다.
+    </div>
+  </section>
+
+  <!-- Slide 2: Download DMG -->
+  <section class="slide" data-slide="2">
+    <span class="step-num">Step 1 / 5</span>
+    <h1>DMG 파일 다운로드</h1>
+    <p>GitHub Releases 페이지에서 <code>Notepad AI-0.1.0-arm64.dmg</code>를 내려받습니다.</p>
+    <div class="visual">
+      <div style="display:flex; align-items:center; gap:18px; font-size: 15px;">
+        <div style="width:74px;height:74px;border-radius:14px;background:linear-gradient(135deg,#aaa,#666);color:white;display:flex;align-items:center;justify-content:center;font-size:30px;font-weight:600;">DMG</div>
+        <div>
+          <div style="font-weight:600;">Notepad AI-0.1.0-arm64.dmg</div>
+          <div style="color:var(--muted); font-size:13px;">약 220MB · macOS 13+ · Apple Silicon</div>
+        </div>
+      </div>
+    </div>
+    <div class="callout">
+      파일을 받으면 보통 <code>다운로드</code> 폴더에 저장됩니다.
+    </div>
+  </section>
+
+  <!-- Slide 3: Open DMG and Drag -->
+  <section class="slide" data-slide="3">
+    <span class="step-num">Step 2 / 5</span>
+    <h1>DMG 열기 → 앱을 드래그</h1>
+    <p>다운로드한 DMG를 더블클릭하면 아래와 같은 창이 열립니다. 왼쪽 아이콘을 오른쪽 <strong>Applications</strong> 폴더로 드래그하세요.</p>
+    <div class="visual">
+      <div class="dmg-window">
+        <div class="dots"><span></span><span></span><span></span></div>
+        <div class="dmg-app">
+          <div class="icon-img">AI</div>
+          <div>Notepad AI</div>
+        </div>
+        <div class="dmg-arrow">→</div>
+        <div class="dmg-app">
+          <div class="applications-icon">A</div>
+          <div>Applications</div>
+        </div>
+      </div>
+    </div>
+    <div class="callout ok">
+      복사가 끝나면 DMG 창을 닫고, 데스크탑에서 DMG 아이콘을 우클릭 → "디스크 추출(Eject)" 해도 됩니다.
+    </div>
+  </section>
+
+  <!-- Slide 4: First launch — Gatekeeper bypass -->
+  <section class="slide" data-slide="4">
+    <span class="step-num">Step 3 / 5</span>
+    <h1>처음 실행 — Gatekeeper 우회</h1>
+    <p>Notepad AI는 오픈소스 프로젝트라 Apple 개발자 서명 비용을 들이지 않았습니다. macOS가 "확인되지 않은 개발자" 경고를 띄울 텐데, 한 번만 우회하면 됩니다.</p>
+    <h2>방법 A — 우클릭 → 열기 (권장)</h2>
+    <p>1. <code>Applications</code> 폴더에서 <strong>Notepad AI</strong> 아이콘을 <kbd>Control</kbd> + 클릭 (또는 우클릭)<br/>2. 메뉴에서 "<strong>열기</strong>" 선택.</p>
+    <div class="visual" style="gap:24px; display:flex; align-items:center; justify-content:center;">
+      <div style="display:flex; flex-direction:column; align-items:center; gap:8px;">
+        <div class="icon-img" style="width:72px;height:72px;font-size:32px;border-radius:16px;">AI</div>
+        <div style="font-size:13px;">Notepad AI</div>
+      </div>
+      <div class="rclick-mock">
+        <div class="item hilite">열기</div>
+        <div class="item">패키지 내용 보기</div>
+        <div class="sep"></div>
+        <div class="item">휴지통으로 이동</div>
+        <div class="item">정보 가져오기</div>
+      </div>
+    </div>
+    <div class="callout warn">
+      ⚠️ 그냥 더블클릭하면 "열 수 없습니다"라고 거절됩니다. 반드시 <strong>우클릭 → 열기</strong>로 첫 실행.
+    </div>
+  </section>
+
+  <!-- Slide 5: Confirmation dialog -->
+  <section class="slide" data-slide="5">
+    <span class="step-num">Step 4 / 5</span>
+    <h1>확인 창에서 "열기" 클릭</h1>
+    <p>우클릭 → 열기로 실행하면 macOS가 한 번 더 확인을 요청합니다. <strong>열기</strong> 버튼을 클릭하세요.</p>
+    <div class="visual">
+      <div class="gk-alert">
+        <div class="icon-img" style="width:48px;height:48px;font-size:22px;border-radius:10px;display:inline-flex;">!</div>
+        <div class="title">"Notepad AI" 앱을 열까요?</div>
+        <div class="body">macOS는 이 앱의 개발자를 확인할 수 없어 악성 소프트웨어인지 확인할 수 없습니다. 신뢰할 수 있는 곳에서 받은 경우에만 여세요.</div>
+        <div class="row">
+          <button class="primary">열기</button>
+          <button class="secondary">취소</button>
+        </div>
+      </div>
+    </div>
+    <div class="callout ok">
+      ✅ 이건 <strong>최초 1회만</strong> 입니다. 이후 더블클릭으로 평소처럼 실행돼요.
+    </div>
+  </section>
+
+  <!-- Slide 6: macOS 15 alternative -->
+  <section class="slide" data-slide="6">
+    <span class="step-num">Step 5 / 5 (옵션)</span>
+    <h1>그래도 안 열리면?</h1>
+    <p>macOS 15(Sequoia)부터는 "열기" 옵션이 안 보일 수 있습니다. 두 가지 대안:</p>
+
+    <h2>방법 B — 시스템 설정에서 허용</h2>
+    <p>실행이 거부된 직후 곧바로:</p>
+    <ol>
+      <li><strong>시스템 설정 → 개인정보 보호 및 보안</strong> 열기</li>
+      <li>아래쪽 <em>"보안"</em> 섹션에서 "<strong>Notepad AI이(가) 차단되었습니다</strong>" 메시지 옆 <strong>그래도 열기</strong> 클릭</li>
+      <li>로그인 비밀번호 입력</li>
+    </ol>
+
+    <h2>방법 C — 터미널 한 줄</h2>
+    <p>기술에 익숙하다면 <kbd>⌘</kbd>+<kbd>스페이스</kbd>로 <strong>터미널</strong>을 열고 한 줄 실행:</p>
+    <pre><code>xattr -dr com.apple.quarantine "/Applications/Notepad AI.app"</code></pre>
+    <p>실행 후 평소처럼 더블클릭하면 열립니다.</p>
+
+    <div class="callout warn">
+      이 명령은 macOS의 "이 파일은 인터넷에서 받음" 표시를 제거합니다. 직접 빌드했거나 공식 릴리스에서 받은, 신뢰할 수 있는 파일에만 사용하세요.
+    </div>
+  </section>
+
+  <!-- Slide 7: AI Login (F7) -->
+  <section class="slide" data-slide="7">
+    <h1>AI 기능 활성화 — ChatGPT 로그인</h1>
+    <p>앱이 처음 실행되면 AI 로그인 창이 자동으로 나타납니다. <strong>개인 ChatGPT Plus 계정</strong>을 사용합니다.</p>
+
+    <div class="callout">
+      AI 기능 없이도 편집기는 완전히 동작합니다. 로그인은 나중에 <kbd>F7</kbd>로 다시 열 수 있습니다.
+    </div>
+
+    <div class="visual">
+      <div class="login-flow">
+        <div class="login-step">
+          <div class="num">1</div>
+          <div>"로그인" 버튼 클릭 → 브라우저가 <strong>auth.openai.com</strong>으로 이동</div>
+        </div>
+        <div class="login-step">
+          <div class="num">2</div>
+          <div>앱에 표시되는 코드를 브라우저에 입력</div>
+        </div>
+        <div class="code-box">ABCD-1234</div>
+        <div class="login-step">
+          <div class="num">3</div>
+          <div>ChatGPT 계정으로 로그인 → 완료</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="callout ok">
+      ✅ 로그인 정보는 <strong>macOS Keychain</strong>에 안전하게 저장됩니다. 재실행해도 자동 로그인.
+    </div>
+  </section>
+
+  <!-- Slide 8: Import HWP/DOCX -->
+  <section class="slide" data-slide="8">
+    <h1>HWP / DOCX 파일 가져오기</h1>
+    <p>기존 문서를 마크다운으로 변환해 편집할 수 있습니다. 메뉴 <strong>파일 → 가져오기</strong> 또는 <kbd>⌘ + O</kbd>로 파일을 선택하세요.</p>
+
+    <h2>지원 형식</h2>
+    <div class="format-grid">
+      <div class="fmt-chip primary">HWP</div>
+      <div class="fmt-chip primary">HWPX</div>
+      <div class="fmt-chip primary">DOCX</div>
+      <div class="fmt-chip primary">PDF</div>
+      <div class="fmt-chip primary">XLSX</div>
+    </div>
+
+    <div class="callout">
+      변환 후 오른쪽 <strong>리치 프리뷰</strong>에서 원본 서식을 확인할 수 있습니다. 상태바의 "<strong>HTML 보기</strong>" 토글로 kordoc의 원본 렌더링도 확인 가능.
+    </div>
+
+    <div class="callout warn">
+      ⚠️ DRM이 걸린 HWP 파일은 변환되지 않을 수 있습니다.<br/>
+      이미지만 있는 스캔 PDF도 텍스트 추출이 불가합니다 (OCR 미지원).
+    </div>
+  </section>
+
+  <!-- Slide 9: AI Features -->
+  <section class="slide" data-slide="9">
+    <h1>AI 기능 소개</h1>
+    <p>로그인 후 네 가지 AI 도우미를 사용할 수 있습니다.</p>
+
+    <div class="ai-grid">
+      <div class="ai-card">
+        <div class="shortcut">⌘⇧A  또는  텍스트 선택 → ✦ 버튼</div>
+        <div class="title">블록 AI — 문장 수정</div>
+        <div class="desc">선택한 텍스트를 3가지 대안으로 다시 씁니다. 마음에 드는 것을 "적용"하면 즉시 교체.</div>
+      </div>
+      <div class="ai-card">
+        <div class="shortcut">⌘J</div>
+        <div class="title">사이드 채팅 — 문서 상담</div>
+        <div class="desc">오른쪽 패널에서 AI와 질문/답변. 문서를 직접 수정하지 않고 조언만 받을 때.</div>
+      </div>
+      <div class="ai-card">
+        <div class="shortcut">⌘ ;</div>
+        <div class="title">하단 채팅 — 초안 작성</div>
+        <div class="desc">화면 아래 채팅창에서 초안 요청. "적용" 버튼으로 에디터에 바로 삽입.</div>
+      </div>
+      <div class="ai-card">
+        <div class="shortcut">F6</div>
+        <div class="title">글쓰기 수준 조절</div>
+        <div class="desc">초등~전문가 5단계. 설정하면 모든 AI 답변의 문체가 해당 수준에 맞춰집니다.</div>
+      </div>
+    </div>
+
+    <div class="callout">
+      💡 툴바 오른쪽 끝 <strong>✦ 모델 버튼</strong>을 클릭하면 사용할 AI 모델을 선택할 수 있습니다.
+    </div>
+  </section>
+
+  <!-- Slide 10: First experience + settings -->
+  <section class="slide" data-slide="10">
+    <h1>🎉 준비 완료 — 첫 사용 가이드</h1>
+
+    <h2>5초 시작</h2>
+    <ul style="font-size:16px; line-height:1.8;">
+      <li>아무 영역에 클릭하고 그냥 글 작성</li>
+      <li>중요한 단어 드래그 → 툴바의 <kbd>B</kbd> 클릭 → 굵게</li>
+      <li>새 줄에 <kbd>H1</kbd> 클릭 → 큰 제목</li>
+      <li><kbd>⊞ Table</kbd> 클릭 → 격자에서 표 크기 선택 → 클릭</li>
+      <li>오른쪽 리치뷰에서 직접 워드처럼 편집해도 OK</li>
+    </ul>
+
+    <h2>자주 쓰는 단축키</h2>
+    <div class="keys">
+      <span class="k">⌘ B / I / E / K</span><span>굵게 / 이탤릭 / 인라인 코드 / 링크</span>
+      <span class="k">⌘ T</span><span>표 삽입</span>
+      <span class="k">⌘ P</span><span>화면 보기 전환 (양쪽 / 리치만 / RAW만)</span>
+      <span class="k">⌘ S / O</span><span>저장 / 파일 열기 (가져오기 포함)</span>
+      <span class="k">⌘ J / ⌘ ;</span><span>사이드 채팅 / 하단 채팅</span>
+      <span class="k">⌘ ⇧ A</span><span>블록 AI (선택 영역 재작성)</span>
+      <span class="k">F6 / F7</span><span>글쓰기 수준 / AI 로그인</span>
+    </div>
+
+    <h2>개인 설정</h2>
+    <p>우상단 메뉴에서 <strong>언어(한국어/English)</strong>, <strong>다크 모드</strong>, <strong>글꼴 크기</strong>를 변경할 수 있습니다. 설정은 자동으로 저장됩니다.</p>
+
+    <div class="callout">
+      💡 상단의 <strong>제목 영역(Untitled)</strong>을 클릭해 파일명을 먼저 지정하고 작성을 시작할 수도 있습니다.
+    </div>
+    <p style="margin-top: 24px; color: var(--muted);">문제가 생기면 GitHub 저장소의 Issues에 남겨주세요.</p>
+  </section>
+
+  <div class="nav">
+    <button class="btn ghost" id="prev">← 이전</button>
+    <span id="indicator" style="color: var(--muted); font-size: 14px;">1 / 10</span>
+    <button class="btn" id="next">다음 →</button>
+  </div>
+
+  <footer>
+    Notepad AI · 오픈소스(MIT) · 2026
+  </footer>
+</div>
+
+<script>
+  const slides = document.querySelectorAll('.slide');
+  const total = slides.length;
+  const progress = document.getElementById('progress');
+  const indicator = document.getElementById('indicator');
+  const prev = document.getElementById('prev');
+  const next = document.getElementById('next');
+
+  for (let i = 0; i < total; i++) {
+    const d = document.createElement('span');
+    d.className = 'dot';
+    d.dataset.idx = i;
+    d.addEventListener('click', () => goto(i));
+    progress.appendChild(d);
+  }
+
+  let current = 0;
+  function render() {
+    slides.forEach((s, i) => s.classList.toggle('active', i === current));
+    progress.querySelectorAll('.dot').forEach((d, i) => {
+      d.classList.toggle('active', i === current);
+      d.classList.toggle('done', i < current);
+    });
+    indicator.textContent = `${current + 1} / ${total}`;
+    prev.disabled = current === 0;
+    next.textContent = current === total - 1 ? '처음으로 ↻' : '다음 →';
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+  function goto(i) {
+    current = Math.max(0, Math.min(total - 1, i));
+    render();
+  }
+  prev.addEventListener('click', () => goto(current - 1));
+  next.addEventListener('click', () => {
+    if (current === total - 1) goto(0);
+    else goto(current + 1);
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); goto(current + 1); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); goto(current - 1); }
+  });
+  render();
+</script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+node_modules/
+dist/
+release/
+.gjc/
+.superpowers/
+docs/superpowers/
+docs/redteam-*.png
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+.vscode/
+*.dmg
+*.blockmap
+SECURITY_REPO_AUDIT.md
+
+# Internal/local-only notes (not for public repo)
+HANDOFF.md
+SEED.yaml
+V1.0.md

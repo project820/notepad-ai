@@ -1,0 +1,1102 @@
+import { createEditor, type EditorHandle } from './editor';
+import { createPreview, type PreviewHandle } from './preview';
+import { createToolbar, paintAccountState, type Theme, type FontSize } from './toolbar';
+import { t, getLocale, setLocale, onLocaleChange, type Locale } from './i18n';
+import { installKeyboardNav } from './keyboard-nav';
+import { loadPrefs, savePrefs, applyTheme, applyFontSize, resolvedDark } from './prefs';
+import { wirePreviewTables } from './preview-table-edit';
+import { applyToEditor, applyToPreview, type FormatAction } from './formatting';
+import { htmlToMarkdown } from './html-to-md';
+import { openLoginModal } from './login-modal';
+import { mountUnifiedChat, type ChatMode } from './unified-chat';
+import { clampChatWidth } from './chat-layout';
+import { openSettingsModal } from './settings-modal';
+import { restoreUnifiedThread, threadToTurns, type UnifiedChatItem } from './unified-chat-history';
+import { buildUnifiedChatInstructions } from './unified-chat-prompt-handler';
+import { styleDirective, detectLanguage, type Naturalness } from './humanize-engine';
+import { guardVerdict } from './humanize-guards';
+import type { Quality } from './quality';
+import type { AiProviderId, ModelRef, ProviderAuthStatus } from '../main/ai/types';
+import {
+  renderEditableDraft,
+  renderManualExplanationPrompt,
+  renderProjectWizardConsent,
+  type ManualExplanationQuestion,
+} from './project-wizard-panel';
+import { installBlockAi } from './block-ai';
+import { EditorSelection } from '@codemirror/state';
+
+type AuthSnapshot = {
+  signedIn: boolean;
+  email?: string;
+  plan?: string;
+  persisted?: boolean;
+  warning?: string;
+  expiresAt?: number;
+};
+
+type LoginUpdate =
+  | { kind: 'usercode'; userCode: string; verificationUri: string }
+  | { kind: 'success'; auth: AuthSnapshot }
+  | { kind: 'error'; message: string };
+
+type ProjectWizardSaveApprovedDraftInput = {
+  projectFolder: string;
+  body: string;
+  frontmatter: Record<string, unknown>;
+  inherits: boolean;
+  lastScanned: string | null;
+};
+
+type ProjectWizardStateResult = {
+  projectFolder: string;
+  overviewPath: string;
+  stage:
+    | 'idle'
+    | 'consent'
+    | 'scan_scope'
+    | 'analysis_profile'
+    | 'manual_questions'
+    | 'scanned'
+    | 'drafted'
+    | 'approved'
+    | 'canceled'
+    | 'blocked';
+  stageStatements: Array<{ at: string; stage: string; message: string; data?: Record<string, unknown> }>;
+};
+
+type ProjectWizardSaveApprovedDraftResult = {
+  status: 'not_ready' | 'partially_ready' | 'ready';
+  overviewPath: string;
+  markdown: string;
+};
+
+type Api = {
+  onFileOpened: (cb: (file: { filePath: string; content: string }) => void) => void;
+  onMenuNew: (cb: () => void) => void;
+  onMenuSave: (cb: () => void) => void;
+  onMenuSaveAs: (cb: () => void) => void;
+  onTogglePreview: (cb: () => void) => void;
+  saveFile: (filePath: string | null, content: string) => Promise<{ saved: boolean; filePath?: string }>;
+  authStatus: () => Promise<AuthSnapshot>;
+  authLogin: () => Promise<void>;
+  authCancelLogin: () => Promise<void>;
+  authLogout: () => Promise<void>;
+  onAuthLoginUpdate: (cb: (u: LoginUpdate) => void) => void;
+  aiChat: (id: string, instructions: string, history: { role: 'user' | 'assistant'; text: string }[], userText: string, model?: string | { provider: AiProviderId; id: string }) => Promise<void>;
+  aiCancel: (id: string) => Promise<void>;
+  onAiChatEvent: (id: string, cb: (e: { kind: 'delta' | 'done' | 'error'; text?: string; message?: string; errorKind?: string }) => void) => () => void;
+  aiModels: (force?: boolean) => Promise<ModelRef[]>;
+  aiProvidersStatus: () => Promise<ProviderAuthStatus[]>;
+  aiHasAnyAuth: () => Promise<boolean>;
+  aiSetApiKey: (provider: AiProviderId, key: string) => Promise<{ persisted: boolean }>;
+  aiDeleteProviderKey: (provider: AiProviderId) => Promise<void>;
+  getPromptAssemblyContext: () => Promise<{ enabled: boolean; systemlawContent: string; ownerContent: string }>;
+  projectWizardStart: (projectFolder: string) => Promise<ProjectWizardStateResult>;
+  projectWizardSaveApprovedDraft: (input: ProjectWizardSaveApprovedDraftInput) => Promise<ProjectWizardSaveApprovedDraftResult>;
+  sessionGet: () => Promise<any>;
+  sessionWrite: (snap: any) => Promise<void>;
+  sessionClear: () => Promise<void>;
+};
+
+declare global {
+  interface Window {
+    api: Api;
+  }
+}
+
+const workspace = document.querySelector('.workspace') as HTMLElement;
+const editorHost = document.getElementById('editor-host') as HTMLDivElement;
+const previewHost = document.getElementById('preview-host') as HTMLDivElement;
+const toolbarHost = document.getElementById('toolbar') as HTMLDivElement;
+const titleEl = document.getElementById('title') as HTMLInputElement;
+const dirtyEl = document.getElementById('dirty') as HTMLDivElement;
+const statusEl = document.getElementById('status') as HTMLSpanElement;
+const wordCountEl = document.getElementById('word-count') as HTMLSpanElement;
+const splitterEl = document.querySelector('.splitter') as HTMLElement;
+
+let currentPath: string | null = null;
+let pendingTitle: string | null = null;
+let dirty = false;
+let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
+
+type PreviewMode = 'split' | 'editor-only' | 'preview-only';
+let previewMode: PreviewMode = 'split';
+
+// Set when an imported (HWP/DOCX/PDF/XLSX) file's rich HTML is available.
+// User can toggle the preview pane to show this verbatim instead of the
+// markdown-it rendering of the (turndown-derived) MD source.
+let convertedHtml: string | null = null;
+let showingConvertedHtml = false;
+
+// Which surface should toolbar buttons act on? Tracks last-focused editing surface.
+type ActiveSurface = 'editor' | 'preview';
+let activeSurface: ActiveSurface = 'editor';
+
+const prefs = loadPrefs();
+// CRITICAL: locale must be set BEFORE any UI is rendered, otherwise the
+// first preview.setDoc / createToolbar / mountSideChat will use the default
+// 'en' dictionary and the user sees a flash of English before switching.
+setLocale((prefs.locale as Locale) ?? 'en');
+applyTheme(prefs.theme);
+applyFontSize(prefs.fontSize);
+
+if (prefs.splitRatio != null) {
+  workspace.style.setProperty('--split-left', `${prefs.splitRatio}fr`);
+  workspace.style.setProperty('--split-right', `${1 - prefs.splitRatio}fr`);
+}
+
+function displayTitle(): string {
+  if (currentPath) return currentPath.split('/').pop() ?? 'Untitled';
+  return pendingTitle ?? 'Untitled';
+}
+
+function setTitle() {
+  if (document.activeElement !== titleEl) {
+    titleEl.value = displayTitle();
+  }
+  dirtyEl.classList.toggle('dirty', dirty);
+}
+
+function updateWordCount(doc: string) {
+  const chars = doc.length;
+  const words = doc.trim() === '' ? 0 : doc.trim().split(/\s+/).length;
+  wordCountEl.textContent = `${words.toLocaleString()} words · ${chars.toLocaleString()} chars`;
+}
+
+let editor: EditorHandle;
+let preview: PreviewHandle;
+let suppressEditorChange = false;
+let editingInPreview = false; // true while user is actively typing in the preview pane
+let previewSyncTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleAutosave() {
+  if (autosaveTimer) clearTimeout(autosaveTimer);
+  autosaveTimer = setTimeout(() => {
+    if (currentPath) void save();
+  }, 3000);
+}
+
+function onDocChange(doc: string) {
+  if (suppressEditorChange) return;
+  if (!dirty) {
+    dirty = true;
+    setTitle();
+  }
+  // Avoid clobbering the preview while the user is typing there.
+  if (!editingInPreview) preview.setDoc(doc);
+  updateWordCount(doc);
+  scheduleAutosave();
+}
+
+async function save() {
+  const result = await window.api.saveFile(currentPath, editor.getDoc());
+  if (result.saved && result.filePath) {
+    currentPath = result.filePath;
+    pendingTitle = null;
+    dirty = false;
+    setTitle();
+    statusEl.textContent = `Saved • ${result.filePath}`;
+  }
+}
+
+async function saveAs() {
+  const result = await window.api.saveFile(null, editor.getDoc());
+  if (result.saved && result.filePath) {
+    currentPath = result.filePath;
+    pendingTitle = null;
+    dirty = false;
+    setTitle();
+    statusEl.textContent = `Saved • ${result.filePath}`;
+  }
+}
+
+function newDoc() {
+  currentPath = null;
+  pendingTitle = null;
+  editor.setDoc('');
+  preview.setDoc('');
+  dirty = false;
+  setTitle();
+  updateWordCount('');
+  statusEl.textContent = 'New document';
+  editor.focus();
+}
+
+function applyPreviewMode() {
+  workspace.classList.remove('mode-split', 'mode-editor-only', 'mode-preview-only');
+  workspace.classList.add(`mode-${previewMode}`);
+}
+
+function cyclePreviewMode() {
+  previewMode =
+    previewMode === 'split' ? 'preview-only' : previewMode === 'preview-only' ? 'editor-only' : 'split';
+  applyPreviewMode();
+  const labels: Record<PreviewMode, string> = {
+    split: 'split',
+    'preview-only': 'rich preview',
+    'editor-only': 'raw markdown',
+  };
+  statusEl.textContent = `View • ${labels[previewMode]}`;
+  // When switching into preview-only or split, the preview is the natural surface to format.
+  if (previewMode === 'preview-only') activeSurface = 'preview';
+  if (previewMode === 'editor-only') activeSurface = 'editor';
+}
+
+const initialDoc = '';
+
+editor = createEditor(editorHost, {
+  initialDoc,
+  onChange: onDocChange,
+});
+
+preview = createPreview(previewHost);
+preview.onAfterRender(() => {
+  wirePreviewTables(preview.el, () => editor.getDoc(), (newDoc) => {
+    suppressEditorChange = true;
+    editor.setDoc(newDoc);
+    suppressEditorChange = false;
+    if (!dirty) {
+      dirty = true;
+      setTitle();
+    }
+    preview.setDoc(newDoc);
+    updateWordCount(newDoc);
+    scheduleAutosave();
+  });
+});
+preview.setDoc(initialDoc);
+updateWordCount(initialDoc);
+applyPreviewMode();
+editor.applyTheme(resolvedDark(prefs.theme));
+
+// ----- Preview live-editing: sync HTML -> MD on input (debounced) -----
+function syncPreviewToSource() {
+  if (previewSyncTimer) clearTimeout(previewSyncTimer);
+  previewSyncTimer = setTimeout(() => {
+    if (!editingInPreview) return;
+    // innerHTML serializes ATTRIBUTES not properties — checkbox toggles
+    // change the .checked property but the attribute is stale. Sync them
+    // so turndown sees the correct state.
+    preview.el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach((el) => {
+      el.toggleAttribute('checked', el.checked);
+    });
+    const md = htmlToMarkdown(preview.el.innerHTML);
+    if (md.trim() === editor.getDoc().trim()) return;
+    suppressEditorChange = true;
+    editor.setDoc(md);
+    suppressEditorChange = false;
+    if (!dirty) {
+      dirty = true;
+      setTitle();
+    }
+    updateWordCount(md);
+    scheduleAutosave();
+  }, 350);
+}
+
+preview.el.addEventListener('input', () => {
+  editingInPreview = true;
+  syncPreviewToSource();
+});
+// Checkbox toggles inside the contenteditable preview fire `change` but
+// not always `input`. Treat them as edits.
+preview.el.addEventListener('change', (e) => {
+  const t = e.target as HTMLInputElement | null;
+  if (t && t.type === 'checkbox') {
+    editingInPreview = true;
+    syncPreviewToSource();
+  }
+});
+preview.el.addEventListener('focusin', () => {
+  activeSurface = 'preview';
+  statusEl.textContent = 'Editing • rich preview';
+});
+preview.el.addEventListener('focusout', () => {
+  // Slight delay so toolbar clicks (which blur the preview briefly) still target it.
+  setTimeout(() => {
+    if (!preview.el.contains(document.activeElement)) {
+      editingInPreview = false;
+      // final sync + re-render preview from canonical source for stable formatting
+      if (previewSyncTimer) clearTimeout(previewSyncTimer);
+      preview.el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach((el) => {
+        el.toggleAttribute('checked', el.checked);
+      });
+      const md = htmlToMarkdown(preview.el.innerHTML);
+      if (md.trim() !== editor.getDoc().trim()) {
+        suppressEditorChange = true;
+        editor.setDoc(md);
+        suppressEditorChange = false;
+        updateWordCount(md);
+        scheduleAutosave();
+      }
+      preview.setDoc(editor.getDoc());
+    }
+  }, 100);
+});
+
+// Track when the editor (CM6) is the active surface
+editorHost.addEventListener('focusin', () => {
+  activeSurface = 'editor';
+  statusEl.textContent = 'Editing • raw markdown';
+});
+
+// ----- Toolbar -----
+function dispatchFormat(action: FormatAction) {
+  if (previewMode === 'preview-only') activeSurface = 'preview';
+  if (previewMode === 'editor-only') activeSurface = 'editor';
+  if (activeSurface === 'preview') {
+    preview.el.focus({ preventScroll: true });
+    applyToPreview(action);
+    editingInPreview = true;
+    syncPreviewToSource();
+  } else {
+    applyToEditor(editor.view, action);
+  }
+}
+
+let cachedAuth: AuthSnapshot = { signedIn: false };
+
+// Shared in-renderer cache for the model list so toolbar AND block-AI both
+// return synchronously instead of doing an IPC roundtrip on every dropdown
+// open. Fired off once at startup so the first click is also instant.
+let rendererModels: { id: string; label?: string; provider?: string }[] | null = null;
+let rendererModelsPromise: Promise<{ id: string; label?: string; provider?: string }[]> | null = null;
+async function loadModelsCached(): Promise<{ id: string; label?: string; provider?: string }[]> {
+  if (rendererModels) return rendererModels;
+  if (!rendererModelsPromise) {
+    rendererModelsPromise = window.api.aiModels(false).then((m) => {
+      rendererModels = m;
+      return m;
+    });
+  }
+  return rendererModelsPromise;
+}
+// Warm the cache eagerly.
+void loadModelsCached();
+
+createToolbar(toolbarHost, {
+  getTheme: () => prefs.theme,
+  getFontSize: () => prefs.fontSize,
+  getModel: () => prefs.model ?? 'gpt-5.4-mini',
+  getLocale: () => getLocale(),
+  getAuth: () => cachedAuth,
+  loadModels: () => loadModelsCached(),
+  onModelChange: (id) => {
+    prefs.model = id;
+    savePrefs(prefs);
+    statusEl.textContent = `Model · ${id}`;
+  },
+  onLocaleChange: (l) => {
+    prefs.locale = l;
+    savePrefs(prefs);
+    setLocale(l);
+  },
+  onToggleSideChat: () => toggleUnifiedChat(),
+  onOpenSettings: () => openSettings(),
+  onSignIn: () => openLoginModal({ onAfterLogin: (a) => { cachedAuth = a; paintAuthPill(a); } }),
+  onSignOut: async () => {
+    await window.api.authLogout();
+    cachedAuth = { signedIn: false };
+    paintAuthPill(cachedAuth);
+    statusEl.textContent = t('status.signedOut');
+  },
+  onFormat: dispatchFormat,
+  onInsertTable: (rows, cols) => {
+    // Single insertion path: always write the Markdown table into the source
+    // (MD is the source of truth). The preview re-renders from the updated doc.
+    editor.insertTable(rows, cols);
+    statusEl.textContent = `Inserted ${rows} × ${cols} table`;
+  },
+  onTogglePreview: cyclePreviewMode,
+  onThemeChange: (t: Theme) => {
+    prefs.theme = t;
+    savePrefs(prefs);
+    applyTheme(t);
+    editor.applyTheme(resolvedDark(t));
+  },
+  onFontSizeChange: (s: FontSize) => {
+    prefs.fontSize = s;
+    savePrefs(prefs);
+    applyFontSize(s);
+  },
+});
+
+// ----- Title rename -----
+titleEl.addEventListener('focus', () => titleEl.select());
+titleEl.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    titleEl.blur();
+  }
+  if (e.key === 'Escape') {
+    titleEl.value = displayTitle();
+    titleEl.blur();
+  }
+});
+titleEl.addEventListener('blur', () => {
+  const raw = titleEl.value.trim();
+  if (!raw || raw === displayTitle()) {
+    titleEl.value = displayTitle();
+    return;
+  }
+  const withExt = /\.\w+$/.test(raw) ? raw : `${raw}.md`;
+  if (currentPath) {
+    const dir = currentPath.replace(/\/[^/]+$/, '');
+    const newPath = `${dir}/${withExt}`;
+    void (async () => {
+      const result = await window.api.saveFile(newPath, editor.getDoc());
+      if (result.saved && result.filePath) {
+        currentPath = result.filePath;
+        pendingTitle = null;
+        dirty = false;
+        statusEl.textContent = `Renamed • ${result.filePath}`;
+        setTitle();
+      }
+    })();
+  } else {
+    pendingTitle = withExt;
+    titleEl.value = withExt;
+    statusEl.textContent = `Title set • will save as "${withExt}"`;
+  }
+});
+
+// ----- Splitter drag -----
+let dragging = false;
+splitterEl.addEventListener('mousedown', (e) => {
+  e.preventDefault();
+  dragging = true;
+  splitterEl.classList.add('dragging');
+  document.body.style.cursor = 'col-resize';
+  document.body.style.userSelect = 'none';
+});
+window.addEventListener('mousemove', (e) => {
+  if (!dragging) return;
+  const rect = workspace.getBoundingClientRect();
+  const ratio = Math.max(0.1, Math.min(0.9, (e.clientX - rect.left) / rect.width));
+  workspace.style.setProperty('--split-left', `${ratio}fr`);
+  workspace.style.setProperty('--split-right', `${1 - ratio}fr`);
+});
+window.addEventListener('mouseup', () => {
+  if (!dragging) return;
+  dragging = false;
+  splitterEl.classList.remove('dragging');
+  document.body.style.cursor = '';
+  document.body.style.userSelect = '';
+  const cs = getComputedStyle(workspace);
+  const cols = cs.gridTemplateColumns.split(' ');
+  if (cols.length >= 3) {
+    const l = parseFloat(cols[0]);
+    const r = parseFloat(cols[2]);
+    if (Number.isFinite(l) && Number.isFinite(r) && l + r > 0) {
+      prefs.splitRatio = l / (l + r);
+      savePrefs(prefs);
+    }
+  }
+});
+
+// ----- Scroll sync (suppressed while preview is being typed in) -----
+let syncing = false;
+const editorScroller = editorHost.querySelector('.cm-scroller') as HTMLElement | null;
+if (editorScroller) {
+  editorScroller.addEventListener('scroll', () => {
+    if (syncing || editingInPreview) return;
+    const ratio = editorScroller.scrollTop / Math.max(1, editorScroller.scrollHeight - editorScroller.clientHeight);
+    syncing = true;
+    preview.el.scrollTop = ratio * Math.max(0, preview.el.scrollHeight - preview.el.clientHeight);
+    requestAnimationFrame(() => (syncing = false));
+  });
+}
+preview.el.addEventListener('scroll', () => {
+  if (syncing || !editorScroller || editingInPreview) return;
+  const ratio = preview.el.scrollTop / Math.max(1, preview.el.scrollHeight - preview.el.clientHeight);
+  syncing = true;
+  editorScroller.scrollTop = ratio * Math.max(0, editorScroller.scrollHeight - editorScroller.clientHeight);
+  requestAnimationFrame(() => (syncing = false));
+});
+
+window.api.onFileOpened((payload: any) => {
+  const { filePath, content, html, converted, error } = payload as {
+    filePath: string | null;
+    content: string;
+    html?: string;
+    converted?: { from: string; originalPath: string };
+    error?: string;
+  };
+  if (error) {
+    statusEl.textContent = `⚠ ${error}`;
+    return;
+  }
+  currentPath = filePath ?? null;
+  pendingTitle = null;
+  let docMd = content;
+  if (html && converted) {
+    try {
+      const md = htmlToMarkdown(html);
+      if (md && md.trim().length > 0) docMd = md;
+    } catch (e) {
+      console.warn('turndown of kordoc HTML failed; using raw markdown:', e);
+    }
+    convertedHtml = html;
+  } else {
+    convertedHtml = null;
+    showingConvertedHtml = false;
+  }
+  editor.setDoc(docMd);
+  if (showingConvertedHtml && convertedHtml) {
+    preview.el.innerHTML = convertedHtml;
+  } else {
+    preview.setDoc(docMd);
+  }
+  dirty = !!converted;
+  setTitle();
+  updateWordCount(docMd);
+  updateHtmlViewToggle();
+  if (converted) {
+    statusEl.textContent = `Converted from ${converted.from} • will save as ${filePath}`;
+  } else {
+    statusEl.textContent = `Opened • ${filePath}`;
+  }
+});
+
+// ----- HTML-view toggle (only meaningful when a converted file is loaded) -----
+function updateHtmlViewToggle() {
+  let btn = document.getElementById('view-html-toggle') as HTMLButtonElement | null;
+  if (!convertedHtml) {
+    btn?.remove();
+    return;
+  }
+  if (!btn) {
+    btn = document.createElement('button');
+    btn.id = 'view-html-toggle';
+    btn.className = 'view-html-toggle';
+    btn.addEventListener('click', () => {
+      showingConvertedHtml = !showingConvertedHtml;
+      if (showingConvertedHtml && convertedHtml) {
+        preview.el.innerHTML = convertedHtml;
+      } else {
+        preview.setDoc(editor.getDoc());
+      }
+      updateHtmlViewToggle();
+    });
+    // Insert just before the word-count span in the status bar
+    const sb = document.querySelector('.statusbar');
+    sb?.insertBefore(btn, document.getElementById('word-count'));
+  }
+  btn.textContent = showingConvertedHtml ? 'View MD' : 'View HTML';
+  btn.title = showingConvertedHtml
+    ? 'Switch back to the markdown-rendered preview'
+    : 'Show kordoc\'s rich HTML rendering';
+}
+
+window.api.onMenuNew(newDoc);
+window.api.onMenuSave(() => void save());
+window.api.onMenuSaveAs(() => void saveAs());
+window.api.onTogglePreview(cyclePreviewMode);
+
+document.addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 't' && !e.shiftKey) {
+    e.preventDefault();
+    const btn = document.getElementById('tb-insert-table') as HTMLButtonElement | null;
+    btn?.click();
+  }
+  if ((e.metaKey || e.ctrlKey) && (e.key === 'j' || e.key === 'J' || e.key === ';')) {
+    e.preventDefault();
+    toggleUnifiedChat();
+  }
+  if (e.key === 'Escape' && ucInflight) {
+    void window.api.aiCancel(ucInflight.id);
+  }
+});
+
+const themeMql = window.matchMedia('(prefers-color-scheme: dark)');
+themeMql.addEventListener('change', (e) => {
+  if (prefs.theme === 'system') editor.applyTheme(e.matches);
+});
+
+window.addEventListener('beforeunload', (e) => {
+  if (dirty) {
+    e.preventDefault();
+    e.returnValue = '';
+  }
+});
+
+setTitle();
+editor.focus();
+installKeyboardNav();
+
+// ---------------- Block AI (F3) -----------------
+installBlockAi({
+  view: editor.view,
+  previewEl: preview.el,
+  getModel: () => prefs.model,
+  getBlockModel: () => prefs.blockModel ?? 'gpt-5.4-mini',
+  onBlockModelChange: (id) => { prefs.blockModel = id; savePrefs(prefs); },
+  loadModels: () => loadModelsCached(),
+  getQuality: () => currentStyle().difficulty,
+  getNaturalness: () => currentStyle().naturalness,
+  // v1.1 Phase 1: fetch toggle state + userData file contents from main process.
+  // When toggle is off the IPC returns empty strings so the handler falls back
+  // to the v1.0 legacy path — byte-identical to pre-v1.1 behaviour.
+  getPromptAssemblyContext: () => window.api.getPromptAssemblyContext(),
+});
+
+// Re-render preview (and its embedded table toolbar buttons) on locale change
+function relabelTableToolbarsInPlace() {
+  const labelMap: Record<string, [string, string]> = {
+    'row+': ['table.addRow', 'table.addRowTitle'],
+    'col+': ['table.addCol', 'table.addColTitle'],
+    'row-': ['table.delRow', 'table.delRowTitle'],
+    'col-': ['table.delCol', 'table.delColTitle'],
+  };
+  preview.el
+    .querySelectorAll<HTMLButtonElement>('.preview-table-wrap .table-toolbar button[data-act]')
+    .forEach((btn) => {
+      const pair = labelMap[btn.dataset.act ?? ''];
+      if (!pair) return;
+      btn.textContent = t(pair[0]);
+      btn.setAttribute('data-tooltip', t(pair[1]));
+    });
+}
+
+onLocaleChange(() => {
+  preview.el.querySelectorAll('table[data-wired="1"]').forEach((t) => t.removeAttribute('data-wired'));
+  preview.setDoc(editor.getDoc());
+  relabelTableToolbarsInPlace();
+});
+
+// ---------------- Codex OAuth (F7) -----------------
+function paintAuthPill(auth: AuthSnapshot) {
+  cachedAuth = auth;
+  paintAccountState(auth.signedIn);
+}
+
+// ---------------- Unified AI Chat (⌘J / ⌘;) -----------------
+const unifiedChatHost = document.getElementById('unified-chat') as HTMLDivElement;
+const contentRow = document.querySelector('.content-row') as HTMLElement;
+const ucResizer = document.querySelector('.uc-resizer') as HTMLDivElement;
+function applyAiOutput(action: 'replace' | 'insert', md: string) {
+  if (action === 'replace') {
+    suppressEditorChange = true;
+    editor.setDoc(md);
+    suppressEditorChange = false;
+    preview.setDoc(md);
+    if (!dirty) { dirty = true; setTitle(); }
+    updateWordCount(md);
+    scheduleAutosave();
+  } else {
+    const { state } = editor.view;
+    const pos = state.selection.main.from;
+    editor.view.dispatch({
+      changes: { from: pos, insert: md },
+      selection: EditorSelection.cursor(pos + md.length),
+      scrollIntoView: true,
+    });
+  }
+}
+
+let unifiedChatHistory: UnifiedChatItem[] = [];
+let ucOpen = false;
+let ucInflight: { id: string; cleanup: () => void } | null = null;
+const wizardQuestions: ManualExplanationQuestion[] = ['purpose', 'folder_scope', 'constraints'];
+
+function ucId(): string {
+  return 'uc-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+}
+
+function setUnifiedChatOpen(open: boolean) {
+  ucOpen = open;
+  contentRow.classList.toggle('uc-open', open);
+  unifiedChatHost.hidden = !open;
+  ucResizer.hidden = !open;
+  if (open) setTimeout(() => unifiedChatHost.querySelector<HTMLTextAreaElement>('.uc-input')?.focus(), 60);
+}
+
+function toggleUnifiedChat() {
+  setUnifiedChatOpen(!ucOpen);
+}
+
+function currentStyle(): { difficulty: Quality; naturalness: Naturalness } {
+  return prefs.style ?? { difficulty: prefs.quality ?? 'college', naturalness: 'balanced' };
+}
+
+function currentModelArg(): string | { provider: AiProviderId; id: string } | undefined {
+  return prefs.selectedModel ?? prefs.model;
+}
+
+function applyStyle(next: { difficulty: Quality; naturalness: Naturalness }) {
+  prefs.style = next;
+  prefs.quality = next.difficulty; // keep legacy difficulty in sync (Block AI etc.)
+  savePrefs(prefs);
+  statusEl.textContent = `Style · ${next.difficulty} · ${next.naturalness}`;
+}
+
+function openSettings() {
+  openSettingsModal({
+    getStyle: () => currentStyle(),
+    onStyleChange: (s) => applyStyle(s),
+    onAfterAuthChange: () => {
+      rendererModels = null;
+      rendererModelsPromise = null;
+      void loadModelsCached();
+      void (async () => {
+        cachedAuth = await window.api.authStatus();
+        paintAuthPill(cachedAuth);
+      })();
+    },
+    onSetCustomModel: (provider, modelId) => {
+      prefs.selectedModel = { provider, id: modelId };
+      if (provider === 'chatgpt') prefs.model = modelId;
+      savePrefs(prefs);
+      statusEl.textContent = `Model · ${provider} · ${modelId}`;
+    },
+  });
+}
+
+async function sendUnified(text: string, mode: ChatMode) {
+  const hasAuth = await window.api.aiHasAnyAuth().catch(() => true);
+  if (!hasAuth) {
+    unifiedChat.addMessage('user', text);
+    unifiedChatHistory.push({ type: 'message', role: 'user', text });
+    unifiedChat.addMessage(
+      'assistant',
+      'No AI provider is connected. Open Settings to sign in with ChatGPT or add a Claude / OpenRouter API key.',
+    );
+    statusEl.textContent = 'Connect an AI provider to use AI.';
+    openSettings();
+    return;
+  }
+  // Snapshot prior history BEFORE appending the new user turn.
+  const priorTurns = threadToTurns(unifiedChatHistory);
+  unifiedChat.addMessage('user', text);
+  unifiedChatHistory.push({ type: 'message', role: 'user', text });
+
+  const stream = unifiedChat.beginAssistant();
+  const id = ucId();
+  const lang = detectLanguage(text + ' ' + editor.getDoc().slice(0, 400));
+  // Always-on humanize for Write; Advise answers conversationally (no rewrite).
+  const styleStr =
+    mode === 'advise'
+      ? styleDirective({ ...currentStyle(), naturalness: 'off' }, lang)
+      : styleDirective(currentStyle(), lang);
+
+  let ctx = { enabled: false, systemlawContent: '', ownerContent: '' };
+  try {
+    ctx = await window.api.getPromptAssemblyContext();
+  } catch {
+    /* legacy path */
+  }
+
+  const instructions = buildUnifiedChatInstructions({
+    toggleEnabled: ctx.enabled,
+    systemlawContent: ctx.systemlawContent,
+    ownerContent: ctx.ownerContent,
+    styleDirectiveStr: styleStr,
+    documentText: editor.getDoc().slice(0, 12000),
+  });
+
+  const cleanup = window.api.onAiChatEvent(id, (e) => {
+    if (e.kind === 'delta' && e.text) {
+      stream.pushDelta(e.text);
+    } else if (e.kind === 'done') {
+      const final = stream.finalize(e.text);
+      unifiedChatHistory.push({ type: 'message', role: 'assistant', text: final });
+      scheduleSessionSnapshot();
+      cleanup();
+      ucInflight = null;
+    } else if (e.kind === 'error') {
+      stream.fail(e.message ?? 'AI error');
+      statusEl.textContent = e.message ?? 'AI error';
+      cleanup();
+      ucInflight = null;
+    }
+  });
+  ucInflight = { id, cleanup };
+
+  try {
+    await window.api.aiChat(id, instructions, priorTurns, text, currentModelArg());
+  } catch (err: any) {
+    stream.fail(err?.message ?? String(err));
+    cleanup();
+    ucInflight = null;
+  }
+}
+
+const unifiedChat = mountUnifiedChat(unifiedChatHost, {
+  onSend: (text, mode) => {
+    if (mode === 'project') return; // 'project' is driven by onProjectSetup
+    void sendUnified(text, mode);
+  },
+  onInsert: (md) => applyAiOutput('insert', '\n' + md.trim() + '\n'),
+  onReplace: (md) => {
+    const next = md.trim();
+    // AC14: meaning-preservation guard on the live output path. A full-document
+    // replace that drops protected spans (numbers / code / quotes) prompts for
+    // confirmation rather than silently losing facts.
+    const verdict = guardVerdict(editor.getDoc(), next);
+    if (verdict.blockApply) {
+      const lost = [
+        ...verdict.comparison.missingNumbers,
+        ...verdict.comparison.missingInlineCode,
+        ...verdict.comparison.missingCode,
+        ...verdict.comparison.missingQuotes,
+      ]
+        .slice(0, 6)
+        .join(', ');
+      const ok = window.confirm(
+        `This replacement drops protected content${lost ? ` (${lost})` : ''}. Replace anyway?`,
+      );
+      if (!ok) {
+        statusEl.textContent = 'Replace canceled — meaning guard.';
+        return;
+      }
+    } else if (verdict.overHumanized) {
+      statusEl.textContent = 'Applied — heavy rewrite, review for meaning drift.';
+    }
+    applyAiOutput('replace', next);
+  },
+  onCopy: (md) => void navigator.clipboard.writeText(md),
+  onProjectSetup: () => void startProjectWizard(),
+});
+
+// ----- Unified chat resize (AC8: freely resizable, capped at 50% window) -----
+let ucResizing = false;
+ucResizer.addEventListener('mousedown', (e) => {
+  if (!ucOpen) return;
+  ucResizing = true;
+  e.preventDefault();
+  document.body.style.userSelect = 'none';
+  document.body.style.cursor = 'col-resize';
+});
+window.addEventListener('mousemove', (e) => {
+  if (!ucResizing) return;
+  const requested = window.innerWidth - e.clientX;
+  const width = clampChatWidth(requested, window.innerWidth);
+  contentRow.style.setProperty('--uc-width', `${width}px`);
+});
+window.addEventListener('mouseup', () => {
+  if (!ucResizing) return;
+  ucResizing = false;
+  document.body.style.userSelect = '';
+  document.body.style.cursor = '';
+});
+async function startProjectWizard() {
+  const folder = currentPath ? folderFromFilePath(currentPath) : '';
+  if (!folder) {
+    statusEl.textContent = 'Save or open a project file before setup.';
+    return;
+  }
+  try {
+    await window.api.projectWizardStart(folder);
+    setUnifiedChatOpen(true);
+    showProjectWizardConsent(folder);
+    statusEl.textContent = 'Project Wizard started.';
+  } catch (error) {
+    console.error('Project Wizard failed', error);
+    statusEl.textContent = 'Project Wizard failed.';
+  }
+}
+
+function folderFromFilePath(filePath: string): string {
+  const slash = filePath.lastIndexOf('/');
+  if (slash < 0) return '';
+  return slash === 0 ? '/' : filePath.slice(0, slash);
+}
+
+function showProjectWizardConsent(folder: string) {
+  unifiedChat.showPanel(renderProjectWizardConsent(folder), (action) => {
+    if (action === 'start') {
+      showProjectWizardQuestion(folder, 0, {});
+      return;
+    }
+    if (action === 'later') {
+      statusEl.textContent = 'Project Wizard saved for later.';
+      return;
+    }
+    if (action === 'never') {
+      statusEl.textContent = 'Project Wizard disabled for this folder.';
+    }
+  });
+}
+
+function showProjectWizardQuestion(
+  folder: string,
+  index: number,
+  answers: Partial<Record<ManualExplanationQuestion, string>>,
+) {
+  const question = wizardQuestions[index];
+  unifiedChat.showPanel(renderManualExplanationPrompt(question), (action, panel) => {
+    if (action === 'cancel-draft') {
+      statusEl.textContent = 'Project Wizard draft saved for later.';
+      return;
+    }
+    if (action !== 'manual-next') return;
+
+    const answer = (panel.querySelector('[data-pw-field="manual-answer"]') as HTMLTextAreaElement | null)?.value.trim() ?? '';
+    if (!answer) {
+      statusEl.textContent = 'Answer this question before continuing.';
+      return;
+    }
+    const nextAnswers = { ...answers, [question]: answer };
+    const nextIndex = index + 1;
+    if (nextIndex < wizardQuestions.length) {
+      showProjectWizardQuestion(folder, nextIndex, nextAnswers);
+      return;
+    }
+
+    showProjectWizardDraft(folder, buildProjectWizardDraft(nextAnswers));
+  });
+}
+
+function showProjectWizardDraft(folder: string, body: string) {
+  unifiedChat.showPanel(renderEditableDraft(body), (action, panel) => {
+    if (action === 'cancel-draft') {
+      statusEl.textContent = 'Project Wizard draft saved for later.';
+      return;
+    }
+    if (action !== 'approve-draft') return;
+
+    const draftBody = (panel.querySelector('.pw-draft') as HTMLTextAreaElement | null)?.value ?? body;
+    void window.api
+      .projectWizardSaveApprovedDraft({
+        projectFolder: folder,
+        body: draftBody,
+        frontmatter: {},
+        inherits: true,
+        lastScanned: null,
+      })
+      .then((result) => {
+        statusEl.textContent = `Project Wizard saved · ${result.status.replace('_', ' ')}`;
+      })
+      .catch((error) => {
+        console.error('Project Wizard save failed', error);
+        statusEl.textContent = 'Project Wizard save failed.';
+      });
+  });
+}
+
+function buildProjectWizardDraft(answers: Partial<Record<ManualExplanationQuestion, string>>): string {
+  const purpose = answers.purpose?.trim() || 'Describe this project.';
+  const scope = answers.folder_scope?.trim() || 'Describe the folder scope.';
+  const constraints = answers.constraints?.trim() || 'List constraints, risks, or things AI should not assume.';
+  return [
+    '## Purpose',
+    purpose,
+    '',
+    '## Background',
+    '',
+    '## Current Goals',
+    '',
+    '## Writing Rules',
+    constraints,
+    '',
+    '## Key Entities',
+    '',
+    '## Source Map',
+    '| File | Role | Notes |',
+    '|---|---|---|',
+    `| ${folderLabelFromScope(scope)} | Project scope | ${scope} |`,
+    '',
+    '## Open Questions',
+    '',
+    '## Context Inbox Notes',
+    '',
+    '## Do Not Assume',
+    constraints,
+    '',
+  ].join('\n');
+}
+
+function folderLabelFromScope(scope: string): string {
+  return scope.replace(/\|/g, '/').replace(/\n+/g, ' ').slice(0, 80) || 'Project folder';
+}
+
+// ---------------- Session snapshot + crash recovery -----------------
+let sessionSnapshotTimer: ReturnType<typeof setTimeout> | null = null;
+function scheduleSessionSnapshot() {
+  if (sessionSnapshotTimer) clearTimeout(sessionSnapshotTimer);
+  sessionSnapshotTimer = setTimeout(() => {
+    const snap = {
+      savedAt: Date.now(),
+      doc: editor.getDoc(),
+      currentPath,
+      pendingTitle,
+      viewMode: previewMode,
+      unifiedChatHistory,
+      model: prefs.model,
+      cleanExit: false,
+    };
+    void window.api.sessionWrite(snap);
+  }, 1500);
+}
+
+const origOnDocChange = onDocChange;
+// Replace editor onChange wrapper to also snapshot
+(editor as any).__hookedSnapshot = true;
+function snapshottingDocChange(doc: string) {
+  origOnDocChange(doc);
+  scheduleSessionSnapshot();
+}
+// Re-wire — recreate the update listener via setDoc won't help; just install a periodic ticker
+setInterval(() => {
+  if (dirty) scheduleSessionSnapshot();
+}, 5000);
+void snapshottingDocChange; // referenced to satisfy linter
+
+function showRestoreBanner(snap: any) {
+  const root = document.createElement('div');
+  root.className = 'restore-banner';
+  const preview = (snap.doc as string).slice(0, 80).replace(/\n+/g, ' • ').trim();
+  root.innerHTML = `
+    <div class="restore-banner-text">
+      <strong>${t('restore.title')}</strong>
+      <span>${preview || '(empty)'} · ${new Date(snap.savedAt).toLocaleString()}</span>
+    </div>
+    <div class="restore-banner-actions">
+      <button class="restore-yes">${t('restore.yes')}</button>
+      <button class="restore-no">${t('restore.no')}</button>
+    </div>
+  `;
+  document.body.appendChild(root);
+  root.querySelector('.restore-yes')?.addEventListener('click', () => {
+    suppressEditorChange = true;
+    editor.setDoc(snap.doc ?? '');
+    suppressEditorChange = false;
+    preview && preview.length > 0;
+    if (snap.currentPath) currentPath = snap.currentPath;
+    if (snap.pendingTitle) pendingTitle = snap.pendingTitle;
+    if (snap.viewMode) { previewMode = snap.viewMode; applyPreviewMode(); }
+    if (snap) {
+      unifiedChatHistory = restoreUnifiedThread(snap);
+      unifiedChat.restore(snap);
+      if (unifiedChatHistory.length > 0) setUnifiedChatOpen(true);
+    }
+    setTitle();
+    updateWordCount(snap.doc ?? '');
+    statusEl.textContent = '복구됨 — 이전 세션이 로드되었습니다.';
+    root.remove();
+  });
+  root.querySelector('.restore-no')?.addEventListener('click', () => {
+    void window.api.sessionClear();
+    root.remove();
+  });
+}
+
+void (async () => {
+  // Check for unclean previous session
+  const snap = await window.api.sessionGet();
+  if (snap && snap.cleanExit === false && (snap.doc?.length > 0 || (snap.chatHistory?.length ?? 0) > 0)) {
+    setTimeout(() => showRestoreBanner(snap), 400);
+  }
+})();
+
+void (async () => {
+  const auth = await window.api.authStatus();
+  paintAuthPill(auth);
+  // First-run nudge: if not signed in and no prefs flag yet, show modal once.
+  const NUDGE_KEY = 'notepad-ai:login-nudge-shown:v1';
+  if (!auth.signedIn && !localStorage.getItem(NUDGE_KEY)) {
+    localStorage.setItem(NUDGE_KEY, '1');
+    setTimeout(() => openLoginModal({ onAfterLogin: (a) => paintAuthPill(a) }), 600);
+  }
+})();

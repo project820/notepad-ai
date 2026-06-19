@@ -1,0 +1,128 @@
+/**
+ * Design tokens — derived from Replicate DESIGN.md (warm cream canvas
+ * + hot orange) with an explicit dark inversion. Surfaces, ink, and hairlines
+ * swap on `html[data-theme='dark']` and on `prefers-color-scheme: dark` (when
+ * no explicit preference is set). Brand orange stays constant — it's the stamp.
+ */
+
+@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+:root {
+  /* ============ Brand (stable across themes) ============ */
+  --color-primary: #ea2804;
+  --color-primary-deep: #c01f00;
+  --color-on-primary: #ffffff;
+  --color-hero-glow: #ff6a3d;
+  --color-hero-pink: #f4a8a0;
+  --color-badge-success: #2b9a66;
+  --ok: var(--color-badge-success);
+
+  /* ============ Type families ============ */
+  --font-display: 'Bricolage Grotesque', 'Geist', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-sans: 'Geist', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', Menlo, Monaco, Consolas, monospace;
+
+  --type-display-md: 600 30px/1.2 var(--font-display);
+  --type-heading-md: 600 24px/1.33 var(--font-sans);
+  --type-heading-sm: 600 20px/1.4 var(--font-sans);
+  --type-body-md: 400 16px/1.5 var(--font-sans);
+  --type-body-sm: 400 14px/1.43 var(--font-sans);
+  --type-button-md: 600 16px/1 var(--font-sans);
+  --type-button-sm: 600 14px/1 var(--font-sans);
+  --type-caption: 400 12px/1.33 var(--font-sans);
+  --type-caption-tight: 600 14px/1.43 var(--font-sans);
+  --type-code-md: 400 14px/1.43 var(--font-mono);
+  --type-code-sm: 400 11px/1.5 var(--font-mono);
+
+  /* ============ Radii ============ */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 16px;
+  --r-full: 9999px;
+
+  /* ============ Spacing ============ */
+  --sp-xs: 4px;
+  --sp-sm: 8px;
+  --sp-md: 12px;
+  --sp-lg: 16px;
+  --sp-xl: 24px;
+  --sp-xxl: 32px;
+
+  /* ============ LIGHT (default surfaces & ink) ============
+   * Replicate cream canvas + ink-on-cream — the editorial baseline.
+   */
+  --color-canvas: #f9f7f3;
+  --color-surface-bone: #f3f0e8;
+  --color-surface-card: #ffffff;
+  --color-surface-dark: #202020;
+  --color-surface-deep: #000000;
+  --color-ink: #202020;
+  --color-body: #3a3a3a;
+  --color-charcoal: #575757;
+  --color-mute: #646464;
+  --color-ash: #8d8d8d;
+  --color-stone: #bbbbbb;
+  --color-on-dark: #fcfcfc;
+  --color-on-dark-mute: rgba(252, 252, 252, 0.72);
+  --color-hairline: rgba(32, 32, 32, 0.12);
+  --color-hairline-strong: #202020;
+  --color-divider-dark: rgba(255, 255, 255, 0.2);
+  --color-link: var(--color-primary);
+}
+
+/* ============ DARK — system preference (no explicit override) ============ */
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme='light']) {
+    --color-canvas: #1a1714;
+    --color-surface-bone: #221d18;
+    --color-surface-card: #2a2520;
+    --color-surface-dark: #0a0907;
+    --color-surface-deep: #000000;
+    --color-ink: #f5efe5;
+    --color-body: #d5cdc0;
+    --color-charcoal: #b8b0a5;
+    --color-mute: #9a8f80;
+    --color-ash: #7a7065;
+    --color-stone: #5f574d;
+    --color-hairline: rgba(245, 239, 229, 0.12);
+    --color-hairline-strong: rgba(245, 239, 229, 0.55);
+    --color-link: var(--color-hero-glow);
+  }
+}
+
+/* ============ Explicit DARK override (always dark, ignore system) ============ */
+html[data-theme='dark'] {
+  --color-canvas: #1a1714;
+  --color-surface-bone: #221d18;
+  --color-surface-card: #2a2520;
+  --color-surface-dark: #0a0907;
+  --color-surface-deep: #000000;
+  --color-ink: #f5efe5;
+  --color-body: #d5cdc0;
+  --color-charcoal: #b8b0a5;
+  --color-mute: #9a8f80;
+  --color-ash: #7a7065;
+  --color-stone: #5f574d;
+  --color-hairline: rgba(245, 239, 229, 0.12);
+  --color-hairline-strong: rgba(245, 239, 229, 0.55);
+  --color-link: var(--color-hero-glow);
+  color-scheme: dark;
+}
+
+/* ============ Explicit LIGHT override ============ */
+html[data-theme='light'] {
+  --color-canvas: #f9f7f3;
+  --color-surface-bone: #f3f0e8;
+  --color-surface-card: #ffffff;
+  --color-ink: #202020;
+  --color-body: #3a3a3a;
+  --color-charcoal: #575757;
+  --color-mute: #646464;
+  --color-ash: #8d8d8d;
+  --color-stone: #bbbbbb;
+  --color-hairline: rgba(32, 32, 32, 0.12);
+  --color-hairline-strong: #202020;
+  --color-link: var(--color-primary);
+  color-scheme: light;
+}

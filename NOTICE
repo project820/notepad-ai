@@ -1,0 +1,20 @@
+Notepad AI
+==========
+
+This product includes work derived from third-party open-source projects.
+
+im-not-ai (Humanize KR)
+-----------------------
+- Source: https://github.com/epoko77-ai/im-not-ai
+- License: MIT
+
+Notepad AI's always-on Korean "AI-tell removal" style layer re-expresses the
+AI-tell taxonomy and rewriting playbook concepts from the im-not-ai project as
+static TypeScript prompt/rule data (see src/renderer/humanize-taxonomy.ts and
+src/renderer/humanize-engine.ts). No source code from im-not-ai is copied
+verbatim; the categories and corrective directives are an independent
+re-expression of the project's documented taxonomy, used under the MIT license
+with attribution.
+
+The English-language humanization taxonomy is an original, minimal, and
+explicitly experimental addition by Notepad AI (im-not-ai is Korean-only).
