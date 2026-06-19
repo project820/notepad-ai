@@ -32,7 +32,7 @@ function orientationLine(orientation: Orientation): string {
 
 function layoutLine(layout: LayoutKind): string {
   return layout === 'slides'
-    ? 'Layout: SLIDES — a deck of discrete full-viewport slide sections (PPT style); one idea per slide, each sized to fill one screen.'
+    ? 'Layout: SLIDES — a real on-screen presentation DECK, not a scrolling page. Exactly ONE slide fills the viewport at a time and every other slide is hidden; the page body itself MUST NOT scroll. You MUST implement slide navigation (see SLIDE NAVIGATION).'
     : 'Layout: SCROLL — a single continuously scrolling page with clear section rhythm.';
 }
 
@@ -80,6 +80,18 @@ export function buildHtmlExportPrompt(args: {
     layoutLine(args.layout),
     'Honor the chosen orientation and layout together (e.g. horizontal + slides = a landscape slide deck; vertical + scroll = a tall scrolling page).',
   ];
+
+  if (args.layout === 'slides') {
+    lines.push(
+      '',
+      'SLIDE NAVIGATION — REQUIRED for the slide deck:',
+      '- Wrap each slide in `<section class="slide">`; show only the active slide (e.g. `.slide{display:none} .slide.active{display:flex}`) and never let the page scroll (`html,body{height:100%;overflow:hidden;margin:0}`).',
+      '- Each slide fills the viewport and matches the chosen orientation aspect; condense or scale long content to fit one screen instead of overflowing.',
+      '- Include ONE small inline `<script>` (no remote libraries) that advances slides: ArrowRight / ArrowDown / PageDown / Space / Enter / left-click → next; ArrowLeft / ArrowUp / PageUp → previous; Home → first; End → last; clamp at both ends.',
+      '- Add discreet on-screen prev/next controls and a "current / total" slide counter styled to match the design.',
+      '- Mark the first slide active on load.',
+    );
+  }
 
   if (tone) {
     lines.push('', `TONE / STYLE: ${tone}`);

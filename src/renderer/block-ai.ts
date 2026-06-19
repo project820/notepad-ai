@@ -177,16 +177,22 @@ export function installBlockAi(deps: BlockAiDeps) {
     if (e.key === 'Escape' && popup) closePopup();
   });
 
-  window.addEventListener('resize', () => {
-    if (!active) return;
+  const repositionPill = () => {
+    if (!active || popup) return;
+    if (pill.style.display === 'none') return;
     if (active.kind === 'editor') {
       const coords = deps.view.coordsAtPos(active.to);
       if (coords) positionPill({ right: coords.right, bottom: coords.bottom });
+      else hidePill();
     } else {
       const rect = active.range.getBoundingClientRect();
-      positionPill({ right: rect.right, bottom: rect.bottom });
+      if (rect && (rect.width || rect.height)) positionPill({ right: rect.right, bottom: rect.bottom });
+      else hidePill();
     }
-  });
+  };
+  window.addEventListener('resize', repositionPill);
+  // Keep the pill anchored to the selection while the editor/preview scrolls.
+  document.addEventListener('scroll', repositionPill, true);
 
   // ===== Popup =====
 

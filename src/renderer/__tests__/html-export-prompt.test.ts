@@ -26,6 +26,18 @@ describe('buildHtmlExportPrompt', () => {
     expect(promptDoc).toContain('# Hello');
   });
 
+  it('requires real slide-deck navigation for the slides layout', () => {
+    const { promptDoc } = buildHtmlExportPrompt({ markdown: '# A', orientation: 'horizontal', layout: 'slides' });
+    expect(promptDoc).toContain('SLIDE NAVIGATION');
+    expect(promptDoc).toContain('ArrowRight');
+    expect(promptDoc).toContain('MUST NOT scroll');
+    expect(promptDoc).toContain('.slide.active');
+  });
+
+  it('does not inject slide navigation for the scroll layout', () => {
+    const { promptDoc } = buildHtmlExportPrompt({ markdown: '# A', orientation: 'vertical', layout: 'scroll' });
+    expect(promptDoc).not.toContain('SLIDE NAVIGATION');
+  });
   it('omits the tone and design sections when not provided', () => {
     const { promptDoc } = buildHtmlExportPrompt({ markdown: '# Hi', orientation: 'vertical', layout: 'scroll' });
     expect(promptDoc).toContain('VERTICAL');

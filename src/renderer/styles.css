@@ -198,7 +198,7 @@ body.app-tooltips-on [data-tooltip]::after {
   position: fixed;
   z-index: 400;
   background: var(--color-ink);
-  color: var(--color-on-dark);
+  color: var(--color-canvas);
   padding: 4px 10px;
   border-radius: var(--r-xs);
   white-space: nowrap;
@@ -2207,8 +2207,14 @@ body.sc-open .bottom-chat-host { right: calc(min(420px, 50vw) + 24px); }
   border: none;
   color: var(--color-mute);
   cursor: pointer;
-  padding: 4px;
+  padding: 0;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 6px;
+  flex: none;
 }
 .settings-modal-close:hover { background: var(--color-surface-bone); color: var(--color-ink); }
 .settings-modal-body { padding: 16px 18px; overflow-y: auto; display: flex; flex-direction: column; gap: 22px; }
