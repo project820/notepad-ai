@@ -3,7 +3,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createToolbar, type ToolbarHandlers } from '../toolbar';
 import { createPreview } from '../preview';
 import { loadPrefs, savePrefs, migratePrefs } from '../prefs';
-import { t } from '../i18n';
+import { t, setLocale } from '../i18n';
 
 function stubHandlers(over: Partial<ToolbarHandlers> = {}): ToolbarHandlers {
   return {
@@ -131,5 +131,65 @@ describe('prefs.previewLineNumbers persistence (AC8)', () => {
     p.previewLineNumbers = true;
     savePrefs(p);
     expect(loadPrefs().previewLineNumbers).toBe(true);
+  });
+});
+
+describe('toolbar #G005 — raw line-alignment toggle', () => {
+  it('reflects the current state in aria-pressed and flips it on click', () => {
+    let on = false;
+    const onToggleRawLineAlign = vi.fn(() => {
+      on = !on;
+    });
+    const { host } = mountToolbar({ onToggleRawLineAlign, getRawLineAlign: () => on });
+    const btn = host.querySelector<HTMLButtonElement>('#tb-raw-line-align')!;
+    expect(btn).not.toBeNull();
+    expect(btn.getAttribute('aria-pressed')).toBe('false');
+    expect(btn.getAttribute('data-tooltip')).toBe(t('tip.rawLineAlign'));
+
+    btn.click();
+    expect(onToggleRawLineAlign).toHaveBeenCalledTimes(1);
+    expect(on).toBe(true);
+    expect(btn.getAttribute('aria-pressed')).toBe('true');
+
+    btn.click();
+    expect(on).toBe(false);
+    expect(btn.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('renders aria-pressed=true when the pref is already on', () => {
+    const { host } = mountToolbar({ getRawLineAlign: () => true });
+    expect(host.querySelector('#tb-raw-line-align')!.getAttribute('aria-pressed')).toBe('true');
+  });
+});
+
+describe('prefs.rawLineAlign persistence (#G005)', () => {
+  it('defaults to false', () => {
+    expect(migratePrefs(null).rawLineAlign).toBe(false);
+  });
+
+  it('round-trips through save/load', () => {
+    const p = migratePrefs(null);
+    p.rawLineAlign = true;
+    savePrefs(p);
+    expect(loadPrefs().rawLineAlign).toBe(true);
+  });
+});
+
+describe('i18n — raw line alignment keys (#G005)', () => {
+  afterEach(() => setLocale('en'));
+
+  it('exposes menu.rawLineAlign + tip.rawLineAlign in all five locales', () => {
+    const expected: Record<string, { menu: string; tip: string }> = {
+      en: { menu: 'Raw line alignment', tip: 'Align raw lines with preview' },
+      ko: { menu: '원본 줄맞춤', tip: '원본을 미리보기에 줄맞춤' },
+      'zh-Hans': { menu: '原文行对齐', tip: '将原文行与预览对齐' },
+      'zh-Hant': { menu: '原文行對齊', tip: '將原文行與預覽對齊' },
+      ja: { menu: '原文行の整列', tip: '原文をプレビューに整列' },
+    };
+    for (const [loc, v] of Object.entries(expected)) {
+      setLocale(loc as never);
+      expect(t('menu.rawLineAlign'), `menu @ ${loc}`).toBe(v.menu);
+      expect(t('tip.rawLineAlign'), `tip @ ${loc}`).toBe(v.tip);
+    }
   });
 });

@@ -2457,3 +2457,43 @@ body.sc-open .bottom-chat-host { right: calc(min(420px, 50vw) + 24px); }
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
   pointer-events: none;
 }
+/* =============================================================
+ * Selection sync (G004) — cross-pane highlight, display-only.
+ * A subtle brand-orange wash links the editor selection to the
+ * matching preview blocks and back. These are CSS classes only:
+ * Turndown ignores element classes, so the highlight never enters
+ * the saved markdown. Kept low-contrast per DESIGN.md (the orange
+ * is a "stamp", not a notification).
+ * ============================================================= */
+.cm-sync-highlight {
+  background: color-mix(in srgb, var(--color-primary) 8%, transparent);
+}
+.preview-sync-highlight {
+  background: color-mix(in srgb, var(--color-primary) 8%, transparent);
+  border-radius: var(--r-xs);
+}
+
+/* Dark surfaces need a touch more opacity to read as the same gentle wash. */
+html[data-theme='dark'] .cm-sync-highlight,
+html[data-theme='dark'] .preview-sync-highlight {
+  background: color-mix(in srgb, var(--color-primary) 15%, transparent);
+}
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme='light']) .cm-sync-highlight,
+  html:not([data-theme='light']) .preview-sync-highlight {
+    background: color-mix(in srgb, var(--color-primary) 15%, transparent);
+  }
+}
+/* =============================================================
+ * Raw line alignment (G005) — split-view spacers, display-only.
+ * Block widgets injected into the raw editor to push source lines
+ * down so they sit level with the matching rendered preview blocks.
+ * Pure vertical filler: no text, no border, never selectable, and
+ * never part of the document (so it can't leak into the saved MD).
+ * ============================================================= */
+.cm-line-align-spacer {
+  display: block;
+  width: 100%;
+  pointer-events: none;
+  user-select: none;
+}

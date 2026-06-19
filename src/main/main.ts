@@ -7,7 +7,19 @@ import { startLogin, cancelLogin, getStatus, logout, type LoginUpdate } from './
 import type { ChatTurn } from './codex-client';
 import { getRegistry } from './ai/provider-registry';
 import { isAiProviderId, type AiProviderId } from './ai/types';
-import { readSession, writeSession, markCleanExit, clearSession, type SessionSnapshot } from './session-store';
+import { readSessionV2, writeSessionV2 } from './session-store';
+import {
+  upsertWindowSnapshot,
+  removeWindowSnapshot,
+  type SessionWindowSnapshot,
+} from './session-schema';
+import {
+  createWindowRegistry,
+  flushPendingOutbound,
+  sendWhenReady,
+  type OutboundSink,
+  type WindowRecord,
+} from './window-registry';
 import { isPromptAssemblyEnabled } from './prompts/toggle';
 import { readSystemlaw } from './prompts/read-systemlaw';
 import { readOwner } from './prompts/read-owner';
@@ -31,7 +43,43 @@ const APP_DISPLAY_NAME = 'Notepad AI';
 const APP_STORAGE_NAME = 'notepad-ai';
 const isDev = process.env.NODE_ENV === 'development';
 
-let mainWindow: BrowserWindow | null = null;
+// ---------- Multi-window runtime (G002) ----------
+// `main` owns the registry of live windows, IPC routing, file-path ownership,
+// and the session aggregate; each window's renderer owns its own document state.
+const registry = createWindowRegistry();
+let appIsReady = false;
+/** The blank window created on a normal launch; the first macOS open-file may reuse it. */
+let launchWindowId: number | null = null;
+
+/** Resolve a live `BrowserWindow` from a registry record (null when gone/destroyed). */
+function windowFromRecord(rec: WindowRecord | null): BrowserWindow | null {
+  if (!rec) return null;
+  const win = BrowserWindow.fromId(rec.windowId);
+  return win && !win.isDestroyed() ? win : null;
+}
+
+/** Build a sink that delivers main→renderer messages to a specific live window. */
+function sinkFor(win: BrowserWindow): OutboundSink {
+  return (channel, payload) => {
+    if (!win.isDestroyed()) win.webContents.send(channel, payload);
+  };
+}
+
+/** The focused / last-focused live window's webContents, for menu-driven actions. */
+function focusedWebContents(): Electron.WebContents | null {
+  const win = windowFromRecord(registry.focusedOrLast());
+  return win ? win.webContents : null;
+}
+
+/** Route a menu action to the focused / last-focused live window. */
+function sendToFocused(channel: string): void {
+  focusedWebContents()?.send(channel);
+}
+
+/** Generate a fresh, stable per-window session key for brand-new windows. */
+function nextWindowKey(): string {
+  return `w-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
 
 function resolveAppIconPath(): string | undefined {
   const iconPath = path.resolve(__dirname, '../../build/icon.png');
@@ -57,18 +105,57 @@ const pendingOpenFiles: string[] = [];
 
 app.on('open-file', (event, filePath) => {
   event.preventDefault();
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    void openFilePath(filePath);
-  } else {
+  if (!appIsReady) {
     pendingOpenFiles.push(filePath);
+    return;
   }
+  void openFileInWindow(filePath, { reuseBlank: true });
 });
 
 function flushPendingOpenFiles() {
-  for (const filePath of pendingOpenFiles.splice(0)) void openFilePath(filePath);
+  for (const filePath of pendingOpenFiles.splice(0)) {
+    void openFileInWindow(filePath, { reuseBlank: true });
+  }
 }
 
-async function createWindow() {
+/** A blank launch window the first OS open-file may reuse (avoids an extra empty window). */
+function findReusableBlankWindow(): BrowserWindow | null {
+  if (launchWindowId == null) return null;
+  const rec = registry.get(launchWindowId);
+  if (!rec || rec.currentPath != null) return null;
+  // Never reuse a window that holds unsaved content (would silently overwrite it).
+  const snap = rec.lastSnapshot;
+  if (snap && (snap.dirty || (snap.doc?.length ?? 0) > 0)) return null;
+  return windowFromRecord(rec);
+}
+
+/**
+ * Open `filePath` honoring duplicate-path ownership. If another window already
+ * owns the file, focus it instead of opening a second writer; otherwise reuse a
+ * blank launch window when allowed, else create a new window for the file.
+ */
+async function openFileInWindow(filePath: string, opts: { reuseBlank: boolean }): Promise<void> {
+  const owner = registry.ownerOfPath(filePath);
+  if (owner) {
+    windowFromRecord(owner)?.focus();
+    console.log(`[file] duplicate-path open focus owner=${owner.windowId} path=${filePath}`);
+    return;
+  }
+  if (opts.reuseBlank) {
+    const blank = findReusableBlankWindow();
+    if (blank) {
+      launchWindowId = null;
+      await openFilePath(filePath, blank);
+      return;
+    }
+  }
+  await createWindow({ openFilePath: filePath });
+}
+
+async function createWindow(
+  opts: { restore?: SessionWindowSnapshot; openFilePath?: string } = {},
+): Promise<BrowserWindow> {
+  const { restore, openFilePath: filePathToOpen } = opts;
   const windowOptions: Electron.BrowserWindowConstructorOptions = {
     width: 1280,
     height: 820,
@@ -88,23 +175,44 @@ async function createWindow() {
   const iconPath = resolveAppIconPath();
   if (iconPath) windowOptions.icon = iconPath;
 
-  mainWindow = new BrowserWindow(windowOptions);
+  const win = new BrowserWindow(windowOptions);
 
-  if (isDev) {
-    await mainWindow.loadURL('http://localhost:5173');
-    mainWindow.webContents.openDevTools({ mode: 'detach' });
-  } else {
-    await mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
-  }
+  const record: WindowRecord = {
+    windowId: win.id,
+    webContentsId: win.webContents.id,
+    windowKey: restore?.id ?? nextWindowKey(),
+    currentPath: restore?.path ?? null,
+    lastFocusedAt: Date.now(),
+    ready: false,
+    pendingOutbound: [],
+    restoreSnapshot: restore,
+  };
+  registry.register(record);
+  if (restore?.path) registry.claimPath(win.id, restore.path);
 
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+  win.on('focus', () => registry.touchFocus(win.id, Date.now()));
+  win.on('closed', () => {
+    registry.unregister(win.id);
+    if (launchWindowId === win.id) launchWindowId = null;
+    console.log(`[window] closed id=${win.id}`);
+  });
+
+  win.webContents.setWindowOpenHandler(({ url }) => {
     if (isAllowedExternalUrl(url)) void shell.openExternal(url);
     return { action: 'deny' };
   });
 
-  mainWindow.on('closed', () => {
-    mainWindow = null;
-  });
+  console.log(`[window] created id=${win.id} key=${record.windowKey}${restore ? ' restore=1' : ''}`);
+
+  if (isDev) {
+    await win.loadURL('http://localhost:5173');
+    win.webContents.openDevTools({ mode: 'detach' });
+  } else {
+    await win.loadFile(path.join(__dirname, '../renderer/index.html'));
+  }
+
+  if (filePathToOpen) await openFilePath(filePathToOpen, win);
+  return win;
 }
 
 function buildMenu() {
@@ -129,7 +237,7 @@ function buildMenu() {
         {
           label: 'New',
           accelerator: 'CmdOrCtrl+N',
-          click: () => mainWindow?.webContents.send('menu:new'),
+          click: () => void createWindow(),
         },
         {
           label: 'Open…',
@@ -140,12 +248,12 @@ function buildMenu() {
         {
           label: 'Save',
           accelerator: 'CmdOrCtrl+S',
-          click: () => mainWindow?.webContents.send('menu:save'),
+          click: () => sendToFocused('menu:save'),
         },
         {
           label: 'Save As…',
           accelerator: 'Shift+CmdOrCtrl+S',
-          click: () => mainWindow?.webContents.send('menu:save-as'),
+          click: () => sendToFocused('menu:save-as'),
         },
       ],
     },
@@ -167,7 +275,7 @@ function buildMenu() {
         {
           label: 'Toggle Preview',
           accelerator: 'CmdOrCtrl+P',
-          click: () => mainWindow?.webContents.send('menu:toggle-preview'),
+          click: () => sendToFocused('menu:toggle-preview'),
         },
         { type: 'separator' },
         { role: 'reload' },
@@ -323,8 +431,8 @@ function blocksToCleanMarkdown(blocks: KordocBlock[]): string {
 }
 
 async function handleOpen() {
-  if (!mainWindow) return;
-  const result = await dialog.showOpenDialog(mainWindow, {
+  const parent = windowFromRecord(registry.focusedOrLast());
+  const dialogOpts: Electron.OpenDialogOptions = {
     properties: ['openFile'],
     filters: [
       { name: 'Documents', extensions: ['md', 'markdown', 'mdx', 'txt', 'hwp', 'hwpx', 'hwpml', 'docx', 'pdf', 'xlsx', 'xls'] },
@@ -333,17 +441,29 @@ async function handleOpen() {
       { name: 'Text', extensions: ['txt'] },
       { name: 'All Files', extensions: ['*'] },
     ],
-  });
+  };
+  const result = parent
+    ? await dialog.showOpenDialog(parent, dialogOpts)
+    : await dialog.showOpenDialog(dialogOpts);
   if (result.canceled || result.filePaths.length === 0) return;
-  await openFilePath(result.filePaths[0]);
+  // File>Open always opens in a new window (duplicate paths focus the owner).
+  await openFileInWindow(result.filePaths[0], { reuseBlank: false });
 }
 
-async function openFilePath(filePath: string) {
-  if (!mainWindow) return;
+async function openFilePath(filePath: string, win: BrowserWindow): Promise<void> {
+  if (win.isDestroyed()) return;
+  const rec = registry.getByWebContents(win.webContents.id);
+  const sink = sinkFor(win);
+  // Gate every payload on renderer readiness so a freshly created window never
+  // drops `file:opened` (which would leave it blank); queued payloads flush in order.
+  const send = (channel: string, payload: unknown) => {
+    if (rec) sendWhenReady(rec, channel, payload, sink);
+    else sink(channel, payload);
+  };
   const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
   if (CONVERTIBLE_EXTS.has(ext)) {
     console.log(`[kordoc] converting ${ext.toUpperCase()}: ${filePath}`);
-    mainWindow.webContents.send('file:opened', {
+    send('file:opened', {
       filePath: null,
       content: '',
       // Status-only — used to display a progress hint while parsing.
@@ -386,15 +506,16 @@ async function openFilePath(filePath: string) {
           }
         }
         const baseName = filePath.replace(/\.[^/.]+$/, '.md');
-        mainWindow.webContents.send('file:opened', {
+        send('file:opened', {
           filePath: baseName,
           content: r.markdown,           // fallback raw markdown
           html,                          // preferred — renderer will turndown this
           converted: { from: ext.toUpperCase(), originalPath: filePath },
         });
+        if (rec) registry.claimPath(rec.windowId, baseName);
       } else {
         const msg = ('error' in r && (r as any).error?.message) ?? 'unknown error';
-        mainWindow.webContents.send('file:opened', {
+        send('file:opened', {
           filePath: null,
           content: '',
           error: `Could not convert ${ext.toUpperCase()}: ${msg}`,
@@ -402,7 +523,7 @@ async function openFilePath(filePath: string) {
       }
     } catch (e: any) {
       console.error('[kordoc] threw:', e);
-      mainWindow.webContents.send('file:opened', {
+      send('file:opened', {
         filePath: null,
         content: '',
         error: `Failed to convert ${ext.toUpperCase()}: ${e?.message ?? e}`,
@@ -411,22 +532,38 @@ async function openFilePath(filePath: string) {
     return;
   }
   const content = await fs.readFile(filePath, 'utf-8');
-  mainWindow.webContents.send('file:opened', { filePath, content });
+  send('file:opened', { filePath, content });
+  if (rec) registry.claimPath(rec.windowId, filePath);
 }
 
-ipcMain.handle('file:save', async (_event, args: { filePath: string | null; content: string }) => {
+ipcMain.handle('file:save', async (event, args: { filePath: string | null; content: string }) => {
+  const rec = registry.getByWebContents(event.sender.id);
+  const win = windowFromRecord(rec);
   let target = args.filePath;
   if (!target) {
-    if (!mainWindow) return { saved: false };
-    const result = await dialog.showSaveDialog(mainWindow, {
+    if (!win) return { saved: false as const };
+    const result = await dialog.showSaveDialog(win, {
       filters: [{ name: 'Markdown', extensions: ['md'] }],
       defaultPath: 'untitled.md',
     });
-    if (result.canceled || !result.filePath) return { saved: false };
+    if (result.canceled || !result.filePath) return { saved: false as const };
     target = result.filePath;
   }
+  // Duplicate-path guard: another live window owns this path → block + focus the
+  // owner, never silently overwrite (the requesting window stays dirty).
+  if (rec) {
+    const decision = registry.resolvePathClaim(rec.windowId, target);
+    if (decision.kind === 'focus-owner') {
+      windowFromRecord(registry.get(decision.ownerWindowId))?.focus();
+      console.log(
+        `[file] duplicate-path blocked path=${target} owner=${decision.ownerWindowId} requester=${rec.windowId} focusOwner=true`,
+      );
+      return { saved: false as const, error: 'already-open' as const, ownerWindowId: decision.ownerWindowId };
+    }
+  }
   await fs.writeFile(target, args.content, 'utf-8');
-  return { saved: true, filePath: target };
+  if (rec) registry.claimPath(rec.windowId, target);
+  return { saved: true as const, filePath: target };
 });
 
 ipcMain.handle('file:open-path', async (_event, filePath: string) => {
@@ -473,6 +610,10 @@ ipcMain.handle('auth:delete-provider-key', async (_e, provider: AiProviderId) =>
 // ---------- AI Chat IPC (streaming) ----------
 
 const activeChats = new Map<string, AbortController>();
+/** Scope chat ids by sender so cancelling in one window can't abort another window's stream. */
+function chatKey(webContentsId: number, id: string): string {
+  return `${webContentsId}:${id}`;
+}
 
 ipcMain.handle(
   'ai:chat',
@@ -487,8 +628,9 @@ ipcMain.handle(
     },
   ) => {
     const controller = new AbortController();
-    activeChats.set(payload.id, controller);
     const sender = event.sender;
+    const key = chatKey(sender.id, payload.id);
+    activeChats.set(key, controller);
     const model =
       typeof payload.model === 'string'
         ? { provider: 'chatgpt' as AiProviderId, id: payload.model }
@@ -507,14 +649,15 @@ ipcMain.handle(
         (e) => sender.send(`ai:chat:${payload.id}`, e),
       );
     } finally {
-      activeChats.delete(payload.id);
+      activeChats.delete(key);
     }
   },
 );
 
-ipcMain.handle('ai:cancel', async (_e, id: string) => {
-  activeChats.get(id)?.abort();
-  activeChats.delete(id);
+ipcMain.handle('ai:cancel', async (event, id: string) => {
+  const key = chatKey(event.sender.id, id);
+  activeChats.get(key)?.abort();
+  activeChats.delete(key);
 });
 
 ipcMain.handle('ai:models', async () => getRegistry().getAvailableModels());
@@ -589,9 +732,63 @@ ipcMain.handle('prompt:assembly-context', async () => {
 
 // ---------- Session snapshot IPC ----------
 
-ipcMain.handle('session:get', async () => readSession());
-ipcMain.handle('session:write', async (_e, snap: SessionSnapshot) => writeSession(snap));
-ipcMain.handle('session:clear', async () => clearSession());
+/** Normalize a renderer-sent session payload into a v2 window snapshot (main owns the id). */
+function toWindowSnapshot(id: string, raw: unknown): SessionWindowSnapshot {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  const view =
+    r.view === 'split' || r.view === 'editor-only' || r.view === 'preview-only' ? r.view : undefined;
+  const win: SessionWindowSnapshot = {
+    id,
+    path: typeof r.path === 'string' ? r.path : null,
+    title: typeof r.title === 'string' ? r.title : null,
+    doc: typeof r.doc === 'string' ? r.doc : '',
+  };
+  if (typeof r.savedAt === 'number') win.savedAt = r.savedAt;
+  if (typeof r.splitRatio === 'number') win.splitRatio = r.splitRatio;
+  if (view) win.view = view;
+  if (Array.isArray(r.unifiedChatHistory)) {
+    win.unifiedChatHistory = r.unifiedChatHistory as SessionWindowSnapshot['unifiedChatHistory'];
+  }
+  if (Array.isArray(r.chatHistory)) {
+    win.chatHistory = r.chatHistory as SessionWindowSnapshot['chatHistory'];
+  }
+  if (typeof r.model === 'string') win.model = r.model;
+  if (typeof r.dirty === 'boolean') win.dirty = r.dirty;
+  return win;
+}
+
+// Session IPC is sender-scoped: each window reads/writes/clears only its own
+// entry in the v2 aggregate. Main owns the per-window key (renderer never sees it).
+ipcMain.handle('session:get', async (event) => {
+  const rec = registry.getByWebContents(event.sender.id);
+  return { snapshot: rec?.restoreSnapshot ?? null };
+});
+
+ipcMain.handle('session:write', async (event, snap: unknown) => {
+  const rec = registry.getByWebContents(event.sender.id);
+  if (!rec) return;
+  const win = toWindowSnapshot(rec.windowKey, snap);
+  rec.lastSnapshot = win; // track content/dirty so a blank launch window is reused safely
+  const next = upsertWindowSnapshot(await readSessionV2(), win);
+  await writeSessionV2({ ...next, cleanExit: false });
+  console.log(`[session] write key=${rec.windowKey} windows=${next.windows.length}`);
+});
+
+ipcMain.handle('session:clear', async (event) => {
+  const rec = registry.getByWebContents(event.sender.id);
+  if (!rec) return;
+  await writeSessionV2(removeWindowSnapshot(await readSessionV2(), rec.windowKey));
+});
+
+// New windows must not receive `file:opened` before the renderer is ready, or the
+// payload is dropped and the window renders blank. Flush the per-window queue here.
+ipcMain.on('window:ready', (event) => {
+  const rec = registry.markReady(event.sender.id);
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!rec || !win) return;
+  const flushed = flushPendingOutbound(rec, sinkFor(win));
+  console.log(`[window] ready id=${rec.windowId} flushed=${flushed}`);
+});
 
 ipcMain.handle('update:check', async () => checkForUpdate(app.getVersion()));
 ipcMain.handle('app:version', () => app.getVersion());
@@ -686,9 +883,10 @@ function htmlSaveFileName(name: unknown): string {
   return /\.html?$/i.test(base) ? base : `${base}.html`;
 }
 
-ipcMain.handle('html:save', async (_e, args: { html?: string; defaultName?: string }) => {
-  if (!mainWindow || typeof args?.html !== 'string') return { saved: false as const };
-  const result = await dialog.showSaveDialog(mainWindow, {
+ipcMain.handle('html:save', async (event, args: { html?: string; defaultName?: string }) => {
+  const win = windowFromRecord(registry.getByWebContents(event.sender.id));
+  if (!win || typeof args?.html !== 'string') return { saved: false as const };
+  const result = await dialog.showSaveDialog(win, {
     filters: [{ name: 'HTML', extensions: ['html'] }],
     defaultPath: htmlSaveFileName(args.defaultName),
   });
@@ -714,9 +912,15 @@ ipcMain.handle('html:open-saved', async (_e, filePath: unknown) => {
 });
 
 app.on('before-quit', () => {
-  // Best-effort: mark current snapshot as clean exit
-  void markCleanExit();
+  // Mark the aggregate as a clean exit so the next launch starts fresh (no restore).
+  void markCleanExitV2();
 });
+
+/** Mark the v2 aggregate as a clean exit so the next launch does not offer restore. */
+async function markCleanExitV2(): Promise<void> {
+  const agg = await readSessionV2();
+  await writeSessionV2({ ...agg, cleanExit: true });
+}
 
 app.whenReady().then(async () => {
   const iconPath = resolveAppIconPath();
@@ -725,16 +929,49 @@ app.whenReady().then(async () => {
   }
 
   buildMenu();
-  await createWindow();
+  appIsReady = true;
 
-  // Replay any Finder "Open With" / double-click paths that arrived before the
-  // window existed (⑥ os-integration).
-  flushPendingOpenFiles();
+  // Recreate windows from an unclean previous exit (v2 aggregate); a clean exit
+  // resets the aggregate and returns false so we open a single fresh window.
+  const restored = await restorePreviousWindows();
+
+  if (pendingOpenFiles.length > 0) {
+    // Finder "Open With" / double-click paths queued before readiness: one window per file.
+    flushPendingOpenFiles();
+  } else if (!restored) {
+    const win = await createWindow();
+    launchWindowId = win.id;
+  }
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (registry.all().length === 0) {
+      void createWindow().then((win) => {
+        launchWindowId = win.id;
+      });
+    }
   });
 });
+
+/**
+ * On an unclean previous exit, recreate one window per persisted non-empty window
+ * so a crash never loses the multi-window set (each renderer offers its own
+ * restore). On a clean exit, reset the aggregate so stale windows never resurrect.
+ * Returns true when at least one window was recreated.
+ */
+async function restorePreviousWindows(): Promise<boolean> {
+  const prev = await readSessionV2();
+  if (prev.cleanExit === true) {
+    await writeSessionV2({ version: 2, windows: [], cleanExit: false });
+    return false;
+  }
+  const candidates = prev.windows.filter(
+    (w) => (w.doc?.length ?? 0) > 0 || (w.unifiedChatHistory?.length ?? 0) > 0,
+  );
+  if (candidates.length === 0) return false;
+  for (const snap of candidates) await createWindow({ restore: snap });
+  console.log(`[session] restored windows=${candidates.length}`);
+  return true;
+}
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();

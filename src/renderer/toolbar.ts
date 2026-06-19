@@ -30,6 +30,10 @@ export type ToolbarHandlers = {
   onTogglePreviewLines?: () => void;
   /** Current preview line-number state (drives aria-pressed). */
   getPreviewLines?: () => boolean;
+  /** Toggle raw line alignment (split-view spacers that line the editor up with the preview). */
+  onToggleRawLineAlign?: () => void;
+  /** Current raw line-alignment state (drives aria-pressed). */
+  getRawLineAlign?: () => boolean;
 };
 
 // ---- SVG glyphs (no emoji) ----
@@ -60,6 +64,7 @@ export const ICONS = {
   outline: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="12" height="10" rx="2"/><line x1="6" y1="3.5" x2="6" y2="12.5"/></svg>`,
   footnote: `<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><text x="1.5" y="12" font-family="-apple-system,sans-serif" font-weight="700" font-size="9.5" fill="currentColor">A</text><text x="9" y="6.6" font-family="-apple-system,sans-serif" font-weight="700" font-size="5.5" fill="currentColor">1</text></svg>`,
   lineNumbers: `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><text x="0.4" y="5.4" font-family="monospace" font-size="4" fill="currentColor" stroke="none">1</text><text x="0.4" y="9.6" font-family="monospace" font-size="4" fill="currentColor" stroke="none">2</text><text x="0.4" y="13.8" font-family="monospace" font-size="4" fill="currentColor" stroke="none">3</text><line x1="5" y1="2.5" x2="5" y2="13.5"/><line x1="7" y1="4" x2="13.5" y2="4"/><line x1="7" y1="8" x2="13.5" y2="8"/><line x1="7" y1="12" x2="13.5" y2="12"/></svg>`,
+  lineAlign: `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><line x1="2" y1="3.5" x2="6" y2="3.5"/><line x1="10" y1="3.5" x2="14" y2="3.5"/><line x1="2" y1="8" x2="6" y2="8"/><line x1="10" y1="8" x2="14" y2="8"/><line x1="2" y1="12.5" x2="6" y2="12.5"/><line x1="10" y1="12.5" x2="14" y2="12.5"/><line x1="8" y1="2" x2="8" y2="14" stroke-dasharray="1.6 1.6"/></svg>`,
 } as const;
 
 type ButtonSpec =
@@ -112,6 +117,9 @@ export function createToolbar(parent: HTMLElement, h: ToolbarHandlers) {
           <button class="tb-icbtn" id="tb-preview-lines" data-tooltip="${t('tip.previewLines')}" aria-label="${t('tip.previewLines')}" aria-pressed="${h.getPreviewLines?.() ? 'true' : 'false'}">
             ${ICONS.lineNumbers}
           </button>
+          <button class="tb-icbtn" id="tb-raw-line-align" data-tooltip="${t('tip.rawLineAlign')}" aria-label="${t('tip.rawLineAlign')}" aria-pressed="${h.getRawLineAlign?.() ? 'true' : 'false'}">
+            ${ICONS.lineAlign}
+          </button>
           <button class="tb-icbtn" id="tb-toggle-preview" data-tooltip="${t('tip.view')}" aria-label="${t('tip.view')}">
             ${ICONS.eye}
           </button>
@@ -140,6 +148,11 @@ export function createToolbar(parent: HTMLElement, h: ToolbarHandlers) {
     previewLinesBtn?.addEventListener('click', () => {
       h.onTogglePreviewLines?.();
       previewLinesBtn.setAttribute('aria-pressed', h.getPreviewLines?.() ? 'true' : 'false');
+    });
+    const rawLineAlignBtn = parent.querySelector<HTMLButtonElement>('#tb-raw-line-align');
+    rawLineAlignBtn?.addEventListener('click', () => {
+      h.onToggleRawLineAlign?.();
+      rawLineAlignBtn.setAttribute('aria-pressed', h.getRawLineAlign?.() ? 'true' : 'false');
     });
   }
   renderToolbar();

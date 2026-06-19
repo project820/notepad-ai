@@ -163,6 +163,8 @@ const DICTS: Record<Locale, Dict> = {
     // v0.2 — view options
     'menu.previewLines': 'Preview line numbers',
     'tip.previewLines': 'Toggle preview line numbers',
+    'menu.rawLineAlign': 'Raw line alignment',
+    'tip.rawLineAlign': 'Align raw lines with preview',
     // v0.2 — HTML export wizard
     'he.button': 'Generate HTML',
     'he.orientation.title': 'Orientation',
@@ -344,6 +346,8 @@ const DICTS: Record<Locale, Dict> = {
     // v0.2 — view options
     'menu.previewLines': '미리보기 줄 번호',
     'tip.previewLines': '미리보기 줄 번호 전환',
+    'menu.rawLineAlign': '원본 줄맞춤',
+    'tip.rawLineAlign': '원본을 미리보기에 줄맞춤',
     // v0.2 — HTML export wizard
     'he.button': 'HTML 생성',
     'he.orientation.title': '방향',
@@ -423,6 +427,7 @@ const DICTS: Record<Locale, Dict> = {
     'ctx.bold': '加粗', 'ctx.italic': '斜体', 'ctx.strike': '删除线', 'ctx.code': '代码', 'ctx.link': '链接', 'ctx.quote': '引用', 'ctx.list': '列表', 'ctx.heading': '标题', 'ctx.footnote': '脚注',
     // v0.2 — view options
     'menu.previewLines': '预览行号', 'tip.previewLines': '切换预览行号',
+    'menu.rawLineAlign': '原文行对齐', 'tip.rawLineAlign': '将原文行与预览对齐',
     // v0.2 — HTML export wizard
     'he.button': '生成 HTML',
     'he.orientation.title': '方向', 'he.orientation.vertical': '纵向', 'he.orientation.horizontal': '横向',
@@ -478,6 +483,7 @@ const DICTS: Record<Locale, Dict> = {
     'ctx.bold': '粗體', 'ctx.italic': '斜體', 'ctx.strike': '刪除線', 'ctx.code': '程式碼', 'ctx.link': '連結', 'ctx.quote': '引用', 'ctx.list': '清單', 'ctx.heading': '標題', 'ctx.footnote': '註腳',
     // v0.2 — view options
     'menu.previewLines': '預覽行號', 'tip.previewLines': '切換預覽行號',
+    'menu.rawLineAlign': '原文行對齊', 'tip.rawLineAlign': '將原文行與預覽對齊',
     // v0.2 — HTML export wizard
     'he.button': '產生 HTML',
     'he.orientation.title': '方向', 'he.orientation.vertical': '直向', 'he.orientation.horizontal': '橫向',
@@ -533,6 +539,7 @@ const DICTS: Record<Locale, Dict> = {
     'ctx.bold': '太字', 'ctx.italic': '斜体', 'ctx.strike': '取り消し線', 'ctx.code': 'コード', 'ctx.link': 'リンク', 'ctx.quote': '引用', 'ctx.list': 'リスト', 'ctx.heading': '見出し', 'ctx.footnote': '脚注',
     // v0.2 — view options
     'menu.previewLines': 'プレビュー行番号', 'tip.previewLines': 'プレビュー行番号の切替',
+    'menu.rawLineAlign': '原文行の整列', 'tip.rawLineAlign': '原文をプレビューに整列',
     // v0.2 — HTML export wizard
     'he.button': 'HTML を生成',
     'he.orientation.title': '向き', 'he.orientation.vertical': '縦型', 'he.orientation.horizontal': '横型',

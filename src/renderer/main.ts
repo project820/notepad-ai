@@ -1,5 +1,8 @@
 import { createEditor, type EditorHandle } from './editor';
 import { createPreview, type PreviewHandle } from './preview';
+import { createSelectionSync, clearPreviewHighlight } from './selection-sync';
+import { collectPreviewBlocks } from './source-preview-map';
+import { setLineSpacers, clearLineSpacers, computeLineAlignmentSpacers, MAX_SPACER_PX, type LineAlignmentBlock } from './cm-line-alignment';
 import { createToolbar, paintAccountState, type Theme, type FontSize } from './toolbar';
 import { t, getLocale, setLocale, onLocaleChange, type Locale } from './i18n';
 import { installKeyboardNav } from './keyboard-nav';
@@ -84,7 +87,8 @@ type Api = {
   onMenuSave: (cb: () => void) => void;
   onMenuSaveAs: (cb: () => void) => void;
   onTogglePreview: (cb: () => void) => void;
-  saveFile: (filePath: string | null, content: string) => Promise<{ saved: boolean; filePath?: string }>;
+  windowReady: () => void;
+  saveFile: (filePath: string | null, content: string) => Promise<{ saved: boolean; filePath?: string; error?: string; ownerWindowId?: number }>;
   authStatus: () => Promise<AuthSnapshot>;
   authLogin: () => Promise<void>;
   authCancelLogin: () => Promise<void>;
@@ -218,6 +222,10 @@ async function save() {
     dirty = false;
     setTitle();
     statusEl.textContent = `Saved • ${result.filePath}`;
+  } else if (result.error === 'already-open') {
+    // Another window owns this path; main focused it. Keep dirty + path so the
+    // user never silently loses their edit (no last-writer-wins).
+    statusEl.textContent = '⚠ 이 파일은 다른 창에서 열려 있어 저장하지 않았습니다.';
   }
 }
 
@@ -229,6 +237,8 @@ async function saveAs() {
     dirty = false;
     setTitle();
     statusEl.textContent = `Saved • ${result.filePath}`;
+  } else if (result.error === 'already-open') {
+    statusEl.textContent = '⚠ 이 파일은 다른 창에서 열려 있어 저장하지 않았습니다.';
   }
 }
 
@@ -262,6 +272,9 @@ function cyclePreviewMode() {
   // When switching into preview-only or split, the preview is the natural surface to format.
   if (previewMode === 'preview-only') activeSurface = 'preview';
   if (previewMode === 'editor-only') activeSurface = 'editor';
+  // Cross-pane selection highlight is split-only; drop it when leaving split.
+  if (previewMode !== 'split') selectionSync.clearAll();
+  scheduleLineAlign();
 }
 
 const initialDoc = '';
@@ -314,6 +327,128 @@ preview.setLineNumbers(prefs.previewLineNumbers ?? false);
 updateWordCount(initialDoc);
 applyPreviewMode();
 editor.applyTheme(resolvedDark(prefs.theme));
+
+// ----- Selection sync (G004): cross-pane highlight, split-view only -----
+// Coalesce bursts of selection events into a single per-frame update.
+function createRafThrottle(): (cb: () => void) => void {
+  let scheduled = false;
+  let latest: (() => void) | null = null;
+  return (cb) => {
+    latest = cb;
+    if (scheduled) return;
+    scheduled = true;
+    requestAnimationFrame(() => {
+      scheduled = false;
+      const fn = latest;
+      latest = null;
+      fn?.();
+    });
+  };
+}
+
+const selectionSync = createSelectionSync({
+  getPreviewRoot: () => preview.el,
+  getSourceMap: () => preview.getSourceMap(),
+  editor: {
+    setHighlightedLines: (lines) => editor.setHighlightedLines(lines),
+    clearHighlight: () => editor.clearHighlight(),
+  },
+  isActive: () => previewMode === 'split' && !showingConvertedHtml,
+  getSelection: () => window.getSelection(),
+});
+
+const editorToPreviewSync = createRafThrottle();
+editor.onSelectionChange((span) => editorToPreviewSync(() => selectionSync.syncEditorToPreview(span)));
+
+const previewToEditorSync = createRafThrottle();
+document.addEventListener('selectionchange', () => previewToEditorSync(() => selectionSync.syncPreviewToEditor()));
+
+// A preview re-render (setDoc) rebuilds the source map → existing highlights are
+// stale, so clear both directions and let the next selection recompute.
+preview.onAfterRender(() => selectionSync.clearAll());
+
+// Blur: when the editor truly loses focus, drop the preview blocks it was driving.
+editorHost.addEventListener('focusout', () => {
+  requestAnimationFrame(() => {
+    if (!editorHost.contains(document.activeElement)) clearPreviewHighlight(preview.el);
+  });
+});
+
+// ----- Raw line alignment (G005): split-view spacers, display-only -----
+// Insert vertical spacers before source lines so the raw editor's blocks line up
+// with the rendered preview blocks (built on the same G003 map A consumes). The
+// spacers are CM block widgets — never document text — so they never touch the
+// saved markdown or the undo history.
+const ALIGN_OVERSCAN_PX = 800; // measure a little past the viewport so scrolling stays aligned
+const MAX_ALIGN_SPACERS = 400; // long-document guard: cap spacers measured per pass
+
+function lineAlignActive(): boolean {
+  return (
+    (prefs.rawLineAlign ?? false) &&
+    previewMode === 'split' &&
+    !showingConvertedHtml &&
+    !editingInPreview
+  );
+}
+
+function measureLineAlignBlocks(): LineAlignmentBlock[] {
+  if (preview.getSourceMap().length === 0) return [];
+  const view = editor.view;
+  const docLines = view.state.doc.lines;
+  const vp = preview.el.getBoundingClientRect();
+  const visTop = vp.top - ALIGN_OVERSCAN_PX;
+  const visBottom = vp.bottom + ALIGN_OVERSCAN_PX;
+  const out: LineAlignmentBlock[] = [];
+  for (const block of collectPreviewBlocks(preview.el)) {
+    if (block.startLine < 1 || block.startLine > docLines) continue;
+    const rect = (block.el as HTMLElement).getBoundingClientRect();
+    if (rect.top > visBottom) break; // past the window (blocks are in document order) → stop
+    if (rect.bottom < visTop) continue; // above the visible window → skip
+    const coords = view.coordsAtPos(view.state.doc.line(block.startLine).from);
+    if (!coords) continue;
+    out.push({ line: block.startLine, previewTop: rect.top, editorTop: coords.top });
+    if (out.length >= MAX_ALIGN_SPACERS) break;
+  }
+  // Normalize both axes to the first measured block so the preview's viewport
+  // frame and the editor's become directly comparable — only relative distances
+  // matter, so constant origin/padding offsets cancel out.
+  if (out.length > 0) {
+    const p0 = out[0].previewTop;
+    const e0 = out[0].editorTop;
+    for (const b of out) {
+      b.previewTop -= p0;
+      b.editorTop -= e0;
+    }
+  }
+  return out;
+}
+
+function applyLineAlign(): void {
+  if (!lineAlignActive()) {
+    clearLineSpacers(editor.view);
+    return;
+  }
+  // Clear first so the measurement reads the *natural* editor positions (without
+  // the previous pass's spacers); replacing the set wholesale would otherwise
+  // oscillate. CM updates the DOM synchronously on dispatch, so the layout reads
+  // below reflect the cleared state — and the whole pass runs inside one RAF
+  // callback, so the browser never paints the intermediate (cleared) frame.
+  clearLineSpacers(editor.view);
+  const blocks = measureLineAlignBlocks();
+  if (blocks.length === 0) return;
+  setLineSpacers(editor.view, computeLineAlignmentSpacers({ blocks, maxSpacerPx: MAX_SPACER_PX }));
+}
+
+const lineAlignThrottle = createRafThrottle();
+function scheduleLineAlign(): void {
+  lineAlignThrottle(applyLineAlign);
+}
+
+// A preview re-render rebuilds the map → spacers are stale; recompute. Other
+// triggers (split entry, toggle, splitter drag, font/typography, resize) call
+// scheduleLineAlign() directly.
+preview.onAfterRender(() => scheduleLineAlign());
+window.addEventListener('resize', () => scheduleLineAlign());
 
 // ----- Preview live-editing: sync HTML -> MD on input (debounced) -----
 function flushPreviewToSource(): boolean {
@@ -469,6 +604,13 @@ createToolbar(toolbarHost, {
     preview.setLineNumbers(next);
   },
   getPreviewLines: () => prefs.previewLineNumbers ?? false,
+  onToggleRawLineAlign: () => {
+    const next = !(prefs.rawLineAlign ?? false);
+    prefs.rawLineAlign = next;
+    savePrefs(prefs);
+    scheduleLineAlign();
+  },
+  getRawLineAlign: () => prefs.rawLineAlign ?? false,
   onOpenSettings: () => openSettings(),
   onSignIn: () => openLoginModal({ onAfterLogin: (a) => { cachedAuth = a; paintAuthPill(a); } }),
   onSignOut: async () => {
@@ -495,6 +637,7 @@ createToolbar(toolbarHost, {
     prefs.fontSize = s;
     savePrefs(prefs);
     applyFontSize(s);
+    scheduleLineAlign();
   },
 });
 
@@ -569,6 +712,7 @@ window.addEventListener('mouseup', () => {
       savePrefs(prefs);
     }
   }
+  scheduleLineAlign();
 });
 
 // ----- Scroll sync (suppressed while preview is being typed in) -----
@@ -648,12 +792,15 @@ function updateHtmlViewToggle() {
     btn.className = 'view-html-toggle';
     btn.addEventListener('click', () => {
       showingConvertedHtml = !showingConvertedHtml;
+      // Switching the preview source (rich HTML ↔ markdown) invalidates the map.
+      selectionSync.clearAll();
       if (showingConvertedHtml && convertedHtml) {
         preview.el.innerHTML = convertedHtml;
       } else {
         preview.setDoc(editor.getDoc());
       }
       updateHtmlViewToggle();
+      scheduleLineAlign();
     });
     // Insert just before the word-count span in the status bar
     const sb = document.querySelector('.statusbar');
@@ -669,6 +816,10 @@ window.api.onMenuNew(newDoc);
 window.api.onMenuSave(() => void save());
 window.api.onMenuSaveAs(() => void saveAs());
 window.api.onTogglePreview(cyclePreviewMode);
+
+// This window can now safely receive `file:opened`: the file + menu listeners are
+// installed, so tell main to flush any open payload queued during window creation.
+window.api.windowReady();
 
 document.addEventListener('keydown', (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key === 't' && !e.shiftKey) {
@@ -858,6 +1009,7 @@ function openSettings() {
       prefs.typography = clampTypography(next);
       savePrefs(prefs);
       applyTypography(prefs.typography);
+      scheduleLineAlign();
     },
   });
 }
@@ -1199,13 +1351,13 @@ function scheduleSessionSnapshot() {
   sessionSnapshotTimer = setTimeout(() => {
     const snap = {
       savedAt: Date.now(),
+      path: currentPath,
+      title: pendingTitle,
       doc: editor.getDoc(),
-      currentPath,
-      pendingTitle,
-      viewMode: previewMode,
+      view: previewMode,
       unifiedChatHistory,
       model: prefs.model,
-      cleanExit: false,
+      dirty,
     };
     void window.api.sessionWrite(snap);
   }, 1500);
@@ -1244,9 +1396,9 @@ function showRestoreBanner(snap: any) {
     editor.setDoc(snap.doc ?? '');
     suppressEditorChange = false;
     preview && preview.length > 0;
-    if (snap.currentPath) currentPath = snap.currentPath;
-    if (snap.pendingTitle) pendingTitle = snap.pendingTitle;
-    if (snap.viewMode) { previewMode = snap.viewMode; applyPreviewMode(); }
+    if (snap.path) currentPath = snap.path;
+    if (snap.title) pendingTitle = snap.title;
+    if (snap.view) { previewMode = snap.view; applyPreviewMode(); }
     if (snap) {
       unifiedChatHistory = restoreUnifiedThread(snap);
       unifiedChat.restore(snap);
@@ -1264,9 +1416,10 @@ function showRestoreBanner(snap: any) {
 }
 
 void (async () => {
-  // Check for unclean previous session
-  const snap = await window.api.sessionGet();
-  if (snap && snap.cleanExit === false && (snap.doc?.length > 0 || (snap.chatHistory?.length ?? 0) > 0)) {
+  // Main returns this window's restore snapshot only on an unclean previous exit.
+  const res = await window.api.sessionGet();
+  const snap = res?.snapshot;
+  if (snap && ((snap.doc?.length ?? 0) > 0 || (snap.unifiedChatHistory?.length ?? 0) > 0)) {
     setTimeout(() => showRestoreBanner(snap), 400);
   }
 })();

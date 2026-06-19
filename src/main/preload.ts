@@ -4,8 +4,10 @@ import type { AiProviderId, ModelRef, ProviderAuthStatus } from './ai/types';
 type OpenedFile = {
   filePath: string | null;
   content: string;
+  html?: string;
   converted?: { from: string; originalPath: string };
   error?: string;
+  progress?: string;
 };
 
 type AuthSnapshot = {
@@ -69,7 +71,12 @@ const api = {
   onTogglePreview: (cb: () => void) => {
     ipcRenderer.on('menu:toggle-preview', () => cb());
   },
-  saveFile: (filePath: string | null, content: string): Promise<{ saved: boolean; filePath?: string }> =>
+  /** Tell main this renderer is ready to receive `file:opened` (flushes any queued payloads). */
+  windowReady: (): void => ipcRenderer.send('window:ready'),
+  saveFile: (
+    filePath: string | null,
+    content: string,
+  ): Promise<{ saved: boolean; filePath?: string; error?: string; ownerWindowId?: number }> =>
     ipcRenderer.invoke('file:save', { filePath, content }),
 
   // Codex OAuth

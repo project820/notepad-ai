@@ -4,8 +4,15 @@ import { history, historyKeymap, defaultKeymap, indentWithTab } from '@codemirro
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { markdownLiveDecorations } from './cm-decorations';
 import { buildMarkdownTable } from './table-md';
+import {
+  selectionHighlightField,
+  setHighlightedLines as cmSetHighlightedLines,
+  clearHighlight as cmClearHighlight,
+} from './cm-selection-highlight';
+import { lineAlignmentField } from './cm-line-alignment';
 
 type ChangeHandler = (doc: string) => void;
+type SelectionHandler = (sel: { fromLine: number; toLine: number } | null) => void;
 
 /**
  * CodeMirror 6 theme — fully driven by CSS variables so it follows the
@@ -96,6 +103,13 @@ export type EditorHandle = {
   insertTable: (rows: number, cols: number) => void;
   focus: () => void;
   applyTheme: (dark: boolean) => void;
+  /** Subscribe to selection changes; `null` is emitted when the selection is empty. */
+  onSelectionChange: (cb: SelectionHandler) => void;
+  /** Display-only: highlight the given 1-based lines (`.cm-sync-highlight`). */
+  setHighlightedLines: (lines: number[]) => void;
+  /** Display-only: remove all sync line highlighting. */
+  clearHighlight: () => void;
+
 };
 
 export function createEditor(parent: HTMLElement, opts: { onChange: ChangeHandler; initialDoc?: string }): EditorHandle {
@@ -130,9 +144,21 @@ export function createEditor(parent: HTMLElement, opts: { onChange: ChangeHandle
     },
   ]);
 
+  const selectionListeners: SelectionHandler[] = [];
+
   const updateListener = EditorView.updateListener.of((update) => {
     if (update.docChanged) {
       opts.onChange(update.state.doc.toString());
+    }
+    if (update.selectionSet && selectionListeners.length > 0) {
+      const main = update.state.selection.main;
+      const span = main.empty
+        ? null
+        : {
+            fromLine: update.state.doc.lineAt(main.from).number,
+            toLine: update.state.doc.lineAt(main.to).number,
+          };
+      for (const cb of selectionListeners) cb(span);
     }
   });
 
@@ -147,6 +173,8 @@ export function createEditor(parent: HTMLElement, opts: { onChange: ChangeHandle
       EditorView.lineWrapping,
       markdown({ base: markdownLanguage, codeLanguages: [] }),
       ...markdownLiveDecorations,
+      selectionHighlightField,
+      lineAlignmentField,
       keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
       formatKeymap,
       updateListener,
@@ -182,5 +210,10 @@ export function createEditor(parent: HTMLElement, opts: { onChange: ChangeHandle
     focus: () => view.focus(),
     // Kept for API compat — CM6 now follows CSS vars, so theme switching is a no-op here.
     applyTheme: (_dark: boolean) => {},
+    onSelectionChange: (cb: SelectionHandler) => {
+      selectionListeners.push(cb);
+    },
+    setHighlightedLines: (lines: number[]) => cmSetHighlightedLines(view, lines),
+    clearHighlight: () => cmClearHighlight(view),
   };
 }

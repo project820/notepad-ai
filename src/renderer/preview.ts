@@ -1,8 +1,5 @@
-import MarkdownIt from 'markdown-it';
-// @ts-expect-error — no types ship with this plugin
-import taskLists from 'markdown-it-task-lists';
-// @ts-expect-error — no types ship with this plugin
-import footnote from 'markdown-it-footnote';
+import { createMarkdownIt } from './markdown-it';
+import { buildTokenLineRanges, tagPreviewBlocks, type SourceLineRange } from './source-preview-map';
 
 export type PreviewHandle = {
   el: HTMLDivElement;
@@ -10,28 +7,16 @@ export type PreviewHandle = {
   onAfterRender: (cb: () => void) => void;
   /** Toggle the reading-only line-number gutter (CSS-counter based). */
   setLineNumbers: (enabled: boolean) => void;
+  /**
+   * Read-only source ↔ preview map for the most recently rendered document.
+   * Each entry's `mapId` matches a top-level element's `data-map-id`. Powers the
+   * selection-sync (A) and line-alignment (B) features wired in later stories.
+   */
+  getSourceMap: () => readonly SourceLineRange[];
 };
 
 export function createPreview(parent: HTMLElement): PreviewHandle {
-  const md = new MarkdownIt({
-    html: false,
-    linkify: true,
-    breaks: false,
-    typographer: true,
-  })
-    .use(taskLists, { enabled: true, label: true })
-    .use(footnote);
-
-  // Open links in the system browser (Electron preload doesn't add target=_blank automatically).
-  const defaultLinkOpen =
-    md.renderer.rules.link_open ?? ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options));
-  md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
-    const aIndex = tokens[idx].attrIndex('target');
-    if (aIndex < 0) tokens[idx].attrPush(['target', '_blank']);
-    else tokens[idx].attrs![aIndex][1] = '_blank';
-    tokens[idx].attrSet('rel', 'noopener noreferrer');
-    return defaultLinkOpen(tokens, idx, options, env, self);
-  };
+  const md = createMarkdownIt();
 
   const el = document.createElement('div');
   el.className = 'preview';
@@ -42,11 +27,18 @@ export function createPreview(parent: HTMLElement): PreviewHandle {
   el.setAttribute('spellcheck', 'false');
 
   const callbacks: Array<() => void> = [];
+  let sourceMap: SourceLineRange[] = [];
 
   return {
     el,
     setDoc: (text: string) => {
       el.innerHTML = md.render(text);
+      // Tag top-level blocks with their source line spans so source↔preview
+      // navigation can map between the editor and the rendered document. The
+      // ranges come from the same `md` instance that produced the HTML, so they
+      // stay in lock-step with what was rendered.
+      sourceMap = buildTokenLineRanges(md, text);
+      tagPreviewBlocks(el, sourceMap);
       callbacks.forEach((cb) => cb());
     },
     onAfterRender: (cb: () => void) => {
@@ -55,5 +47,6 @@ export function createPreview(parent: HTMLElement): PreviewHandle {
     setLineNumbers: (enabled: boolean) => {
       el.classList.toggle('preview-line-numbers', enabled);
     },
+    getSourceMap: () => sourceMap,
   };
 }
