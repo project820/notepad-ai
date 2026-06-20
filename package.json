@@ -1,6 +1,6 @@
 {
   "name": "notepad-ai",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "Friendly Mac markdown editor for non-technical writers, Korean-centric.",
   "main": "dist/main/main.js",
   "scripts": {
