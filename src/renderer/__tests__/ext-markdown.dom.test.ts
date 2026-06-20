@@ -12,8 +12,11 @@ describe('extended markdown — createMarkdownIt() rendering', () => {
     expect(render('==hi==')).toContain('<mark>');
   });
 
-  it('renders ~x~ as <sub>', () => {
-    expect(render('H~2~O')).toContain('<sub>');
+  it('does NOT treat ~x~ as subscript — `~` is a range/approx char in Korean prose', () => {
+    // Regression: `50~55%` must stay literal text, not render `50` as <sub>.
+    const out = render('일본 50~55% 비율');
+    expect(out).not.toContain('<sub>');
+    expect(out).toContain('50~55%');
   });
 
   it('renders ^x^ as <sup>', () => {
@@ -56,10 +59,6 @@ describe('extended markdown — html:false security boundary', () => {
 describe('extended markdown — turndown round-trip (htmlToMarkdown)', () => {
   it('<mark>x</mark> → ==x==', () => {
     expect(htmlToMarkdown('<mark>x</mark>').trim()).toBe('==x==');
-  });
-
-  it('<sub>x</sub> → ~x~', () => {
-    expect(htmlToMarkdown('<sub>x</sub>').trim()).toBe('~x~');
   });
 
   it('<sup>x</sup> → ^x^', () => {

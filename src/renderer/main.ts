@@ -23,6 +23,7 @@ import { typographyCssVars, clampTypography, type TypographyPref } from './typog
 import { wirePreviewLinks } from './preview-links';
 import { mountLeftPanel } from './left-panel';
 import type { AiProviderId, ModelRef, ProviderAuthStatus } from '../main/ai/types';
+import { isAiProviderId } from '../main/ai/types';
 import {
   renderEditableDraft,
   renderManualExplanationPrompt,
@@ -1052,15 +1053,15 @@ function currentModelArg(): string | { provider: AiProviderId; id: string } | un
  *  context window (provider-level). Generous so normal documents are never
  *  truncated; bounded so a pathological multi-MB paste can't overflow the smallest
  *  context. */
-function htmlExportSourceCharBudget(model: string | { provider: AiProviderId; id: string } | undefined): number {
-  const provider: AiProviderId = typeof model === 'object' && model ? model.provider : 'chatgpt';
+function htmlExportSourceCharBudget(model: string | { provider: string; id: string } | undefined): number {
+  const provider: string = typeof model === 'object' && model ? model.provider : 'chatgpt';
   switch (provider) {
     case 'claude':
       return 320_000; // ~200K-token context
     case 'openrouter':
       return 260_000; // smallest curated context (~128K tokens)
     default:
-      return 420_000; // chatgpt codex backend (large context)
+      return 800_000; // chatgpt codex backend (very large context, e.g. GPT-5.x)
   }
 }
 
@@ -1212,8 +1213,13 @@ let htmlExportWizard: HtmlExportWizardHandle | null = null;
 const HTML_EXPORT_INSTRUCTIONS =
   'You are an expert front-end engineer. You output a single, complete, self-contained HTML5 document with inline CSS and no remote or raster assets. Output only the HTML document — no Markdown and no code fences.';
 
-/** Run one HTML generation over the streaming aiChat IPC, resolving with the full reply. */
-function runHtmlGeneration(prompt: string): { result: Promise<string>; cancel: () => void } {
+/** Run one HTML generation over the streaming aiChat IPC, resolving with the full
+ *  reply. `model` overrides the main model selection (HTML-only model picker). */
+function runHtmlGeneration(
+  prompt: string,
+  model?: { provider: AiProviderId; id: string },
+): { result: Promise<string>; cancel: () => void } {
+  const modelArg = model ?? currentModelArg();
   let cancelled = false;
   let activeCancel = () => {};
   // undici/codex streams sometimes drop mid-generation ("terminated") on long
@@ -1239,7 +1245,7 @@ function runHtmlGeneration(prompt: string): { result: Promise<string>; cancel: (
         void window.api.aiCancel(id);
         cleanup();
       };
-      window.api.aiChat(id, HTML_EXPORT_INSTRUCTIONS, [], prompt, currentModelArg()).catch((err) => {
+      window.api.aiChat(id, HTML_EXPORT_INSTRUCTIONS, [], prompt, modelArg).catch((err) => {
         cleanup();
         reject(err instanceof Error ? err : new Error(String(err)));
       });
@@ -1284,13 +1290,25 @@ async function startHtmlExportWizard() {
   htmlExportWizard?.destroy();
   htmlExportWizard = mountHtmlExportWizard(host, {
     getMarkdown: () => editor.getDoc(),
-    getMaxSourceChars: () => htmlExportSourceCharBudget(currentModelArg()),
+    maxSourceCharsForModel: (m) => htmlExportSourceCharBudget(m ?? currentModelArg()),
+    listHtmlModels: async () => {
+      const ms = await loadModelsCached();
+      return ms.map((m) => ({ provider: m.provider ?? 'chatgpt', id: m.id, label: m.label }));
+    },
+    getDefaultModel: () => prefs.htmlModel ?? currentModelArg(),
+    onModelChosen: (m) => {
+      if (isAiProviderId(m.provider)) {
+        prefs.htmlModel = { provider: m.provider, id: m.id };
+        savePrefs(prefs);
+      }
+    },
     getCurrentPath: () => currentPath,
     getPendingTitle: () => pendingTitle,
     fetchDesignMd: (input) => window.api.fetchDesignMd(input),
     saveHtml: (args) => window.api.saveHtml(args),
     openSavedHtml: (filePath) => window.api.openSavedHtml(filePath),
-    aiGenerate: (prompt) => runHtmlGeneration(prompt),
+    aiGenerate: (prompt, model) =>
+      runHtmlGeneration(prompt, model && isAiProviderId(model.provider) ? { provider: model.provider, id: model.id } : undefined),
     openExternal: (url) => void window.api.openExternal(url),
     onCancel: () => {
       statusEl.textContent = 'HTML export canceled.';

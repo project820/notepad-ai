@@ -28,6 +28,9 @@ export type Prefs = {
   previewLineNumbers?: boolean;
   /** v0.3 raw line-alignment toggle: spacers align raw editor lines with preview blocks (default off; back-filled by migratePrefs). */
   rawLineAlign?: boolean;
+  /** v0.3.5 HTML-export model override (picked in the HTML wizard). Falls back to
+   *  the main `selectedModel`/`model` when unset. */
+  htmlModel?: SelectedModel;
 };
 
 const KEY = 'notepad-ai:prefs:v1';

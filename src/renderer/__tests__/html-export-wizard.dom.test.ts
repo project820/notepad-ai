@@ -125,7 +125,7 @@ describe('mountHtmlExportWizard — fetch failure falls back to tone-only', () =
 
 describe('mountHtmlExportWizard — token warning gate', () => {
   it('a long document stops at token-warning until confirmed', async () => {
-    const { host, deps, handle } = setup({ getMaxSourceChars: () => 1000 }, 'z'.repeat(20000));
+    const { host, deps, handle } = setup({ maxSourceCharsForModel: () => 1000 }, 'z'.repeat(20000));
     click(host, 'orient-vertical');
     click(host, 'layout-scroll');
     click(host, 'design-skip');
@@ -142,6 +142,33 @@ describe('mountHtmlExportWizard — token warning gate', () => {
     expect(deps.aiGenerate).toHaveBeenCalledTimes(1);
     await flush();
     expect(handle.getState().step).toBe('generated');
+  });
+});
+
+describe('mountHtmlExportWizard — HTML-only model picker', () => {
+  it('renders a model picker on style-tone and routes the chosen model to aiGenerate', async () => {
+    const { host, deps, handle } = setup({
+      listHtmlModels: async () => [
+        { provider: 'chatgpt', id: 'gpt-5.4-mini', label: 'GPT-5.4 mini' },
+        { provider: 'chatgpt', id: 'gpt-5.4', label: 'GPT-5.4' },
+      ],
+      getDefaultModel: () => ({ provider: 'chatgpt', id: 'gpt-5.4-mini' }),
+    });
+    click(host, 'orient-vertical');
+    click(host, 'layout-scroll');
+    click(host, 'design-skip');
+    await flush(); // model list resolves, style-tone re-renders with the picker
+    const select = host.querySelector<HTMLSelectElement>('[data-he-field="model"]');
+    expect(select).toBeTruthy();
+    // Default is preselected.
+    expect(select!.value).toBe('chatgpt:gpt-5.4-mini');
+    // Pick the bigger model.
+    select!.value = 'chatgpt:gpt-5.4';
+    click(host, 'tone-submit');
+    await flush();
+    expect(deps.aiGenerate).toHaveBeenCalledTimes(1);
+    const passedModel = (deps.aiGenerate as ReturnType<typeof vi.fn>).mock.calls[0][1];
+    expect(passedModel).toEqual({ provider: 'chatgpt', id: 'gpt-5.4' });
   });
 });
 

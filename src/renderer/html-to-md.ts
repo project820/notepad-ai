@@ -33,18 +33,12 @@ function buildService(): TurndownService {
     replacement: () => '',
   });
 
-  // ===== Extended markdown round-trip (==mark==, ~sub~, ^sup^, heading ids, deflists) =====
+  // ===== Extended markdown round-trip (==mark==, ^sup^, heading ids, deflists) =====
 
   // <mark> → ==highlight==
   td.addRule('mark', {
     filter: ['mark'],
     replacement: (content) => '==' + content + '==',
-  });
-
-  // <sub> → ~subscript~
-  td.addRule('sub', {
-    filter: ['sub'],
-    replacement: (content) => '~' + content + '~',
   });
 
   // <sup> → ^superscript^

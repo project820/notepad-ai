@@ -3,10 +3,11 @@ import MarkdownIt from 'markdown-it';
 import taskLists from 'markdown-it-task-lists';
 // @ts-expect-error — no types ship with this plugin
 import footnote from 'markdown-it-footnote';
+// NOTE: markdown-it-sub (~x~) is intentionally NOT used. In Korean-centric prose
+// `~` denotes a numeric range / "approximately" (e.g. `50~55%`), so `~x~` would
+// misrender normal text as subscript. Superscript (^x^) is kept (low collision).
 // @ts-expect-error — no types ship with this plugin
 import mark from 'markdown-it-mark';
-// @ts-expect-error — no types ship with this plugin
-import sub from 'markdown-it-sub';
 // @ts-expect-error — no types ship with this plugin
 import sup from 'markdown-it-sup';
 // @ts-expect-error — no types ship with this plugin
@@ -37,7 +38,6 @@ export function createMarkdownIt(): MarkdownIt {
     .use(taskLists, { enabled: true, label: true })
     .use(footnote)
     .use(mark)
-    .use(sub)
     .use(sup)
     .use(emoji)
     .use(deflist)

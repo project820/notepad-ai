@@ -21,6 +21,9 @@ import {
   type HtmlExportState,
 } from './html-export-state';
 
+/** A model choice for HTML generation (provider + id). */
+export type HtmlModelChoice = { provider: string; id: string; label?: string };
+
 /** A running AI generation: a promise for the full reply plus a cancel hook. */
 export type AiGenerateJob = { result: Promise<string>; cancel: () => void };
 
@@ -28,13 +31,20 @@ export type HtmlExportDeps = {
   getMarkdown: () => string;
   getCurrentPath: () => string | null;
   getPendingTitle: () => string | null;
-  /** Max source-markdown chars (sized to the selected model's context window).
+  /** Max source-markdown chars for the chosen model (sized to its context window).
    *  Omitted → the prompt builder's generous default. */
-  getMaxSourceChars?: () => number;
+  maxSourceCharsForModel?: (model: HtmlModelChoice | undefined) => number;
+  /** Models offered in the HTML-only model picker. Omitted/empty → no picker shown. */
+  listHtmlModels?: () => Promise<HtmlModelChoice[]>;
+  /** Default model to preselect (last HTML model, else the main model). */
+  getDefaultModel?: () => HtmlModelChoice | string | undefined;
+  /** Persist the user's HTML-model choice. */
+  onModelChosen?: (model: HtmlModelChoice) => void;
   fetchDesignMd: (input: string) => Promise<{ ok: boolean; designMd?: string; rawUrl?: string; error?: string }>;
   saveHtml: (args: { html: string; defaultName?: string }) => Promise<{ saved: boolean; filePath?: string }>;
   openSavedHtml: (filePath: string) => Promise<{ opened: boolean; error?: string }>;
-  aiGenerate: (prompt: string) => AiGenerateJob;
+  /** Generate HTML for `prompt` using `model` (falls back to the main model when omitted). */
+  aiGenerate: (prompt: string, model?: HtmlModelChoice) => AiGenerateJob;
   /** Open an external URL (the getdesign.md gallery). */
   openExternal?: (url: string) => void;
   /** Called when the user cancels the wizard. */
@@ -84,6 +94,57 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
   let currentJob: AiGenerateJob | null = null;
   /** Prompt computed at tone submission, consumed when generation actually starts. */
   let pendingPrompt = '';
+  /** Model chosen for this generation (read from the picker at tone submission). */
+  let pendingModel: HtmlModelChoice | undefined;
+  /** Models for the HTML-only picker, loaded once on mount. */
+  let htmlModels: HtmlModelChoice[] = [];
+
+  // Load the model list once; re-render the (style-tone) step when it arrives.
+  if (deps.listHtmlModels) {
+    deps
+      .listHtmlModels()
+      .then((ms) => {
+        if (disposed) return;
+        htmlModels = Array.isArray(ms) ? ms : [];
+        if (state.step === 'style-tone') render();
+      })
+      .catch(() => {
+        /* no picker; generation falls back to the default model */
+      });
+  }
+
+  function modelKey(m: { provider: string; id: string }): string {
+    return `${m.provider}:${m.id}`;
+  }
+  function defaultModelKey(): string | undefined {
+    const d = deps.getDefaultModel?.();
+    if (!d) return undefined;
+    return typeof d === 'string' ? `chatgpt:${d}` : modelKey(d);
+  }
+  function parseModelKey(v: string): HtmlModelChoice {
+    const i = v.indexOf(':');
+    return i < 0 ? { provider: 'chatgpt', id: v } : { provider: v.slice(0, i), id: v.slice(i + 1) };
+  }
+  /** The model the user picked (or the default when no picker is shown). */
+  function readSelectedModel(): HtmlModelChoice | undefined {
+    const v = field<HTMLSelectElement>('model')?.value;
+    if (v) return parseModelKey(v);
+    const d = deps.getDefaultModel?.();
+    if (!d) return undefined;
+    return typeof d === 'string' ? { provider: 'chatgpt', id: d } : d;
+  }
+  function modelPickerHtml(): string {
+    if (!htmlModels.length) return '';
+    const sel = defaultModelKey();
+    const opts = htmlModels
+      .map((m) => {
+        const k = modelKey(m);
+        return `<option value="${esc(k)}"${k === sel ? ' selected' : ''}>${esc(m.label || m.id)}</option>`;
+      })
+      .join('');
+    return `<label class="he-model-label" for="he-model">${esc(t('he.model'))}</label>
+          <select class="he-select" id="he-model" data-he-field="model">${opts}</select>`;
+  }
 
   function dispatch(event: HtmlExportEvent) {
     if (disposed) return;
@@ -117,13 +178,15 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
   function submitTone() {
     if (!state.orientation || !state.layout) return;
     const tone = field<HTMLTextAreaElement>('tone')?.value.trim() ?? '';
+    pendingModel = readSelectedModel();
+    if (pendingModel) deps.onModelChosen?.(pendingModel);
     const built = buildHtmlExportPrompt({
       markdown: deps.getMarkdown(),
       orientation: state.orientation,
       layout: state.layout,
       designMd: state.design?.designMd,
       tone,
-      maxSourceChars: deps.getMaxSourceChars?.(),
+      maxSourceChars: deps.maxSourceCharsForModel?.(pendingModel),
     });
     pendingPrompt = built.promptDoc;
     dispatch({ type: 'SUBMIT_TONE', tone, tokenWarning: built.warning });
@@ -144,7 +207,7 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
       layout: state.layout,
       designMd: state.design?.designMd,
       tone: state.tone,
-      maxSourceChars: deps.getMaxSourceChars?.(),
+      maxSourceChars: deps.maxSourceCharsForModel?.(pendingModel),
     });
     pendingPrompt = built.promptDoc;
     dispatch({ type: 'SUBMIT_TONE', tone: state.tone ?? '', tokenWarning: false });
@@ -153,7 +216,7 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
 
   function maybeStartGeneration() {
     if (state.step !== 'generating' || !pendingPrompt) return;
-    const job = deps.aiGenerate(pendingPrompt);
+    const job = deps.aiGenerate(pendingPrompt, pendingModel);
     currentJob = job;
     job.result.then(
       (text) => {
@@ -312,6 +375,7 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
           ${state.fetchError ? `<div class="he-error">${esc(t('he.error.fetch'))}</div>` : ''}
           <div class="he-q">${esc(t('he.tone.title'))}</div>
           <textarea class="he-textarea" data-he-field="tone" rows="3" placeholder="${esc(t('he.tone.placeholder'))}"></textarea>
+          ${modelPickerHtml()}
           ${footer(
             backBtn() + `<button class="he-btn he-primary" data-he="tone-submit" type="button">${esc(t('he.generate'))}</button>`,
           )}`;
