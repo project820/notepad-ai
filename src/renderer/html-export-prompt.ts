@@ -10,10 +10,10 @@
 
 import type { LayoutKind, Orientation } from './html-export-state';
 
-/** Markdown longer than this warns the user before generating (token-warning gate). */
-const WARN_CHARS = 12000;
-/** Markdown longer than this is hard-truncated with a marker. */
-const TRUNCATE_CHARS = 40000;
+/** Default cap on source-markdown chars when the caller supplies no model-specific
+ *  budget. Generous — sized for large context windows so normal documents are
+ *  never truncated; the wizard passes a per-model budget at runtime. */
+const DEFAULT_MAX_SOURCE_CHARS = 200_000;
 /** DESIGN.md is clamped so the prompt stays bounded. */
 const DESIGN_CHARS = 8000;
 const TRUNCATION_MARKER = '\n\n<!-- NOTE: the source above was truncated here for length. -->';
@@ -50,13 +50,21 @@ export function buildHtmlExportPrompt(args: {
   layout: LayoutKind;
   designMd?: string;
   tone?: string;
+  /** Max source-markdown chars before truncation, sized to the selected model's
+   *  context window by the caller. Falls back to {@link DEFAULT_MAX_SOURCE_CHARS}. */
+  maxSourceChars?: number;
 }): BuiltHtmlExportPrompt {
   const markdown = typeof args.markdown === 'string' ? args.markdown : '';
-  const warning = markdown.length > WARN_CHARS;
+  const maxSourceChars =
+    typeof args.maxSourceChars === 'number' && args.maxSourceChars > 0
+      ? Math.floor(args.maxSourceChars)
+      : DEFAULT_MAX_SOURCE_CHARS;
+  // Warn only as the source nears the model's budget; truncate only past it.
+  const warning = markdown.length > Math.floor(maxSourceChars * 0.85);
   let body = markdown;
   let truncated = false;
-  if (markdown.length > TRUNCATE_CHARS) {
-    body = markdown.slice(0, TRUNCATE_CHARS) + TRUNCATION_MARKER;
+  if (markdown.length > maxSourceChars) {
+    body = markdown.slice(0, maxSourceChars) + TRUNCATION_MARKER;
     truncated = true;
   }
 

@@ -1,28 +1,37 @@
 import { describe, it, expect } from 'vitest';
-import {
-  HTML_EXPORT_OUTPUT_FRACTION,
-  htmlExportMaxTokens,
-  isHtmlExportInstructions,
-} from '../main/ai/output-budget';
+import { htmlExportMaxTokens, isHtmlExportInstructions } from '../main/ai/output-budget';
 
 describe('htmlExportMaxTokens', () => {
-  it('targets 70% of context but clamps to the provider output ceiling', () => {
-    // 70% of 200K = 140K, clamped to Claude's 64K output ceiling.
-    expect(htmlExportMaxTokens('claude')).toBe(64_000);
-    // 70% of 256K = 179.2K, clamped to 64K.
-    expect(htmlExportMaxTokens('chatgpt')).toBe(64_000);
-    // 70% of 128K = 89.6K, clamped to 32K.
-    expect(htmlExportMaxTokens('openrouter')).toBe(32_000);
+  it('returns undefined for ChatGPT — the codex backend rejects a max-output-tokens param', () => {
+    // Sending max_output_tokens to the codex /responses backend is an HTTP 400, so
+    // we must omit it entirely (it streams its full native capacity anyway).
+    expect(htmlExportMaxTokens('chatgpt', 'gpt-5.5')).toBeUndefined();
+    expect(htmlExportMaxTokens('chatgpt', 'gpt-5.4-mini')).toBeUndefined();
+    expect(htmlExportMaxTokens('chatgpt', 'some-future-model')).toBeUndefined();
   });
 
-  it('exposes the 70% fraction constant', () => {
-    expect(HTML_EXPORT_OUTPUT_FRACTION).toBe(0.7);
+  it('sizes Claude to each model\'s documented max output (Opus caps lower than Sonnet)', () => {
+    expect(htmlExportMaxTokens('claude', 'claude-sonnet-4-5')).toBe(64_000);
+    expect(htmlExportMaxTokens('claude', 'claude-haiku-4-5')).toBe(64_000);
+    // Opus 4.1 caps at 32K — a flat 64K would 400, so per-model sizing matters.
+    expect(htmlExportMaxTokens('claude', 'claude-opus-4-1')).toBe(32_000);
   });
 
-  it('is always far above the old 4096 default and never below it', () => {
-    for (const p of ['chatgpt', 'claude', 'openrouter'] as const) {
-      expect(htmlExportMaxTokens(p)).toBeGreaterThan(4096);
-    }
+  it('sizes OpenRouter per curated model slug', () => {
+    expect(htmlExportMaxTokens('openrouter', 'anthropic/claude-sonnet-4.5')).toBe(64_000);
+    expect(htmlExportMaxTokens('openrouter', 'google/gemini-2.5-pro')).toBe(65_536);
+    expect(htmlExportMaxTokens('openrouter', 'x-ai/grok-4')).toBe(32_000);
+  });
+
+  it('falls back to a safe per-provider default for unknown / custom models', () => {
+    expect(htmlExportMaxTokens('claude', 'claude-some-custom')).toBe(8_192);
+    expect(htmlExportMaxTokens('openrouter', 'meta/llama-custom')).toBe(32_000);
+  });
+
+  it('never requests a tiny default — capped models all exceed the old 4096', () => {
+    expect(htmlExportMaxTokens('claude', 'claude-sonnet-4-5')!).toBeGreaterThan(4096);
+    expect(htmlExportMaxTokens('openrouter', 'google/gemini-2.5-pro')!).toBeGreaterThan(4096);
+    expect(htmlExportMaxTokens('claude', 'unknown')!).toBeGreaterThan(4096);
   });
 });
 

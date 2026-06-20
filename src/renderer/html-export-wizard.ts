@@ -28,6 +28,9 @@ export type HtmlExportDeps = {
   getMarkdown: () => string;
   getCurrentPath: () => string | null;
   getPendingTitle: () => string | null;
+  /** Max source-markdown chars (sized to the selected model's context window).
+   *  Omitted → the prompt builder's generous default. */
+  getMaxSourceChars?: () => number;
   fetchDesignMd: (input: string) => Promise<{ ok: boolean; designMd?: string; rawUrl?: string; error?: string }>;
   saveHtml: (args: { html: string; defaultName?: string }) => Promise<{ saved: boolean; filePath?: string }>;
   openSavedHtml: (filePath: string) => Promise<{ opened: boolean; error?: string }>;
@@ -120,6 +123,7 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
       layout: state.layout,
       designMd: state.design?.designMd,
       tone,
+      maxSourceChars: deps.getMaxSourceChars?.(),
     });
     pendingPrompt = built.promptDoc;
     dispatch({ type: 'SUBMIT_TONE', tone, tokenWarning: built.warning });
@@ -140,6 +144,7 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
       layout: state.layout,
       designMd: state.design?.designMd,
       tone: state.tone,
+      maxSourceChars: deps.getMaxSourceChars?.(),
     });
     pendingPrompt = built.promptDoc;
     dispatch({ type: 'SUBMIT_TONE', tone: state.tone ?? '', tokenWarning: false });

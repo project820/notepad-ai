@@ -647,7 +647,7 @@ ipcMain.handle(
           model,
           signal: controller.signal,
           maxOutputTokens: isHtmlExportInstructions(payload.instructions)
-            ? htmlExportMaxTokens(model.provider)
+            ? htmlExportMaxTokens(model.provider, model.id)
             : undefined,
         },
         (e) => sender.send(`ai:chat:${payload.id}`, e),

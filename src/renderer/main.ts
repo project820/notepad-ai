@@ -1048,6 +1048,22 @@ function currentModelArg(): string | { provider: AiProviderId; id: string } | un
   return prefs.selectedModel ?? prefs.model;
 }
 
+/** Source-markdown char budget for HTML export, sized to the selected model's
+ *  context window (provider-level). Generous so normal documents are never
+ *  truncated; bounded so a pathological multi-MB paste can't overflow the smallest
+ *  context. */
+function htmlExportSourceCharBudget(model: string | { provider: AiProviderId; id: string } | undefined): number {
+  const provider: AiProviderId = typeof model === 'object' && model ? model.provider : 'chatgpt';
+  switch (provider) {
+    case 'claude':
+      return 320_000; // ~200K-token context
+    case 'openrouter':
+      return 260_000; // smallest curated context (~128K tokens)
+    default:
+      return 420_000; // chatgpt codex backend (large context)
+  }
+}
+
 function applyStyle(next: { difficulty: Quality; naturalness: Naturalness }) {
   prefs.style = next;
   prefs.quality = next.difficulty; // keep legacy difficulty in sync (Block AI etc.)
@@ -1268,6 +1284,7 @@ async function startHtmlExportWizard() {
   htmlExportWizard?.destroy();
   htmlExportWizard = mountHtmlExportWizard(host, {
     getMarkdown: () => editor.getDoc(),
+    getMaxSourceChars: () => htmlExportSourceCharBudget(currentModelArg()),
     getCurrentPath: () => currentPath,
     getPendingTitle: () => pendingTitle,
     fetchDesignMd: (input) => window.api.fetchDesignMd(input),

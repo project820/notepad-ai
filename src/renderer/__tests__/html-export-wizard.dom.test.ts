@@ -125,7 +125,7 @@ describe('mountHtmlExportWizard — fetch failure falls back to tone-only', () =
 
 describe('mountHtmlExportWizard — token warning gate', () => {
   it('a long document stops at token-warning until confirmed', async () => {
-    const { host, deps, handle } = setup({}, 'z'.repeat(20000));
+    const { host, deps, handle } = setup({ getMaxSourceChars: () => 1000 }, 'z'.repeat(20000));
     click(host, 'orient-vertical');
     click(host, 'layout-scroll');
     click(host, 'design-skip');

@@ -52,19 +52,28 @@ describe('buildHtmlExportPrompt', () => {
     expect(result.truncated).toBe(false);
   });
 
-  it('warns (without truncating) for a long-but-bounded document', () => {
-    const result = buildHtmlExportPrompt({ markdown: 'x'.repeat(20000), orientation: 'vertical', layout: 'scroll' });
-    expect(result.warning).toBe(true);
+  it('does not warn or truncate a 40K-char document under the default budget (regression: old 40K cap)', () => {
+    // The old TRUNCATE_CHARS=40000 hard-cut normal documents; the generous default
+    // (200K) must leave a 40K-char doc fully intact and unwarned.
+    const md = 'z'.repeat(40000);
+    const result = buildHtmlExportPrompt({ markdown: md, orientation: 'vertical', layout: 'scroll' });
+    expect(result.warning).toBe(false);
     expect(result.truncated).toBe(false);
-    expect(result.promptDoc).toContain('x'.repeat(20000));
+    expect(result.promptDoc).toContain(md);
   });
 
-  it('warns and truncates with a marker for an extremely long document', () => {
-    const result = buildHtmlExportPrompt({ markdown: 'y'.repeat(60000), orientation: 'vertical', layout: 'scroll' });
-    expect(result.warning).toBe(true);
-    expect(result.truncated).toBe(true);
-    expect(result.promptDoc).toContain('truncated');
-    expect(result.promptDoc).not.toContain('y'.repeat(60000));
+  it('respects a model-specific maxSourceChars: warns near it, truncates past it', () => {
+    const budget = 1000;
+    const warnOnly = buildHtmlExportPrompt({ markdown: 'x'.repeat(900), orientation: 'vertical', layout: 'scroll', maxSourceChars: budget });
+    expect(warnOnly.warning).toBe(true);
+    expect(warnOnly.truncated).toBe(false);
+    expect(warnOnly.promptDoc).toContain('x'.repeat(900));
+
+    const truncated = buildHtmlExportPrompt({ markdown: 'y'.repeat(1500), orientation: 'vertical', layout: 'scroll', maxSourceChars: budget });
+    expect(truncated.warning).toBe(true);
+    expect(truncated.truncated).toBe(true);
+    expect(truncated.promptDoc).toContain('truncated');
+    expect(truncated.promptDoc).not.toContain('y'.repeat(1500));
   });
 });
 
