@@ -60,6 +60,50 @@ export function htmlExportMaxTokens(provider: AiProviderId, modelId: string): nu
 }
 
 /**
+ * Best-effort max CONTEXT window (input+output tokens) per model, keyed by
+ * `${provider}:${id}`. Powers the model picker's context badge and the HTML-export
+ * source-size budget. Best-effort and maintained alongside the catalog; unknown /
+ * custom models fall back to the per-provider default below.
+ */
+const MODEL_CONTEXT_WINDOW: Record<string, number> = {
+  // ChatGPT (GPT-5.x) — large-context flagships.
+  'chatgpt:gpt-5.5': 1_000_000,
+  'chatgpt:gpt-5.4': 1_000_000,
+  'chatgpt:gpt-5.4-mini': 400_000,
+  // Claude 4.x.
+  'claude:claude-sonnet-4-5': 200_000,
+  'claude:claude-opus-4-1': 200_000,
+  'claude:claude-haiku-4-5': 200_000,
+  // OpenRouter slugs.
+  'openrouter:anthropic/claude-sonnet-4.5': 200_000,
+  'openrouter:google/gemini-2.5-pro': 1_000_000,
+  'openrouter:x-ai/grok-4': 256_000,
+  'openrouter:openai/gpt-5.1': 400_000,
+};
+
+/** Per-provider fallback context window for models not in {@link MODEL_CONTEXT_WINDOW}. */
+const PROVIDER_DEFAULT_CONTEXT: Record<AiProviderId, number> = {
+  chatgpt: 400_000,
+  claude: 200_000,
+  openrouter: 128_000,
+};
+
+/** Max context window (tokens) for the given model, with a per-provider fallback. */
+export function modelContextWindowTokens(provider: AiProviderId, modelId: string): number {
+  return MODEL_CONTEXT_WINDOW[`${provider}:${modelId}`] ?? PROVIDER_DEFAULT_CONTEXT[provider];
+}
+
+/** Human badge for a context window: `1M`, `1.5M`, `256K`. Empty for invalid input. */
+export function formatContextWindow(tokens: number): string {
+  if (!Number.isFinite(tokens) || tokens <= 0) return '';
+  if (tokens >= 1_000_000) {
+    const m = tokens / 1_000_000;
+    return `${Number.isInteger(m) ? m : m.toFixed(1)}M`;
+  }
+  return `${Math.round(tokens / 1000)}K`;
+}
+
+/**
  * Detect the HTML-export generation request by its instructions signature.
  * Mirrors the renderer's HTML_EXPORT_INSTRUCTIONS constant; a miss only means the
  * request keeps the normal output cap (safe degrade, never an error).

@@ -24,6 +24,7 @@ import { wirePreviewLinks } from './preview-links';
 import { mountLeftPanel } from './left-panel';
 import type { AiProviderId, ModelRef, ProviderAuthStatus } from '../main/ai/types';
 import { isAiProviderId } from '../main/ai/types';
+import { modelContextWindowTokens } from '../main/ai/output-budget';
 import {
   renderEditableDraft,
   renderManualExplanationPrompt,
@@ -1049,20 +1050,15 @@ function currentModelArg(): string | { provider: AiProviderId; id: string } | un
   return prefs.selectedModel ?? prefs.model;
 }
 
-/** Source-markdown char budget for HTML export, sized to the selected model's
- *  context window (provider-level). Generous so normal documents are never
- *  truncated; bounded so a pathological multi-MB paste can't overflow the smallest
- *  context. */
+/** Source-markdown char budget for HTML export, sized to the selected model's actual
+ *  context window. ~3 chars/token, reserving ~40% of the window for the output +
+ *  instructions + design so a big-context model (e.g. GPT-5.x at 1M) accepts far more
+ *  source than a 128K one, and normal documents are never truncated. */
 function htmlExportSourceCharBudget(model: string | { provider: string; id: string } | undefined): number {
-  const provider: string = typeof model === 'object' && model ? model.provider : 'chatgpt';
-  switch (provider) {
-    case 'claude':
-      return 320_000; // ~200K-token context
-    case 'openrouter':
-      return 260_000; // smallest curated context (~128K tokens)
-    default:
-      return 800_000; // chatgpt codex backend (very large context, e.g. GPT-5.x)
-  }
+  const provider = typeof model === 'object' && model ? model.provider : 'chatgpt';
+  const id = typeof model === 'string' ? model : typeof model === 'object' && model ? model.id : 'gpt-5.4-mini';
+  const ctxTokens = isAiProviderId(provider) ? modelContextWindowTokens(provider, id) : 400_000;
+  return Math.floor(ctxTokens * 3 * 0.6);
 }
 
 function applyStyle(next: { difficulty: Quality; naturalness: Naturalness }) {
@@ -1293,7 +1289,15 @@ async function startHtmlExportWizard() {
     maxSourceCharsForModel: (m) => htmlExportSourceCharBudget(m ?? currentModelArg()),
     listHtmlModels: async () => {
       const ms = await loadModelsCached();
-      return ms.map((m) => ({ provider: m.provider ?? 'chatgpt', id: m.id, label: m.label }));
+      return ms.map((m) => {
+        const provider = m.provider ?? 'chatgpt';
+        return {
+          provider,
+          id: m.id,
+          label: m.label,
+          contextWindow: isAiProviderId(provider) ? modelContextWindowTokens(provider, m.id) : undefined,
+        };
+      });
     },
     getDefaultModel: () => prefs.htmlModel ?? currentModelArg(),
     onModelChosen: (m) => {

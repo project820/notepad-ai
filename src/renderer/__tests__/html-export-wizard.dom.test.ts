@@ -149,8 +149,8 @@ describe('mountHtmlExportWizard — HTML-only model picker', () => {
   it('renders a model picker on style-tone and routes the chosen model to aiGenerate', async () => {
     const { host, deps, handle } = setup({
       listHtmlModels: async () => [
-        { provider: 'chatgpt', id: 'gpt-5.4-mini', label: 'GPT-5.4 mini' },
-        { provider: 'chatgpt', id: 'gpt-5.4', label: 'GPT-5.4' },
+        { provider: 'chatgpt', id: 'gpt-5.4-mini', label: 'GPT-5.4 mini', contextWindow: 400_000 },
+        { provider: 'chatgpt', id: 'gpt-5.4', label: 'GPT-5.4', contextWindow: 1_000_000 },
       ],
       getDefaultModel: () => ({ provider: 'chatgpt', id: 'gpt-5.4-mini' }),
     });
@@ -162,6 +162,10 @@ describe('mountHtmlExportWizard — HTML-only model picker', () => {
     expect(select).toBeTruthy();
     // Default is preselected.
     expect(select!.value).toBe('chatgpt:gpt-5.4-mini');
+    // 1M-context models are distinguishable by a context badge in the option text.
+    const optText = Array.from(select!.querySelectorAll('option')).map((o) => o.textContent);
+    expect(optText).toContain('GPT-5.4 · 1M');
+    expect(optText).toContain('GPT-5.4 mini · 400K');
     // Pick the bigger model.
     select!.value = 'chatgpt:gpt-5.4';
     click(host, 'tone-submit');

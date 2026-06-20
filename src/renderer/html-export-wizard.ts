@@ -21,8 +21,10 @@ import {
   type HtmlExportState,
 } from './html-export-state';
 
-/** A model choice for HTML generation (provider + id). */
-export type HtmlModelChoice = { provider: string; id: string; label?: string };
+import { formatContextWindow } from '../main/ai/output-budget';
+
+/** A model choice for HTML generation (provider + id, with optional context size). */
+export type HtmlModelChoice = { provider: string; id: string; label?: string; contextWindow?: number };
 
 /** A running AI generation: a promise for the full reply plus a cancel hook. */
 export type AiGenerateJob = { result: Promise<string>; cancel: () => void };
@@ -139,7 +141,9 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
     const opts = htmlModels
       .map((m) => {
         const k = modelKey(m);
-        return `<option value="${esc(k)}"${k === sel ? ' selected' : ''}>${esc(m.label || m.id)}</option>`;
+        const badge = m.contextWindow ? formatContextWindow(m.contextWindow) : '';
+        const text = badge ? `${m.label || m.id} · ${badge}` : m.label || m.id;
+        return `<option value="${esc(k)}"${k === sel ? ' selected' : ''}>${esc(text)}</option>`;
       })
       .join('');
     return `<label class="he-model-label" for="he-model">${esc(t('he.model'))}</label>

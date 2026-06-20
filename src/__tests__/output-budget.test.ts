@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { htmlExportMaxTokens, isHtmlExportInstructions } from '../main/ai/output-budget';
+import {
+  htmlExportMaxTokens,
+  isHtmlExportInstructions,
+  modelContextWindowTokens,
+  formatContextWindow,
+} from '../main/ai/output-budget';
+
 
 describe('htmlExportMaxTokens', () => {
   it('returns undefined for ChatGPT — the codex backend rejects a max-output-tokens param', () => {
@@ -32,6 +38,32 @@ describe('htmlExportMaxTokens', () => {
     expect(htmlExportMaxTokens('claude', 'claude-sonnet-4-5')!).toBeGreaterThan(4096);
     expect(htmlExportMaxTokens('openrouter', 'google/gemini-2.5-pro')!).toBeGreaterThan(4096);
     expect(htmlExportMaxTokens('claude', 'unknown')!).toBeGreaterThan(4096);
+  });
+});
+
+describe('modelContextWindowTokens', () => {
+  it('returns each model\'s context window, with a per-provider fallback', () => {
+    expect(modelContextWindowTokens('chatgpt', 'gpt-5.4')).toBe(1_000_000);
+    expect(modelContextWindowTokens('openrouter', 'google/gemini-2.5-pro')).toBe(1_000_000);
+    expect(modelContextWindowTokens('claude', 'claude-sonnet-4-5')).toBe(200_000);
+    expect(modelContextWindowTokens('openrouter', 'x-ai/grok-4')).toBe(256_000);
+    // Unknown/custom → provider default.
+    expect(modelContextWindowTokens('claude', 'claude-future')).toBe(200_000);
+    expect(modelContextWindowTokens('openrouter', 'meta/llama')).toBe(128_000);
+  });
+});
+
+describe('formatContextWindow', () => {
+  it('formats millions as M and thousands as K', () => {
+    expect(formatContextWindow(1_000_000)).toBe('1M');
+    expect(formatContextWindow(1_500_000)).toBe('1.5M');
+    expect(formatContextWindow(256_000)).toBe('256K');
+    expect(formatContextWindow(200_000)).toBe('200K');
+  });
+  it('returns empty for invalid input', () => {
+    expect(formatContextWindow(0)).toBe('');
+    expect(formatContextWindow(-5)).toBe('');
+    expect(formatContextWindow(NaN)).toBe('');
   });
 });
 
