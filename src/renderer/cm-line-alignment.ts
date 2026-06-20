@@ -174,9 +174,11 @@ const spacerField = StateField.define<DecorationSet>({
         return buildSpacerDecorations(tr.state, effect.value);
       }
     }
-    // A document edit invalidates the held line numbers; drop the spacers and let
-    // the wiring recompute them from the next measurement.
-    if (tr.docChanged) return Decoration.none;
+    // A document edit shifts line positions: map the held spacer widgets through
+    // the change so the established vertical geometry travels WITH the text instead
+    // of collapsing on the first keystroke (which jerks the text up until the
+    // debounced realignment runs). The next measurement cleanly replaces them.
+    if (tr.docChanged) return deco.map(tr.changes);
     return deco;
   },
   provide: (f) => EditorView.decorations.from(f),

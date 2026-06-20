@@ -177,11 +177,17 @@ describe('setLineSpacers / clearLineSpacers — CM block-widget spacers', () => 
     view.destroy();
   });
 
-  it('drops spacers on a document edit (held line numbers go stale)', () => {
+  it('maps spacers through a document edit so geometry is preserved (no jump on keystroke)', () => {
     const view = mountEditor(DOC);
     setLineSpacers(view, [{ line: 3, heightPx: 30 }]);
     expect(view.state.field(lineAlignmentField).size).toBe(1);
+    // A keystroke before the spacer used to collapse it instantly (text jumped up);
+    // now the decoration is mapped through the change and survives until the next
+    // measurement cleanly replaces it.
     view.dispatch({ changes: { from: 0, insert: 'x' } });
+    expect(view.state.field(lineAlignmentField).size).toBe(1);
+    // Clearing still removes it, and the edit never entered the document as text.
+    clearLineSpacers(view);
     expect(view.state.field(lineAlignmentField).size).toBe(0);
     view.destroy();
   });

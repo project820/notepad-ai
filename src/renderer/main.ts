@@ -3,6 +3,7 @@ import { createPreview, type PreviewHandle } from './preview';
 import { createSelectionSync, clearPreviewHighlight } from './selection-sync';
 import { collectPreviewBlocks } from './source-preview-map';
 import { setLineSpacers, clearLineSpacers, computeBidirectionalAlignment, MAX_SPACER_PX, type LineAlignmentBlock, type PreviewSpacer } from './cm-line-alignment';
+import { interpolateScroll, normalizeAnchors, type ScrollAnchor } from './scroll-sync';
 import { createToolbar, paintAccountState, type Theme, type FontSize } from './toolbar';
 import { t, getLocale, setLocale, onLocaleChange, type Locale } from './i18n';
 import { installKeyboardNav } from './keyboard-nav';
@@ -436,7 +437,8 @@ editorHost.addEventListener('focusout', () => {
 // with the rendered preview blocks (built on the same G003 map A consumes). The
 // spacers are CM block widgets — never document text — so they never touch the
 // saved markdown or the undo history.
-const MAX_ALIGN_SPACERS = 400; // long-document guard: cap spacers measured per pass
+const MAX_ALIGN_SPACERS = 400; // long-document guard: cap how many spacer widgets we APPLY
+const MAX_MEASURE_BLOCKS = 3000; // generous guard so scroll anchors can map (nearly) the whole doc
 
 function lineAlignActive(): boolean {
   return (
@@ -499,7 +501,10 @@ function setPreviewOffsets(root: HTMLElement, spacers: readonly PreviewSpacer[])
  *  by a constant — we calibrate that constant ONCE from the first on-screen line
  *  (coordsAtPos gives its true viewport top) so editor and preview share the exact
  *  same frame and there is no uniform vertical offset between the panes.
- *  Both panes MUST be spacer-free when this runs (applyLineAlign clears first). */
+ *  When computing NEW alignment spacers the caller clears both panes first so it
+ *  reads natural (offset-free) positions; the scroll-sync anchor builder, by
+ *  contrast, intentionally measures WITH the current spacers in place so its
+ *  anchors reflect the true on-screen geometry. Both uses are valid. */
 function measureLineAlignBlocks(): LineAlignmentBlock[] {
   if (preview.getSourceMap().length === 0) return [];
   const view = editor.view;
@@ -523,7 +528,7 @@ function measureLineAlignBlocks(): LineAlignmentBlock[] {
     const editorTop = lineViewportTop - cmTop + cmScrollTop;
     const previewTop = (block.el as HTMLElement).getBoundingClientRect().top - pRect.top + pScrollTop;
     out.push({ line: block.startLine, mapId: block.mapId, previewTop, editorTop });
-    if (out.length >= MAX_ALIGN_SPACERS) break;
+    if (out.length >= MAX_MEASURE_BLOCKS) break;
   }
   return out;
 }
@@ -544,8 +549,12 @@ function applyLineAlign(): void {
   const blocks = measureLineAlignBlocks();
   if (blocks.length === 0) return;
   const { editorSpacers, previewSpacers } = computeBidirectionalAlignment(blocks, MAX_SPACER_PX);
-  setLineSpacers(editor.view, editorSpacers);
-  setPreviewOffsets(preview.el, previewSpacers);
+  // Apply at most MAX_ALIGN_SPACERS widgets to bound CM/DOM work on huge documents.
+  // Spacers are cumulative from the top, so the applied prefix stays correctly
+  // aligned; only blocks past the cap go unpadded (scroll-sync anchors still cover
+  // the whole doc because measureLineAlignBlocks is uncapped up to MAX_MEASURE_BLOCKS).
+  setLineSpacers(editor.view, editorSpacers.slice(0, MAX_ALIGN_SPACERS));
+  setPreviewOffsets(preview.el, previewSpacers.slice(0, MAX_ALIGN_SPACERS));
 }
 
 const lineAlignThrottle = createRafThrottle();
@@ -556,27 +565,88 @@ function scheduleLineAlign(): void {
 // A preview re-render rebuilds the map → spacers are stale; recompute. Other
 // triggers (split entry, toggle, splitter drag, font/typography, resize) call
 // scheduleLineAlign() directly.
-preview.onAfterRender(() => scheduleLineAlign());
-window.addEventListener('resize', () => scheduleLineAlign());
+preview.onAfterRender(() => {
+  invalidateScrollAnchors();
+  scheduleLineAlign();
+});
+window.addEventListener('resize', () => {
+  invalidateScrollAnchors();
+  scheduleLineAlign();
+});
 
-// Scroll sync: while line-align is on, mirror scroll between the two panes 1:1.
-// Bidirectional alignment gives both panes equal per-block tops, so a direct
-// scrollTop mirror keeps the aligned blocks aligned as the user scrolls (and
-// covers content past the rendered editor viewport). The lock suppresses the
-// echoed scroll event the programmatic assignment fires.
-let scrollSyncLock = false;
-function mirrorScroll(from: 'editor' | 'preview'): void {
-  if (!lineAlignActive() || scrollSyncLock) return;
-  scrollSyncLock = true;
-  const cm = editor.view.scrollDOM;
-  if (from === 'editor') preview.el.scrollTop = cm.scrollTop;
-  else cm.scrollTop = preview.el.scrollTop;
-  requestAnimationFrame(() => {
-    scrollSyncLock = false;
-  });
+// ----- Scroll sync: piecewise-linear anchor interpolation -----
+// One controller for both line-align ON and OFF. Anchors are each mapped block's
+// content-space top in the two panes (measureLineAlignBlocks); we interpolate the
+// destination position between the two anchors that bracket the source scroll.
+// This is exact at every block boundary and window-size invariant — replacing the
+// old dual mechanism (a 1:1 mirror fighting a whole-height ratio sync) that
+// jittered and drifted as the window resized. Anchors rebuild lazily whenever
+// either pane's scrollHeight changes (edits, font/typography, image loads, resize,
+// alignment spacers), so the mapping self-heals without hunting every trigger.
+let scrollAnchors: ScrollAnchor[] = [];
+let anchorsDirty = true;
+let lastEdScrollH = -1;
+let lastPvScrollH = -1;
+function invalidateScrollAnchors(): void {
+  anchorsDirty = true;
 }
-editor.view.scrollDOM.addEventListener('scroll', () => mirrorScroll('editor'), { passive: true });
-preview.el.addEventListener('scroll', () => mirrorScroll('preview'), { passive: true });
+function rebuildScrollAnchors(): void {
+  anchorsDirty = false;
+  scrollAnchors =
+    previewMode === 'split'
+      ? normalizeAnchors(
+          measureLineAlignBlocks().map((b) => ({ ed: b.editorTop, pv: b.previewTop })),
+        )
+      : [];
+}
+// Echo suppression without a timing race: when we programmatically set a pane's
+// scrollTop we remember that value; the `scroll` event it fires back is swallowed
+// once (it matches the expected value), so the panes never ping-pong. A genuine
+// user scroll never matches the stale expectation and clears it. This replaces a
+// requestAnimationFrame-released lock that could clear before the echoed event
+// arrived (the jitter the previous design exhibited).
+let expectedEdTop = -1;
+let expectedPvTop = -1;
+function syncScroll(from: 'ed' | 'pv'): void {
+  if (editingInPreview || previewMode !== 'split') return;
+  const cm = editor.view.scrollDOM;
+  const srcEl = from === 'ed' ? cm : preview.el;
+  const expected = from === 'ed' ? expectedEdTop : expectedPvTop;
+  if (expected >= 0 && Math.abs(srcEl.scrollTop - expected) <= 1) {
+    // This is the echo of our own programmatic scroll — consume it and stop.
+    if (from === 'ed') expectedEdTop = -1;
+    else expectedPvTop = -1;
+    return;
+  }
+  // Genuine user scroll on this pane — drop any stale expectation for it.
+  if (from === 'ed') expectedEdTop = -1;
+  else expectedPvTop = -1;
+
+  const edMax = cm.scrollHeight - cm.clientHeight;
+  const pvMax = preview.el.scrollHeight - preview.el.clientHeight;
+  if (cm.scrollHeight !== lastEdScrollH || preview.el.scrollHeight !== lastPvScrollH) {
+    anchorsDirty = true;
+  }
+  if (anchorsDirty) {
+    rebuildScrollAnchors();
+    lastEdScrollH = cm.scrollHeight;
+    lastPvScrollH = preview.el.scrollHeight;
+  }
+  const srcMax = from === 'ed' ? edMax : pvMax;
+  const dstMax = from === 'ed' ? pvMax : edMax;
+  const target = interpolateScroll(scrollAnchors, srcEl.scrollTop, from, srcMax, dstMax);
+  const clamped = Math.max(0, Math.min(dstMax, target));
+  // Record the value we are about to set so its echoed scroll event is ignored.
+  if (from === 'ed') {
+    expectedPvTop = clamped;
+    preview.el.scrollTop = clamped;
+  } else {
+    expectedEdTop = clamped;
+    cm.scrollTop = clamped;
+  }
+}
+editor.view.scrollDOM.addEventListener('scroll', () => syncScroll('ed'), { passive: true });
+preview.el.addEventListener('scroll', () => syncScroll('pv'), { passive: true });
 
 // ----- Preview live-editing: sync HTML -> MD on input (debounced) -----
 function flushPreviewToSource(): boolean {
@@ -857,25 +927,7 @@ window.addEventListener('mouseup', () => {
   scheduleLineAlign();
 });
 
-// ----- Scroll sync (suppressed while preview is being typed in) -----
-let syncing = false;
-const editorScroller = editorHost.querySelector('.cm-scroller') as HTMLElement | null;
-if (editorScroller) {
-  editorScroller.addEventListener('scroll', () => {
-    if (syncing || editingInPreview) return;
-    const ratio = editorScroller.scrollTop / Math.max(1, editorScroller.scrollHeight - editorScroller.clientHeight);
-    syncing = true;
-    preview.el.scrollTop = ratio * Math.max(0, preview.el.scrollHeight - preview.el.clientHeight);
-    requestAnimationFrame(() => (syncing = false));
-  });
-}
-preview.el.addEventListener('scroll', () => {
-  if (syncing || !editorScroller || editingInPreview) return;
-  const ratio = preview.el.scrollTop / Math.max(1, preview.el.scrollHeight - preview.el.clientHeight);
-  syncing = true;
-  editorScroller.scrollTop = ratio * Math.max(0, editorScroller.scrollHeight - editorScroller.clientHeight);
-  requestAnimationFrame(() => (syncing = false));
-});
+// (Scroll sync is handled by the unified anchor-interpolation controller above.)
 
 window.api.onFileOpened((payload: any) => {
   const { filePath, content, html, converted, error } = payload as {
