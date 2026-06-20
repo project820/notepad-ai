@@ -214,14 +214,25 @@ function scheduleAutosave() {
   }, 3000);
 }
 
+// Coalesce preview re-renders into one per animation frame. Each keystroke used
+// to synchronously re-parse the whole markdown and rebuild the preview DOM +
+// source map; on a large document (or a fast paste burst) that janks typing.
+// RAF-coalescing renders only the latest document state, at most one frame
+// behind — word count and autosave stay synchronous (they're cheap).
+const previewRenderThrottle = createRafThrottle();
 function onDocChange(doc: string) {
   if (suppressEditorChange) return;
   if (!dirty) {
     dirty = true;
     setTitle();
   }
-  // Avoid clobbering the preview while the user is typing there.
-  if (!editingInPreview) preview.setDoc(doc);
+  // Avoid clobbering the preview while the user is typing there (re-checked in
+  // the throttled callback in case focus moves into the preview within the frame).
+  if (!editingInPreview) {
+    previewRenderThrottle(() => {
+      if (!editingInPreview) preview.setDoc(doc);
+    });
+  }
   updateWordCount(doc);
   scheduleAutosave();
 }
