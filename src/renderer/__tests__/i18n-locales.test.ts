@@ -134,4 +134,18 @@ describe('i18n — 5 locales (#3)', () => {
       }
     }
   });
+
+  it('exposes the language-restart prompt in all five locales', () => {
+    const expected: Record<string, string> = {
+      en: 'Changing the language requires restarting the app. Restart now?',
+      ko: '언어를 변경하려면 앱을 다시 시작해야 합니다. 지금 다시 시작할까요?',
+      'zh-Hans': '更改语言需要重启应用。现在重启吗？',
+      'zh-Hant': '變更語言需要重新啟動應用程式。現在重新啟動嗎？',
+      ja: '言語を変更するにはアプリの再起動が必要です。今すぐ再起動しますか？',
+    };
+    for (const [loc, label] of Object.entries(expected)) {
+      setLocale(loc as never);
+      expect(t('lang.restartPrompt'), `lang.restartPrompt @ ${loc}`).toBe(label);
+    }
+  });
 });

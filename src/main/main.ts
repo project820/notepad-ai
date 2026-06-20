@@ -866,6 +866,13 @@ ipcMain.on('window:ready', (event) => {
 
 ipcMain.handle('update:check', async () => checkForUpdate(app.getVersion()));
 ipcMain.handle('app:version', () => app.getVersion());
+ipcMain.handle('app:relaunch', () => {
+  // Full restart so every renderer surface re-renders in the newly selected
+  // language. Renderers flush their session snapshot before invoking this, so
+  // open documents and unsaved buffers are restored on the next launch.
+  app.relaunch();
+  app.exit(0);
+});
 ipcMain.handle('shell:open-external', async (_e, url: string) => {
   if (isAllowedExternalUrl(url)) await shell.openExternal(url);
 });

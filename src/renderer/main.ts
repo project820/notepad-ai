@@ -121,6 +121,7 @@ type Api = {
   checkForUpdate: () => Promise<{ updateAvailable: boolean; currentVersion: string; latestVersion: string; url: string } | null>;
   openExternal: (url: string) => Promise<void>;
   appVersion: () => Promise<string>;
+  relaunchApp: () => Promise<void>;
   fetchDesignMd: (input: string) => Promise<{ ok: boolean; designMd?: string; rawUrl?: string; error?: string }>;
   saveHtml: (args: { html: string; defaultName?: string }) => Promise<{ saved: boolean; filePath?: string }>;
   openSavedHtml: (filePath: string) => Promise<{ opened: boolean; error?: string }>;
@@ -731,9 +732,10 @@ createToolbar(toolbarHost, {
     statusEl.textContent = `Model · ${id}`;
   },
   onLocaleChange: (l) => {
+    if (l === getLocale()) return;
     prefs.locale = l;
     savePrefs(prefs);
-    setLocale(l);
+    void requestLocaleRestart(l);
   },
   onToggleSideChat: () => toggleUnifiedChat(),
   onToggleOutline: () => toggleLeftPanel(),
@@ -1549,21 +1551,45 @@ function folderLabelFromScope(scope: string): string {
 
 // ---------------- Session snapshot + crash recovery -----------------
 let sessionSnapshotTimer: ReturnType<typeof setTimeout> | null = null;
+function buildSessionSnapshot() {
+  return {
+    savedAt: Date.now(),
+    path: currentPath,
+    title: pendingTitle,
+    doc: editor.getDoc(),
+    view: previewMode,
+    unifiedChatHistory,
+    model: prefs.model,
+    dirty,
+  };
+}
 function scheduleSessionSnapshot() {
   if (sessionSnapshotTimer) clearTimeout(sessionSnapshotTimer);
   sessionSnapshotTimer = setTimeout(() => {
-    const snap = {
-      savedAt: Date.now(),
-      path: currentPath,
-      title: pendingTitle,
-      doc: editor.getDoc(),
-      view: previewMode,
-      unifiedChatHistory,
-      model: prefs.model,
-      dirty,
-    };
-    void window.api.sessionWrite(snap);
+    void window.api.sessionWrite(buildSessionSnapshot());
   }, 1500);
+}
+/** Cancel any pending debounce and write the snapshot immediately (await before app relaunch). */
+async function flushSessionSnapshot() {
+  if (sessionSnapshotTimer) {
+    clearTimeout(sessionSnapshotTimer);
+    sessionSnapshotTimer = null;
+  }
+  await window.api.sessionWrite(buildSessionSnapshot());
+}
+
+/**
+ * Apply a language change. The UI is icon-driven and many surfaces only relabel
+ * on a full rebuild, so we restart the app to guarantee every surface renders in
+ * the chosen language. We switch the live locale first (so the confirm prompt
+ * shows in the newly-selected language), then offer a restart. On confirm we
+ * flush the session snapshot before relaunching so open/unsaved docs survive.
+ */
+async function requestLocaleRestart(l: Locale) {
+  setLocale(l);
+  if (!window.confirm(t('lang.restartPrompt'))) return;
+  await flushSessionSnapshot();
+  await window.api.relaunchApp();
 }
 
 const origOnDocChange = onDocChange;

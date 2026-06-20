@@ -175,6 +175,8 @@ const api = {
     ipcRenderer.invoke('update:check'),
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke('shell:open-external', url),
   appVersion: (): Promise<string> => ipcRenderer.invoke('app:version'),
+  /** Relaunch the whole app (used to fully apply a language change). */
+  relaunchApp: (): Promise<void> => ipcRenderer.invoke('app:relaunch'),
 
   // HTML export (⑤)
   fetchDesignMd: (
