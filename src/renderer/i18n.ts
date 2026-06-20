@@ -20,6 +20,7 @@ const DICTS: Record<Locale, Dict> = {
     'tip.bold': 'Bold (⌘B)',
     'tip.italic': 'Italic (⌘I)',
     'tip.strike': 'Strikethrough',
+    'tip.highlight': 'Highlight',
     'tip.code': 'Inline code (⌘E)',
     'tip.h1': 'Heading 1',
     'tip.h2': 'Heading 2',
@@ -154,6 +155,7 @@ const DICTS: Record<Locale, Dict> = {
     'ctx.bold': 'Bold',
     'ctx.italic': 'Italic',
     'ctx.strike': 'Strikethrough',
+    'ctx.highlight': 'Highlight',
     'ctx.code': 'Code',
     'ctx.link': 'Link',
     'ctx.quote': 'Quote',
@@ -212,6 +214,7 @@ const DICTS: Record<Locale, Dict> = {
     'tip.bold': '굵게 (⌘B)',
     'tip.italic': '기울임 (⌘I)',
     'tip.strike': '취소선',
+    'tip.highlight': '하이라이트',
     'tip.code': '인라인 코드 (⌘E)',
     'tip.h1': '제목 1',
     'tip.h2': '제목 2',
@@ -337,6 +340,7 @@ const DICTS: Record<Locale, Dict> = {
     'ctx.bold': '굵게',
     'ctx.italic': '기울임',
     'ctx.strike': '취소선',
+    'ctx.highlight': '하이라이트',
     'ctx.code': '코드',
     'ctx.link': '링크',
     'ctx.quote': '인용',
@@ -389,6 +393,7 @@ const DICTS: Record<Locale, Dict> = {
   'zh-Hans': {
     'tip.model': 'AI 模型', 'tip.font': '字号', 'tip.theme': '主题', 'tip.account': '账户', 'tip.language': '语言',
     'tip.bold': '加粗 (⌘B)', 'tip.italic': '斜体 (⌘I)', 'tip.strike': '删除线', 'tip.code': '行内代码 (⌘E)',
+    'tip.highlight': '高亮',
     'tip.h1': '标题 1', 'tip.h2': '标题 2', 'tip.h3': '标题 3', 'tip.quote': '引用', 'tip.ul': '项目符号列表',
     'tip.ol': '编号列表', 'tip.task': '任务列表', 'tip.link': '链接 (⌘K)', 'tip.image': '图片', 'tip.codeblock': '代码块',
     'tip.hr': '分隔线', 'tip.table': '插入表格 (⌘T)', 'tip.view': '切换视图 (⌘P)',
@@ -425,6 +430,7 @@ const DICTS: Record<Locale, Dict> = {
     // v0.2 — edit tools
     'tip.footnote': '插入脚注',
     'ctx.bold': '加粗', 'ctx.italic': '斜体', 'ctx.strike': '删除线', 'ctx.code': '代码', 'ctx.link': '链接', 'ctx.quote': '引用', 'ctx.list': '列表', 'ctx.heading': '标题', 'ctx.footnote': '脚注',
+    'ctx.highlight': '高亮',
     // v0.2 — view options
     'menu.previewLines': '预览行号', 'tip.previewLines': '切换预览行号',
     'menu.rawLineAlign': '原文行对齐', 'tip.rawLineAlign': '将原文行与预览对齐',
@@ -445,6 +451,7 @@ const DICTS: Record<Locale, Dict> = {
   'zh-Hant': {
     'tip.model': 'AI 模型', 'tip.font': '字級', 'tip.theme': '主題', 'tip.account': '帳戶', 'tip.language': '語言',
     'tip.bold': '粗體 (⌘B)', 'tip.italic': '斜體 (⌘I)', 'tip.strike': '刪除線', 'tip.code': '行內程式碼 (⌘E)',
+    'tip.highlight': '螢光標示',
     'tip.h1': '標題 1', 'tip.h2': '標題 2', 'tip.h3': '標題 3', 'tip.quote': '引用', 'tip.ul': '項目符號清單',
     'tip.ol': '編號清單', 'tip.task': '工作清單', 'tip.link': '連結 (⌘K)', 'tip.image': '圖片', 'tip.codeblock': '程式碼區塊',
     'tip.hr': '分隔線', 'tip.table': '插入表格 (⌘T)', 'tip.view': '切換檢視 (⌘P)',
@@ -481,6 +488,7 @@ const DICTS: Record<Locale, Dict> = {
     // v0.2 — edit tools
     'tip.footnote': '插入註腳',
     'ctx.bold': '粗體', 'ctx.italic': '斜體', 'ctx.strike': '刪除線', 'ctx.code': '程式碼', 'ctx.link': '連結', 'ctx.quote': '引用', 'ctx.list': '清單', 'ctx.heading': '標題', 'ctx.footnote': '註腳',
+    'ctx.highlight': '螢光標示',
     // v0.2 — view options
     'menu.previewLines': '預覽行號', 'tip.previewLines': '切換預覽行號',
     'menu.rawLineAlign': '原文行對齊', 'tip.rawLineAlign': '將原文行與預覽對齊',
@@ -501,6 +509,7 @@ const DICTS: Record<Locale, Dict> = {
   ja: {
     'tip.model': 'AI モデル', 'tip.font': '文字サイズ', 'tip.theme': 'テーマ', 'tip.account': 'アカウント', 'tip.language': '言語',
     'tip.bold': '太字 (⌘B)', 'tip.italic': '斜体 (⌘I)', 'tip.strike': '取り消し線', 'tip.code': 'インラインコード (⌘E)',
+    'tip.highlight': 'ハイライト',
     'tip.h1': '見出し 1', 'tip.h2': '見出し 2', 'tip.h3': '見出し 3', 'tip.quote': '引用', 'tip.ul': '箇条書きリスト',
     'tip.ol': '番号付きリスト', 'tip.task': 'タスクリスト', 'tip.link': 'リンク (⌘K)', 'tip.image': '画像', 'tip.codeblock': 'コードブロック',
     'tip.hr': '区切り線', 'tip.table': '表を挿入 (⌘T)', 'tip.view': '表示切替 (⌘P)',
@@ -537,6 +546,7 @@ const DICTS: Record<Locale, Dict> = {
     // v0.2 — edit tools
     'tip.footnote': '脚注を挿入',
     'ctx.bold': '太字', 'ctx.italic': '斜体', 'ctx.strike': '取り消し線', 'ctx.code': 'コード', 'ctx.link': 'リンク', 'ctx.quote': '引用', 'ctx.list': 'リスト', 'ctx.heading': '見出し', 'ctx.footnote': '脚注',
+    'ctx.highlight': 'ハイライト',
     // v0.2 — view options
     'menu.previewLines': 'プレビュー行番号', 'tip.previewLines': 'プレビュー行番号の切替',
     'menu.rawLineAlign': '原文行の整列', 'tip.rawLineAlign': '原文をプレビューに整列',

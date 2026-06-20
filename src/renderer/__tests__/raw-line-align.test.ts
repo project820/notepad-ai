@@ -4,142 +4,120 @@ import { EditorState, type Extension } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { history, undo } from '@codemirror/commands';
 import {
-  computeLineAlignmentSpacers,
+  computeBidirectionalAlignment,
   setLineSpacers,
   clearLineSpacers,
   lineAlignmentField,
   MAX_SPACER_PX,
+  type LineAlignmentBlock,
+  type AlignmentResult,
 } from '../cm-line-alignment';
 
-describe('computeLineAlignmentSpacers — pure spacer geometry (no DOM)', () => {
-  it('returns an empty list for empty input (map absent / no blocks)', () => {
-    expect(computeLineAlignmentSpacers({ blocks: [] })).toEqual([]);
+/** Resolve the post-spacer top of every block in BOTH panes. A spacer inserted
+ *  before block k pushes block k and every later block down by its height. */
+function appliedTops(blocks: readonly LineAlignmentBlock[], res: AlignmentResult): Array<{ e: number; p: number }> {
+  const eAdd = blocks.map(() => 0);
+  const pAdd = blocks.map(() => 0);
+  for (const s of res.editorSpacers) {
+    const k = blocks.findIndex((b) => b.line === s.line);
+    if (k < 0) continue;
+    for (let i = k; i < blocks.length; i++) eAdd[i] += s.heightPx;
+  }
+  for (const s of res.previewSpacers) {
+    const k = blocks.findIndex((b) => b.mapId === s.mapId);
+    if (k < 0) continue;
+    for (let i = k; i < blocks.length; i++) pAdd[i] += s.heightPx;
+  }
+  return blocks.map((b, i) => ({ e: b.editorTop + eAdd[i], p: b.previewTop + pAdd[i] }));
+}
+
+describe('computeBidirectionalAlignment — pure spacer geometry (no DOM)', () => {
+  it('returns empty spacer sets for empty input', () => {
+    expect(computeBidirectionalAlignment([])).toEqual({ editorSpacers: [], previewSpacers: [] });
   });
 
-  it('adds the gap as a spacer when the editor block sits above its preview block', () => {
-    // Block 1 anchors at 0/0 (no spacer); block 2 needs preview-editor = 100.
-    expect(
-      computeLineAlignmentSpacers({
-        blocks: [
-          { line: 1, previewTop: 0, editorTop: 0 },
-          { line: 5, previewTop: 100, editorTop: 0 },
-        ],
-      }),
-    ).toEqual([{ line: 5, heightPx: 100 }]);
+  it('pushes the EDITOR down when its block sits above the preview block', () => {
+    const blocks: LineAlignmentBlock[] = [
+      { line: 1, mapId: 0, previewTop: 0, editorTop: 0 },
+      { line: 5, mapId: 1, previewTop: 100, editorTop: 0 },
+    ];
+    const res = computeBidirectionalAlignment(blocks);
+    expect(res.editorSpacers).toEqual([{ line: 5, heightPx: 100 }]);
+    expect(res.previewSpacers).toEqual([]);
   });
 
-  it('clamps a negative gap to 0 (no compression) and emits no spacer', () => {
-    // Editor line already sits below the preview block → would need negative space.
-    expect(
-      computeLineAlignmentSpacers({ blocks: [{ line: 3, previewTop: 10, editorTop: 60 }] }),
-    ).toEqual([]);
+  it('pushes the PREVIEW down when its block sits above the editor block (regression: not just the first block)', () => {
+    // The old one-sided model skipped this — only the first block ever aligned.
+    const blocks: LineAlignmentBlock[] = [
+      { line: 3, mapId: 7, previewTop: 10, editorTop: 60 },
+    ];
+    const res = computeBidirectionalAlignment(blocks);
+    expect(res.editorSpacers).toEqual([]);
+    expect(res.previewSpacers).toEqual([{ mapId: 7, heightPx: 50 }]);
   });
 
-  it('keeps the cumulative offset monotonic — never compresses a later block', () => {
-    const out = computeLineAlignmentSpacers({
-      blocks: [
-        { line: 1, previewTop: 0, editorTop: 0 }, // anchor → 0
-        { line: 4, previewTop: 120, editorTop: 0 }, // wants cumulative 120 → +120
-        { line: 8, previewTop: 60, editorTop: 40 }, // wants cumulative 20 < 120 → +0 (skip)
-        { line: 12, previewTop: 300, editorTop: 40 }, // wants cumulative 260 > 120 → +140
-      ],
+  it('aligns EVERY block top in both panes even when editor height overtakes preview', () => {
+    // Exactly the failure the user reported: after block 1, the raw editor
+    // accumulates more height than the compact preview (e.g. a table). The old
+    // model left every later block unaligned; bidirectional pads the preview.
+    const blocks: LineAlignmentBlock[] = [
+      { line: 1, mapId: 0, previewTop: 30, editorTop: 8 }, // preview header taller → editor +22
+      { line: 2, mapId: 1, previewTop: 70, editorTop: 120 }, // raw table taller → preview catches up
+      { line: 8, mapId: 2, previewTop: 110, editorTop: 240 }, // editor keeps running ahead
+      { line: 14, mapId: 3, previewTop: 400, editorTop: 300 }, // preview pulls ahead again
+    ];
+    const res = computeBidirectionalAlignment(blocks);
+    const tops = appliedTops(blocks, res);
+    // The core invariant the user asked for: all lines aligned to the preview.
+    tops.forEach(({ e, p }) => expect(e).toBeCloseTo(p, 6));
+    // And both panes only ever grew (every block top >= its natural top).
+    blocks.forEach((b, i) => {
+      expect(tops[i].e).toBeGreaterThanOrEqual(b.editorTop);
+      expect(tops[i].p).toBeGreaterThanOrEqual(b.previewTop);
     });
-    expect(out).toEqual([
-      { line: 4, heightPx: 120 },
-      { line: 12, heightPx: 140 },
-    ]);
-    // Every emitted height is strictly positive and the running total only grows.
-    let running = 0;
-    for (const s of out) {
-      expect(s.heightPx).toBeGreaterThan(0);
-      running += s.heightPx;
-    }
-    expect(running).toBe(260);
+  });
+
+  it('contributes a spacer to at most one pane per block', () => {
+    const blocks: LineAlignmentBlock[] = [
+      { line: 1, mapId: 0, previewTop: 0, editorTop: 0 },
+      { line: 4, mapId: 1, previewTop: 200, editorTop: 50 },
+      { line: 9, mapId: 2, previewTop: 60, editorTop: 400 },
+    ];
+    const res = computeBidirectionalAlignment(blocks);
+    const editorLines = new Set(res.editorSpacers.map((s) => s.line));
+    const previewIdx = new Set(res.previewSpacers.map((s) => blocks.findIndex((b) => b.mapId === s.mapId)));
+    const editorIdx = new Set([...editorLines].map((line) => blocks.findIndex((b) => b.line === line)));
+    // No block index appears in both spacer sets.
+    for (const i of editorIdx) expect(previewIdx.has(i)).toBe(false);
   });
 
   it('caps each spacer at the supplied maxSpacerPx', () => {
-    expect(
-      computeLineAlignmentSpacers({
-        blocks: [{ line: 2, previewTop: 100000, editorTop: 0 }],
-        maxSpacerPx: 500,
-      }),
-    ).toEqual([{ line: 2, heightPx: 500 }]);
+    const res = computeBidirectionalAlignment([{ line: 2, mapId: 0, previewTop: 100000, editorTop: 0 }], 500);
+    expect(res.editorSpacers).toEqual([{ line: 2, heightPx: 500 }]);
   });
 
   it('never lets maxSpacerPx exceed the absolute MAX_SPACER_PX cap', () => {
-    const out = computeLineAlignmentSpacers({
-      blocks: [{ line: 2, previewTop: 1e9, editorTop: 0 }],
-      maxSpacerPx: 1e9,
-    });
-    expect(out[0].heightPx).toBe(MAX_SPACER_PX);
+    const res = computeBidirectionalAlignment([{ line: 2, mapId: 0, previewTop: 1e9, editorTop: 0 }], 1e9);
+    expect(res.editorSpacers[0].heightPx).toBe(MAX_SPACER_PX);
   });
 
-  it('skips blocks with invalid line numbers or non-finite tops', () => {
-    expect(
-      computeLineAlignmentSpacers({
-        blocks: [
-          { line: 0, previewTop: 0, editorTop: 0 }, // invalid line
-          { line: 2, previewTop: NaN, editorTop: 0 }, // non-finite top
-          { line: 3, previewTop: 50, editorTop: 0 }, // valid → +50
-        ],
-      }),
-    ).toEqual([{ line: 3, heightPx: 50 }]);
-  });
-});
-
-describe('computeLineAlignmentSpacers — post-spacer alignment (preview is truth)', () => {
-  /** Apply the emitted spacers to the natural editor tops; a block at `line` is
-   *  pushed down by every spacer inserted at or before it. */
-  const appliedTops = (
-    blocks: ReadonlyArray<{ line: number; previewTop: number; editorTop: number }>,
-    spacers: ReadonlyArray<{ line: number; heightPx: number }>,
-  ): number[] =>
-    blocks.map(
-      (b) => b.editorTop + spacers.filter((s) => s.line <= b.line).reduce((sum, s) => sum + s.heightPx, 0),
-    );
-
-  it('pads every block onto its preview top, including the first block', () => {
-    const blocks = [
-      { line: 1, previewTop: 20, editorTop: 4 }, // padding gap → first spacer 16
-      { line: 5, previewTop: 140, editorTop: 90 }, // wants cumulative 50 → +34
-      { line: 9, previewTop: 200, editorTop: 180 }, // wants cumulative 20 < 50 → +0 (overshoot)
-      { line: 13, previewTop: 400, editorTop: 300 }, // wants cumulative 100 → +50
-    ];
-    const spacers = computeLineAlignmentSpacers({ blocks });
-    // The first block is padded by its real gap — not normalized away to 0.
-    expect(spacers).toEqual([
-      { line: 1, heightPx: 16 },
-      { line: 5, heightPx: 34 },
-      { line: 13, heightPx: 50 },
+  it('skips blocks with invalid line numbers, invalid mapIds, or non-finite tops', () => {
+    const res = computeBidirectionalAlignment([
+      { line: 0, mapId: 0, previewTop: 0, editorTop: 0 }, // invalid line
+      { line: 2, mapId: 1.5, previewTop: 0, editorTop: 0 }, // invalid mapId
+      { line: 3, mapId: 2, previewTop: NaN, editorTop: 0 }, // non-finite top
+      { line: 4, mapId: 3, previewTop: 50, editorTop: 0 }, // valid → editor +50
     ]);
-
-    const tops = appliedTops(blocks, spacers);
-    // Blocks that received their full spacer land exactly on the preview top.
-    expect(tops[0]).toBe(20);
-    expect(tops[1]).toBe(140);
-    expect(tops[3]).toBe(400);
-    // The no-compression block sits at/below its preview top, never above it.
-    expect(tops[2]).toBeGreaterThanOrEqual(200);
-    // No block is ever pulled above its preview top (would require compression).
-    blocks.forEach((b, i) => expect(tops[i]).toBeGreaterThanOrEqual(b.previewTop));
-    // Cumulative spacer offset only grows (monotonic, strictly positive heights).
-    let running = 0;
-    for (const s of spacers) {
-      expect(s.heightPx).toBeGreaterThan(0);
-      expect(s.heightPx).toBeLessThanOrEqual(MAX_SPACER_PX);
-      running += s.heightPx;
-    }
-    expect(running).toBe(100);
+    expect(res.editorSpacers).toEqual([{ line: 4, heightPx: 50 }]);
+    expect(res.previewSpacers).toEqual([]);
   });
 
-  it('emits no leading spacer when the first editor line already sits at/below its preview top', () => {
-    const spacers = computeLineAlignmentSpacers({
-      blocks: [
-        { line: 1, previewTop: 10, editorTop: 40 }, // editor already below preview → no compression
-        { line: 4, previewTop: 120, editorTop: 60 }, // wants cumulative 60 → +60
-      ],
-    });
-    expect(spacers).toEqual([{ line: 4, heightPx: 60 }]);
+  it('absorbs the first-block origin/padding difference (first block participates)', () => {
+    const blocks: LineAlignmentBlock[] = [{ line: 1, mapId: 0, previewTop: 20, editorTop: 4 }];
+    const res = computeBidirectionalAlignment(blocks);
+    expect(res.editorSpacers).toEqual([{ line: 1, heightPx: 16 }]);
+    const [{ e, p }] = appliedTops(blocks, res);
+    expect(e).toBe(p);
   });
 });
 

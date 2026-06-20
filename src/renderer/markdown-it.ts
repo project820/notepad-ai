@@ -3,6 +3,17 @@ import MarkdownIt from 'markdown-it';
 import taskLists from 'markdown-it-task-lists';
 // @ts-expect-error — no types ship with this plugin
 import footnote from 'markdown-it-footnote';
+// @ts-expect-error — no types ship with this plugin
+import mark from 'markdown-it-mark';
+// @ts-expect-error — no types ship with this plugin
+import sub from 'markdown-it-sub';
+// @ts-expect-error — no types ship with this plugin
+import sup from 'markdown-it-sup';
+// @ts-expect-error — no types ship with this plugin
+import { full as emoji } from 'markdown-it-emoji';
+// @ts-expect-error — no types ship with this plugin
+import deflist from 'markdown-it-deflist';
+import attrs from 'markdown-it-attrs';
 
 /**
  * Build the markdown-it instance shared by the live preview and the
@@ -24,7 +35,13 @@ export function createMarkdownIt(): MarkdownIt {
     typographer: true,
   })
     .use(taskLists, { enabled: true, label: true })
-    .use(footnote);
+    .use(footnote)
+    .use(mark)
+    .use(sub)
+    .use(sup)
+    .use(emoji)
+    .use(deflist)
+    .use(attrs, { allowedAttributes: ['id'] });
 
   // Open links in the system browser (Electron preload doesn't add
   // target=_blank automatically).

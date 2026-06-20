@@ -5,6 +5,7 @@ export type FormatAction =
   | 'bold'
   | 'italic'
   | 'strike'
+  | 'highlight'
   | 'code'
   | 'h1'
   | 'h2'
@@ -212,6 +213,7 @@ export function applyToEditor(view: EditorView, action: FormatAction) {
     case 'bold': return wrap(view, '**');
     case 'italic': return wrap(view, '_');
     case 'strike': return wrap(view, '~~');
+    case 'highlight': return wrap(view, '==');
     case 'code': return wrap(view, '`');
     case 'h1': return applyLinePrefix(view, '# ', { exclusive: true });
     case 'h2': return applyLinePrefix(view, '## ', { exclusive: true });
@@ -251,6 +253,24 @@ export function applyToPreview(action: FormatAction): boolean {
         code.appendChild(range.extractContents());
         range.insertNode(code);
         range.selectNodeContents(code);
+        sel.removeAllRanges();
+        sel.addRange(range);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    case 'highlight': {
+      // Wrap selection in <mark>
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0) return false;
+      const range = sel.getRangeAt(0);
+      if (range.collapsed) return false;
+      const mark = doc.createElement('mark');
+      try {
+        mark.appendChild(range.extractContents());
+        range.insertNode(mark);
+        range.selectNodeContents(mark);
         sel.removeAllRanges();
         sel.addRange(range);
         return true;

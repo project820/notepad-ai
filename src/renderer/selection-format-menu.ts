@@ -36,11 +36,12 @@ export type SelectionFormatMenuDeps = {
 
 type CtxItem = { action: FormatAction; labelKey: string };
 
-/** Toolbar-parity subset: bold/italic/strike/code/link/quote/list/heading/footnote. */
+/** Toolbar-parity subset: bold/italic/strike/highlight/code/link/quote/list/heading/footnote. */
 const ITEMS: CtxItem[] = [
   { action: 'bold', labelKey: 'ctx.bold' },
   { action: 'italic', labelKey: 'ctx.italic' },
   { action: 'strike', labelKey: 'ctx.strike' },
+  { action: 'highlight', labelKey: 'ctx.highlight' },
   { action: 'code', labelKey: 'ctx.code' },
   { action: 'link', labelKey: 'ctx.link' },
   { action: 'quote', labelKey: 'ctx.quote' },

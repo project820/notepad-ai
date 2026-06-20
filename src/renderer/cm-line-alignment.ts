@@ -28,29 +28,33 @@ export const MAX_SPACER_PX = 4000;
 /** A spacer to insert before a 1-based source `line`, `heightPx` tall. */
 export type LineSpacer = { line: number; heightPx: number };
 
-/** One preview↔editor block measurement fed to {@link computeLineAlignmentSpacers}. */
+/** One block measured in BOTH panes at their natural (spacer-free) positions. */
 export type LineAlignmentBlock = {
-  /** 1-based source line the block starts on (the spacer is inserted before it). */
+  /** 1-based source line the block starts on (editor spacer inserted before it). */
   line: number;
+  /** The preview block's `data-map-id` (preview spacer is inserted before it). */
+  mapId: number;
   /**
-   * Top of the rendered preview block in the preview pane's **content space**
-   * (block rect top − preview-scroller rect top + preview scrollTop), so it is
-   * the block's absolute offset within the scrollable content — scroll-invariant.
+   * Top of the rendered preview block in the preview pane's content space
+   * (block rect top − preview-scroller rect top + preview scrollTop) — the
+   * block's absolute offset within the scrollable content, scroll-invariant.
    */
   previewTop: number;
   /**
-   * Top of this block's editor line in the editor pane's content space
-   * (line coords top − cm-scroller rect top + cm scrollTop), measured WITHOUT
-   * spacers (its natural position). Same per-pane content-space convention as
-   * `previewTop`, so the difference `previewTop − editorTop` is a real gap.
+   * Top of this block's editor line in the editor pane's content space, measured
+   * WITHOUT spacers (its natural position). Use the CM6 height map
+   * (`view.lineBlockAt(pos).top`) so off-screen lines are measurable too.
    */
   editorTop: number;
 };
 
-export type LineAlignmentInput = {
-  blocks: readonly LineAlignmentBlock[];
-  /** Per-spacer height cap (px). Clamped to {@link MAX_SPACER_PX}. */
-  maxSpacerPx?: number;
+/** A display-only spacer for a preview block, keyed by its `data-map-id`. */
+export type PreviewSpacer = { mapId: number; heightPx: number };
+
+/** The spacers that align both panes block-for-block. */
+export type AlignmentResult = {
+  editorSpacers: LineSpacer[];
+  previewSpacers: PreviewSpacer[];
 };
 
 function clampCap(v: number | undefined): number {
@@ -59,44 +63,51 @@ function clampCap(v: number | undefined): number {
 }
 
 /**
- * Pure: compute the spacer heights that align each editor block top with its
- * preview block top, **without ever compressing** (spacers only add space). The
- * rendered preview is the source of truth; the raw editor is padded down to it.
+ * Pure: compute the spacers that align each block's top in BOTH panes
+ * (bidirectional). Because raw editor text height can't be removed, alignment is
+ * achieved by only ADDING space: for each block the taller pane stays put and the
+ * shorter pane gets a spacer down to it. Running accumulators (`eAcc`, `pAcc`)
+ * track the space already added above the current block in each pane, so the
+ * comparison is done in the post-spacer coordinate space and every block's top
+ * ends up at `max(editorTop+eAcc, previewTop+pAcc)` in both panes.
  *
- * For block `i`, the desired total spacer height above it is
- * `previewTop[i] - editorTop[i]`. Because earlier spacers also push block `i`
- * down, the running accumulator is monotonic non-decreasing: a block that would
- * need *less* cumulative space than already accrued (its editor line already sits
- * past its preview block) gets a 0 spacer, never a negative one. Each individual
- * spacer is clamped to `[0, maxSpacerPx]`. Zero-height spacers are omitted.
- *
- * The FIRST block participates like any other — its `previewTop - editorTop`
- * becomes the first spacer (absorbing the per-pane origin/padding difference), so
- * alignment is correct from the first block. Tops MUST therefore be same-origin
- * content-space values (see {@link LineAlignmentBlock}); do NOT pre-normalize
- * them to the first block, which would force its gap to 0 and leave every block
- * shifted by that error.
+ * Each block contributes a spacer to AT MOST one pane (the shorter one); the
+ * other gets 0. The first block participates like any other, absorbing the
+ * per-pane origin/padding difference. Each add is clamped to `[0, maxSpacerPx]`;
+ * zero adds are omitted. Tops MUST be same-origin content-space values per pane.
  *
  * No DOM.
  */
-export function computeLineAlignmentSpacers(input: LineAlignmentInput): LineSpacer[] {
-  const blocks = input?.blocks ?? [];
-  if (blocks.length === 0) return [];
-  const cap = clampCap(input.maxSpacerPx);
-  const out: LineSpacer[] = [];
-  let running = 0; // cumulative spacer height accrued above the current block
+export function computeBidirectionalAlignment(
+  blocks: readonly LineAlignmentBlock[],
+  maxSpacerPx: number = MAX_SPACER_PX,
+): AlignmentResult {
+  const cap = clampCap(maxSpacerPx);
+  const editorSpacers: LineSpacer[] = [];
+  const previewSpacers: PreviewSpacer[] = [];
+  let eAcc = 0; // space already added above the current block in the editor
+  let pAcc = 0; // space already added above the current block in the preview
   for (const b of blocks) {
     if (!Number.isInteger(b.line) || b.line < 1) continue;
-    if (!Number.isFinite(b.previewTop) || !Number.isFinite(b.editorTop)) continue;
-    // Total spacer wanted above this block so its editor line meets the preview top.
-    const target = b.previewTop - b.editorTop;
-    let add = target - running; // extra beyond what earlier spacers already added
-    if (add <= 0) continue; // no compression: negative/zero → skip, running unchanged
-    if (add > cap) add = cap;
-    running += add;
-    out.push({ line: b.line, heightPx: add });
+    if (!Number.isInteger(b.mapId)) continue;
+    if (!Number.isFinite(b.editorTop) || !Number.isFinite(b.previewTop)) continue;
+    const eCur = b.editorTop + eAcc;
+    const pCur = b.previewTop + pAcc;
+    const aligned = Math.max(eCur, pCur);
+    let eAdd = aligned - eCur; // >= 0
+    let pAdd = aligned - pCur; // >= 0
+    if (eAdd > cap) eAdd = cap;
+    if (pAdd > cap) pAdd = cap;
+    if (eAdd > 0) {
+      editorSpacers.push({ line: b.line, heightPx: eAdd });
+      eAcc += eAdd;
+    }
+    if (pAdd > 0) {
+      previewSpacers.push({ mapId: b.mapId, heightPx: pAdd });
+      pAcc += pAdd;
+    }
   }
-  return out;
+  return { editorSpacers, previewSpacers };
 }
 
 /** Block widget that occupies a fixed vertical gap and nothing else. */

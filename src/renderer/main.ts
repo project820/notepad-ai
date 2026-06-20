@@ -2,7 +2,7 @@ import { createEditor, type EditorHandle } from './editor';
 import { createPreview, type PreviewHandle } from './preview';
 import { createSelectionSync, clearPreviewHighlight } from './selection-sync';
 import { collectPreviewBlocks } from './source-preview-map';
-import { setLineSpacers, clearLineSpacers, computeLineAlignmentSpacers, MAX_SPACER_PX, type LineAlignmentBlock } from './cm-line-alignment';
+import { setLineSpacers, clearLineSpacers, computeBidirectionalAlignment, MAX_SPACER_PX, type LineAlignmentBlock, type PreviewSpacer } from './cm-line-alignment';
 import { createToolbar, paintAccountState, type Theme, type FontSize } from './toolbar';
 import { t, getLocale, setLocale, onLocaleChange, type Locale } from './i18n';
 import { installKeyboardNav } from './keyboard-nav';
@@ -389,33 +389,82 @@ function lineAlignActive(): boolean {
   );
 }
 
+const PREVIEW_SHIFT_ATTR = 'data-line-align-shift';
+
+/** Remove every preview-side alignment offset. We shift each block via its OWN
+ *  inline margin-top (no extra nodes), so Turndown is unaffected (it ignores
+ *  style / data-*) and clearing is just resetting that inline margin. */
+function clearPreviewOffsets(root: HTMLElement): void {
+  root.querySelectorAll<HTMLElement>(`[${PREVIEW_SHIFT_ATTR}]`).forEach((el) => {
+    el.style.marginTop = '';
+    el.removeAttribute(PREVIEW_SHIFT_ATTR);
+  });
+}
+
+/** Push mapped top-level preview blocks DOWN so the preview side of a
+ *  bidirectional alignment grows to meet the editor. Each shifted block keeps its
+ *  natural collapsed top gap plus the wanted offset (`naturalGap + heightPx`);
+ *  because that new margin is ≥ the neighbour it would collapse with, it wins
+ *  outright and the block moves by EXACTLY `heightPx` — margin-collapse can't eat
+ *  into it (verified live). Shifts cascade through normal flow, so later blocks
+ *  inherit earlier offsets, matching the cumulative geometry that
+ *  computeBidirectionalAlignment produced. */
+function setPreviewOffsets(root: HTMLElement, spacers: readonly PreviewSpacer[]): void {
+  clearPreviewOffsets(root);
+  if (spacers.length === 0) return;
+  // mapId -> direct-child block element (top-level only; never nested dupes).
+  const elByMapId = new Map<number, HTMLElement>();
+  for (const child of Array.from(root.children)) {
+    const id = child.getAttribute('data-map-id');
+    if (id != null) elByMapId.set(Number(id), child as HTMLElement);
+  }
+  for (const s of spacers) {
+    let h = Number.isFinite(s.heightPx) ? s.heightPx : 0;
+    if (h <= 0) continue;
+    if (h > MAX_SPACER_PX) h = MAX_SPACER_PX;
+    const block = elByMapId.get(s.mapId);
+    if (!block) continue;
+    const curMT = parseFloat(getComputedStyle(block).marginTop) || 0;
+    const prev = block.previousElementSibling;
+    const prevMB = prev ? parseFloat(getComputedStyle(prev).marginBottom) || 0 : 0;
+    const naturalGap = Math.max(prevMB, curMT);
+    block.style.marginTop = `${naturalGap + h}px`;
+    block.setAttribute(PREVIEW_SHIFT_ATTR, '1');
+  }
+}
+
+/** Measure every mapped block's natural top in BOTH panes in ONE shared frame:
+ *  the block's actual viewport Y plus its pane's own scrollTop (scroll-invariant).
+ *  The preview block uses its real getBoundingClientRect; the editor line uses the
+ *  CM6 height map (lineBlockAt) so off-screen lines are measurable too. lineBlockAt
+ *  is in CM's internal document coordinates, which are offset from real viewport Y
+ *  by a constant — we calibrate that constant ONCE from the first on-screen line
+ *  (coordsAtPos gives its true viewport top) so editor and preview share the exact
+ *  same frame and there is no uniform vertical offset between the panes.
+ *  Both panes MUST be spacer-free when this runs (applyLineAlign clears first). */
 function measureLineAlignBlocks(): LineAlignmentBlock[] {
   if (preview.getSourceMap().length === 0) return [];
   const view = editor.view;
   const docLines = view.state.doc.lines;
-  // Same-origin content-space: measure each pane against its OWN scroller (rect
-  // top + scrollTop) so each top is the block's absolute offset within that
-  // pane's scrollable content — directly comparable and scroll-invariant. This
-  // replaces the old viewport coords + normalize-to-first-block, which discarded
-  // the real first-block gap (preview vs editor padding) and accumulated error
-  // down the page. Because the tops are scroll-invariant, a single pass measures
-  // the WHOLE document (capped) instead of a scroll-dependent window, so the
-  // spacers stay valid as the user scrolls. The editor tops are NATURAL
-  // positions: applyLineAlign() clears the previous spacers before this runs.
+  // Measure both panes relative to their OWN scroller's border-box top, in content
+  // space (scroll-invariant). The two scrollers sit side by side at the same
+  // viewport Y, so aligning these values aligns the panes visually. For the editor,
+  // use the line's real viewport top (coordsAtPos) when it's rendered; fall back to
+  // the height map (contentDOM top + lineBlockAt) for off-screen lines.
+  const cmTop = view.scrollDOM.getBoundingClientRect().top;
+  const cmScrollTop = view.scrollDOM.scrollTop;
+  const contentTop = view.contentDOM.getBoundingClientRect().top;
   const pRect = preview.el.getBoundingClientRect();
-  const cmScroller = view.scrollDOM;
-  const eRect = cmScroller.getBoundingClientRect();
   const pScrollTop = preview.el.scrollTop;
-  const eScrollTop = cmScroller.scrollTop;
   const out: LineAlignmentBlock[] = [];
   for (const block of collectPreviewBlocks(preview.el)) {
     if (block.startLine < 1 || block.startLine > docLines) continue;
-    const coords = view.coordsAtPos(view.state.doc.line(block.startLine).from);
-    if (!coords) continue;
-    const rect = (block.el as HTMLElement).getBoundingClientRect();
-    const previewTop = rect.top - pRect.top + pScrollTop;
-    const editorTop = coords.top - eRect.top + eScrollTop;
-    out.push({ line: block.startLine, previewTop, editorTop });
+    const pos = view.state.doc.line(block.startLine).from;
+    const coords = view.coordsAtPos(pos);
+    const lineViewportTop = coords ? coords.top : contentTop + view.lineBlockAt(pos).top;
+    const editorTop = lineViewportTop - cmTop + cmScrollTop;
+    const previewTop = (block.el as HTMLElement).getBoundingClientRect().top - pRect.top + pScrollTop;
+    out.push({ line: block.startLine, mapId: block.mapId, previewTop, editorTop });
     if (out.length >= MAX_ALIGN_SPACERS) break;
   }
   return out;
@@ -424,17 +473,21 @@ function measureLineAlignBlocks(): LineAlignmentBlock[] {
 function applyLineAlign(): void {
   if (!lineAlignActive()) {
     clearLineSpacers(editor.view);
+    clearPreviewOffsets(preview.el);
     return;
   }
-  // Clear first so the measurement reads the *natural* editor positions (without
-  // the previous pass's spacers); replacing the set wholesale would otherwise
-  // oscillate. CM updates the DOM synchronously on dispatch, so the layout reads
-  // below reflect the cleared state — and the whole pass runs inside one RAF
-  // callback, so the browser never paints the intermediate (cleared) frame.
+  // Clear BOTH panes first so the measurement reads natural (offset-free)
+  // positions. CM updates the DOM synchronously on dispatch and clearPreviewOffsets
+  // resets the inline margins synchronously, so the layout reads below reflect the
+  // cleared state — and the whole pass runs inside one RAF callback, so the browser
+  // never paints the intermediate (cleared) frame.
   clearLineSpacers(editor.view);
+  clearPreviewOffsets(preview.el);
   const blocks = measureLineAlignBlocks();
   if (blocks.length === 0) return;
-  setLineSpacers(editor.view, computeLineAlignmentSpacers({ blocks, maxSpacerPx: MAX_SPACER_PX }));
+  const { editorSpacers, previewSpacers } = computeBidirectionalAlignment(blocks, MAX_SPACER_PX);
+  setLineSpacers(editor.view, editorSpacers);
+  setPreviewOffsets(preview.el, previewSpacers);
 }
 
 const lineAlignThrottle = createRafThrottle();
@@ -447,6 +500,25 @@ function scheduleLineAlign(): void {
 // scheduleLineAlign() directly.
 preview.onAfterRender(() => scheduleLineAlign());
 window.addEventListener('resize', () => scheduleLineAlign());
+
+// Scroll sync: while line-align is on, mirror scroll between the two panes 1:1.
+// Bidirectional alignment gives both panes equal per-block tops, so a direct
+// scrollTop mirror keeps the aligned blocks aligned as the user scrolls (and
+// covers content past the rendered editor viewport). The lock suppresses the
+// echoed scroll event the programmatic assignment fires.
+let scrollSyncLock = false;
+function mirrorScroll(from: 'editor' | 'preview'): void {
+  if (!lineAlignActive() || scrollSyncLock) return;
+  scrollSyncLock = true;
+  const cm = editor.view.scrollDOM;
+  if (from === 'editor') preview.el.scrollTop = cm.scrollTop;
+  else cm.scrollTop = preview.el.scrollTop;
+  requestAnimationFrame(() => {
+    scrollSyncLock = false;
+  });
+}
+editor.view.scrollDOM.addEventListener('scroll', () => mirrorScroll('editor'), { passive: true });
+preview.el.addEventListener('scroll', () => mirrorScroll('preview'), { passive: true });
 
 // ----- Preview live-editing: sync HTML -> MD on input (debounced) -----
 function flushPreviewToSource(): boolean {

@@ -33,6 +33,50 @@ function buildService(): TurndownService {
     replacement: () => '',
   });
 
+  // ===== Extended markdown round-trip (==mark==, ~sub~, ^sup^, heading ids, deflists) =====
+
+  // <mark> → ==highlight==
+  td.addRule('mark', {
+    filter: ['mark'],
+    replacement: (content) => '==' + content + '==',
+  });
+
+  // <sub> → ~subscript~
+  td.addRule('sub', {
+    filter: ['sub'],
+    replacement: (content) => '~' + content + '~',
+  });
+
+  // <sup> → ^superscript^
+  td.addRule('sup', {
+    filter: ['sup'],
+    replacement: (content) => '^' + content + '^',
+  });
+
+  // Headings → ATX, preserving an explicit `id` as a trailing `{#id}` attr token.
+  td.addRule('headingId', {
+    filter: ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'],
+    replacement: (content, node) => {
+      const level = Number(node.nodeName.charAt(1));
+      const id = node.id;
+      return '\n\n' + '#'.repeat(level) + ' ' + content + (id ? ` {#${id}}` : '') + '\n\n';
+    },
+  });
+
+  // <dl> → definition-list markdown: each term on its own line, each
+  // definition prefixed with `: `. Handles multiple dt/dd pairs.
+  td.addRule('definitionList', {
+    filter: (node) => node.nodeName === 'DL',
+    replacement: (_content, node) => {
+      const lines: string[] = [];
+      node.childNodes.forEach((child) => {
+        if (child.nodeName === 'DT') lines.push((child.textContent ?? '').trim());
+        else if (child.nodeName === 'DD') lines.push(': ' + (child.textContent ?? '').trim());
+      });
+      return '\n' + lines.join('\n') + '\n';
+    },
+  });
+
   // Hard-strip elements that should NEVER appear in the markdown output.
   // kordoc.renderHtml() inlines <style> blocks (page CSS) which would
   // otherwise leak verbatim as plain text. Same for <script>, <head>,
