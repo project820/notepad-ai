@@ -6,15 +6,15 @@
  * live only in the main process; status objects expose `keyLast4` at most.
  */
 
-export type AiProviderId = 'chatgpt' | 'claude' | 'openrouter';
+export type AiProviderId = 'chatgpt' | 'claude' | 'openrouter' | 'ollama' | 'lmstudio';
 
-export const AI_PROVIDER_IDS: readonly AiProviderId[] = ['chatgpt', 'claude', 'openrouter'];
+export const AI_PROVIDER_IDS: readonly AiProviderId[] = ['chatgpt', 'claude', 'openrouter', 'ollama', 'lmstudio'];
 
 export function isAiProviderId(value: unknown): value is AiProviderId {
   return typeof value === 'string' && (AI_PROVIDER_IDS as readonly string[]).includes(value);
 }
 
-export type AuthKind = 'oauth' | 'api_key';
+export type AuthKind = 'oauth' | 'api_key' | 'local';
 
 /**
  * A selectable model. `provider` + `id` uniquely identify it. `humanizeEngineId`
@@ -30,6 +30,8 @@ export type ModelRef = {
   requiresAuth: boolean;
   /** True for user-entered custom model IDs (not in the curated catalog). */
   custom?: boolean;
+  /** Best-effort max context window (input+output tokens) for the model, when known. */
+  contextWindow?: number;
 };
 
 /** A renderer-safe provider auth status. Never contains secret material. */

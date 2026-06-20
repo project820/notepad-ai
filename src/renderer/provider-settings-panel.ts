@@ -1,26 +1,42 @@
 /**
- * provider-settings-panel.ts — multi-provider AI settings UI (G001 renderer).
+ * provider-settings-panel.ts — multi-provider AI settings UI (G001 renderer,
+ * extended for G003 local providers).
  *
  * Follows the settings-editor-panel pattern:
  *   - `renderProviderSettingsPanel(opts)` — pure, no DOM, returns HTML string
  *     (testable in Node).
  *   - `mountProviderSettingsPanel(parent, opts)` — DOM-dependent, wires actions.
  *
- * Surfaces the three v1 providers (ChatGPT sign-in, Claude API key, OpenRouter
- * API key), a per-provider connected/last-4 status, a custom model-ID input
- * (mitigates catalog staleness), and a zero-auth notice that prompts onboarding
- * when no provider is connected (AC23). Secrets are never rendered — only the
- * last 4 chars of a saved key are shown.
+ * Surfaces:
+ *   - Cloud providers (ChatGPT sign-in, Claude / OpenRouter API key) with a
+ *     per-provider connected/last-4 status and a custom model-ID input.
+ *   - Local providers (Ollama / LM Studio, `authKind: 'local'`) with a server
+ *     URL input + save/reset instead of an API key. Local servers are discovery,
+ *     not auth: an offline server is shown as a friendly "no models found" hint,
+ *     never an auth error.
+ *   - A zero-auth onboarding notice when no cloud provider is connected and no
+ *     local models are discovered (AC23).
+ *
+ * Secrets are never rendered — only the last 4 chars of a saved key are shown.
  */
 
+import { t } from './i18n';
+import type { AiProviderId, AuthKind } from '../main/ai/types';
+
 export type ProviderStatusView = {
-  provider: 'chatgpt' | 'claude' | 'openrouter';
+  provider: AiProviderId;
   label: string;
-  authKind: 'oauth' | 'api_key';
+  authKind: AuthKind;
   connected: boolean;
   accountLabel?: string;
   keyLast4?: string;
   error?: string;
+  /** Local providers only: current configured base URL. */
+  localUrl?: string;
+  /** Local providers only: default base URL (drives the reset button). */
+  localUrlDefault?: string;
+  /** Local providers only: count of discovered models (drives the offline hint). */
+  localModelCount?: number;
 };
 
 export type ProviderSettingsRenderOptions = {
@@ -32,7 +48,11 @@ export type ProviderSettingsOptions = ProviderSettingsRenderOptions & {
   onChatgptSignOut: () => void;
   onSaveKey: (provider: 'claude' | 'openrouter', key: string) => void;
   onDeleteKey: (provider: 'claude' | 'openrouter') => void;
-  onSetCustomModel: (provider: 'chatgpt' | 'claude' | 'openrouter', modelId: string) => void;
+  onSetCustomModel: (provider: AiProviderId, modelId: string) => void;
+  /** Persist a local provider's server URL (validated localhost in main). */
+  onSaveLocalUrl?: (provider: 'ollama' | 'lmstudio', url: string) => void;
+  /** Reset a local provider's server URL to its default. */
+  onResetLocalUrl?: (provider: 'ollama' | 'lmstudio') => void;
 };
 
 export type ProviderSettingsHandle = {
@@ -49,6 +69,15 @@ function escapeHTML(raw: string): string {
 }
 
 function statusLine(s: ProviderStatusView): string {
+  if (s.authKind === 'local') {
+    // Local servers are discovery, not auth: only surface a positive "models
+    // available" pill. The empty/offline case is handled by the hint line so it
+    // never reads as an auth failure.
+    if ((s.localModelCount ?? 0) > 0) {
+      return `<span class="prov-status prov-status-on">${escapeHTML(t('settings.local.modelsFound'))}</span>`;
+    }
+    return '';
+  }
   if (!s.connected) return '<span class="prov-status prov-status-off">Not connected</span>';
   const detail =
     s.authKind === 'oauth'
@@ -62,7 +91,16 @@ function statusLine(s: ProviderStatusView): string {
 }
 
 function providerControls(s: ProviderStatusView): string {
-  if (s.provider === 'chatgpt') {
+  if (s.authKind === 'local') {
+    const url = s.localUrl ?? s.localUrlDefault ?? '';
+    return `
+    <input class="prov-url-input" data-prov-url="${s.provider}" type="text"
+      value="${escapeHTML(url)}" placeholder="${escapeHTML(s.localUrlDefault ?? '')}"
+      aria-label="${escapeHTML(s.label)} ${escapeHTML(t('settings.local.urlLabel'))}" />
+    <button class="prov-btn prov-btn-primary" data-prov-action="save-url" data-prov="${s.provider}" type="button">${escapeHTML(t('settings.local.save'))}</button>
+    <button class="prov-btn" data-prov-action="reset-url" data-prov="${s.provider}" type="button">${escapeHTML(t('settings.local.reset'))}</button>`;
+  }
+  if (s.authKind === 'oauth') {
     return s.connected
       ? `<button class="prov-btn" data-prov-action="signout" type="button">Sign out</button>`
       : `<button class="prov-btn prov-btn-primary" data-prov-action="signin" type="button">Sign in</button>`;
@@ -75,30 +113,47 @@ function providerControls(s: ProviderStatusView): string {
     <button class="prov-btn" data-prov-action="delete-key" data-prov="${s.provider}" type="button"${s.connected ? '' : ' disabled'}>Remove</button>`;
 }
 
+/** Local provider footer: a friendly, non-auth hint (offline → run-server guidance). */
+function localHint(s: ProviderStatusView): string {
+  const msg = (s.localModelCount ?? 0) > 0 ? t('settings.local.hint') : t('settings.local.noModels');
+  return `<div class="prov-local-note">${escapeHTML(msg)}</div>`;
+}
+
+/** Cloud provider footer: a custom model-ID input (mitigates catalog staleness). */
+function customModelControl(s: ProviderStatusView): string {
+  return `<div class="prov-custom">
+      <input class="prov-custom-input" data-prov-custom="${s.provider}" type="text"
+        placeholder="Custom model ID (optional)" aria-label="${escapeHTML(s.label)} custom model id" />
+      <button class="prov-btn" data-prov-action="set-custom" data-prov="${s.provider}" type="button">Use model</button>
+    </div>`;
+}
+
 export function renderProviderSettingsPanel(opts: ProviderSettingsRenderOptions): string {
   const statuses = opts.statuses ?? [];
-  const anyConnected = statuses.some((s) => s.connected);
+  // The onboarding notice tracks cloud auth and discovered local models — local
+  // providers report a static `connected: true`, so they alone must not silence
+  // the cloud sign-in nudge, but a working local server (models found) should.
+  const anyCloudConnected = statuses.some((s) => s.authKind !== 'local' && s.connected);
+  const anyLocalModels = statuses.some((s) => s.authKind === 'local' && (s.localModelCount ?? 0) > 0);
+  const anyUsable = anyCloudConnected || anyLocalModels;
 
-  const zeroAuthNotice = anyConnected
+  const zeroAuthNotice = anyUsable
     ? ''
     : `<div class="prov-zero-auth" role="alert">No AI provider connected. Connect at least one below to use AI features.</div>`;
 
   const rows = statuses
-    .map(
-      (s) => `<section class="prov-row" data-prov-row="${s.provider}">
+    .map((s) => {
+      const isLocal = s.authKind === 'local';
+      return `<section class="prov-row" data-prov-row="${s.provider}">
     <div class="prov-row-head">
       <span class="prov-label">${escapeHTML(s.label)}</span>
       ${statusLine(s)}
     </div>
     ${s.error ? `<div class="prov-error" role="alert">${escapeHTML(s.error)}</div>` : ''}
     <div class="prov-controls">${providerControls(s)}</div>
-    <div class="prov-custom">
-      <input class="prov-custom-input" data-prov-custom="${s.provider}" type="text"
-        placeholder="Custom model ID (optional)" aria-label="${escapeHTML(s.label)} custom model id" />
-      <button class="prov-btn" data-prov-action="set-custom" data-prov="${s.provider}" type="button">Use model</button>
-    </div>
-  </section>`,
-    )
+    ${isLocal ? localHint(s) : customModelControl(s)}
+  </section>`;
+    })
     .join('\n');
 
   return `<div class="prov-root">
@@ -118,7 +173,7 @@ export function mountProviderSettingsPanel(
     const btn = (e.target as HTMLElement).closest('button[data-prov-action]') as HTMLButtonElement | null;
     if (!btn) return;
     const action = btn.dataset.provAction;
-    const prov = btn.dataset.prov as 'claude' | 'openrouter' | 'chatgpt' | undefined;
+    const prov = btn.dataset.prov as AiProviderId | undefined;
     if (action === 'signin') return opts.onChatgptSignIn();
     if (action === 'signout') return opts.onChatgptSignOut();
     if (action === 'save-key' && (prov === 'claude' || prov === 'openrouter')) {
@@ -130,6 +185,15 @@ export function mountProviderSettingsPanel(
     }
     if (action === 'delete-key' && (prov === 'claude' || prov === 'openrouter')) {
       return opts.onDeleteKey(prov);
+    }
+    if (action === 'save-url' && (prov === 'ollama' || prov === 'lmstudio')) {
+      const input = parent.querySelector<HTMLInputElement>(`input[data-prov-url="${prov}"]`);
+      const url = input?.value.trim() ?? '';
+      if (url) opts.onSaveLocalUrl?.(prov, url);
+      return;
+    }
+    if (action === 'reset-url' && (prov === 'ollama' || prov === 'lmstudio')) {
+      return opts.onResetLocalUrl?.(prov);
     }
     if (action === 'set-custom' && prov) {
       const input = parent.querySelector<HTMLInputElement>(`input[data-prov-custom="${prov}"]`);

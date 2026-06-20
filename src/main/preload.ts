@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { AiProviderId, ModelRef, ProviderAuthStatus } from './ai/types';
+import type { FileTreeEntry } from '../shared/file-types';
 
 type OpenedFile = {
   filePath: string | null;
@@ -79,6 +80,21 @@ const api = {
   ): Promise<{ saved: boolean; filePath?: string; error?: string; ownerWindowId?: number }> =>
     ipcRenderer.invoke('file:save', { filePath, content }),
 
+  // Workspace / file tree (G004 — left-panel file tree)
+  openFolder: (): Promise<string | null> => ipcRenderer.invoke('workspace:open-folder'),
+  listDir: (
+    rootPath: string,
+    dirPath: string,
+  ): Promise<{ ok: boolean; entries: FileTreeEntry[]; error?: string }> =>
+    ipcRenderer.invoke('workspace:list-dir', { rootPath, dirPath }),
+  openFileInCurrent: (
+    filePath: string,
+  ): Promise<{ opened: boolean; focusedOwner?: boolean; ownerWindowId?: number; error?: string }> =>
+    ipcRenderer.invoke('file:open-in-current', filePath),
+  openPath: (
+    filePath: string,
+  ): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('shell:open-path', filePath),
+
   // Codex OAuth
   authStatus: (): Promise<AuthSnapshot> => ipcRenderer.invoke('auth:status'),
   authLogin: (): Promise<void> => ipcRenderer.invoke('auth:login'),
@@ -117,6 +133,14 @@ const api = {
     ipcRenderer.invoke('auth:set-api-key', { provider, key }),
   aiDeleteProviderKey: (provider: AiProviderId): Promise<void> =>
     ipcRenderer.invoke('auth:delete-provider-key', provider),
+
+  // Local AI provider config (Ollama / LM Studio base URLs)
+  localAiGetConfig: (): Promise<{ ollama: string; lmstudio: string }> =>
+    ipcRenderer.invoke('local-ai:get-config'),
+  localAiSetConfig: (
+    partial: { ollama?: string; lmstudio?: string },
+  ): Promise<{ ollama: string; lmstudio: string }> =>
+    ipcRenderer.invoke('local-ai:set-config', partial),
 
   /**
    * Fetch the v1.1 prompt-assembly context from the main process.

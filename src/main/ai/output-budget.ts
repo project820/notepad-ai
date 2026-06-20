@@ -42,6 +42,10 @@ const PROVIDER_DEFAULT_OUTPUT: Record<AiProviderId, number> = {
   chatgpt: 0, // unused — chatgpt returns undefined below
   claude: 8_192,
   openrouter: 32_000,
+  // Local OpenAI-compatible servers (G002+): conservative placeholder caps until
+  // per-model sizing lands. They accept a max_tokens param, so a finite default is safe.
+  ollama: 8_192,
+  lmstudio: 8_192,
 };
 
 /**
@@ -86,10 +90,25 @@ const PROVIDER_DEFAULT_CONTEXT: Record<AiProviderId, number> = {
   chatgpt: 400_000,
   claude: 200_000,
   openrouter: 128_000,
+  // Local providers (G002+): conservative default context window; refined per-model later.
+  ollama: 32_768,
+  lmstudio: 32_768,
 };
 
-/** Max context window (tokens) for the given model, with a per-provider fallback. */
-export function modelContextWindowTokens(provider: AiProviderId, modelId: string): number {
+/**
+ * Max context window (tokens) for the given model.
+ *
+ * A live `ModelRef.contextWindow` (e.g. an Ollama `/api/show` value) takes
+ * priority when known; otherwise we fall back to the curated table and then a
+ * per-provider default — so local models report a real window when discovery
+ * provides one, and a sane fallback otherwise.
+ */
+export function modelContextWindowTokens(
+  provider: AiProviderId,
+  modelId: string,
+  liveContextWindow?: number,
+): number {
+  if (typeof liveContextWindow === 'number' && liveContextWindow > 0) return liveContextWindow;
   return MODEL_CONTEXT_WINDOW[`${provider}:${modelId}`] ?? PROVIDER_DEFAULT_CONTEXT[provider];
 }
 

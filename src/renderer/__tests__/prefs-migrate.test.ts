@@ -42,4 +42,28 @@ describe('migratePrefs', () => {
   it('tolerates non-object input', () => {
     expect(migratePrefs(undefined).selectedModel?.provider).toBe('chatgpt');
   });
+
+  it('preserves an already-migrated blockSelectedModel (no clobber)', () => {
+    const p = migratePrefs({ blockModel: 'gpt-5.5', blockSelectedModel: { provider: 'openrouter', id: 'x-ai/grok-4' } });
+    expect(p.blockSelectedModel).toEqual({ provider: 'openrouter', id: 'x-ai/grok-4' });
+  });
+
+  it('preserves selectedModel and blockSelectedModel together', () => {
+    const p = migratePrefs({
+      selectedModel: { provider: 'claude', id: 'claude-opus-4-1' },
+      blockSelectedModel: { provider: 'claude', id: 'claude-haiku-4-5' },
+    });
+    expect(p.selectedModel).toEqual({ provider: 'claude', id: 'claude-opus-4-1' });
+    expect(p.blockSelectedModel).toEqual({ provider: 'claude', id: 'claude-haiku-4-5' });
+  });
+
+  it('accepts a local provider selection (widened provider union)', () => {
+    const p = migratePrefs({ selectedModel: { provider: 'ollama', id: 'llama3.1' } });
+    expect(p.selectedModel).toEqual({ provider: 'ollama', id: 'llama3.1' });
+  });
+
+  it('preserves workspaceRoot and leaves it unset by default', () => {
+    expect(migratePrefs(null).workspaceRoot).toBeUndefined();
+    expect(migratePrefs({ workspaceRoot: '/home/u/notes' }).workspaceRoot).toBe('/home/u/notes');
+  });
 });

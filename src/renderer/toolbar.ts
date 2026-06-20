@@ -1,6 +1,9 @@
 import type { FormatAction } from './formatting';
 import { openMenu } from './dropdown';
 import { t, getLocale, setLocale, onLocaleChange, type Locale } from './i18n';
+import { modelKey } from './model-key';
+import { formatContextWindow, modelContextWindowTokens } from '../main/ai/output-budget';
+import { isAiProviderId, type AiProviderId } from '../main/ai/types';
 
 export type Theme = 'system' | 'light' | 'dark';
 export type FontSize = 'sm' | 'md' | 'lg';
@@ -18,10 +21,10 @@ export type ToolbarHandlers = {
   onSignOut: () => void;
   getTheme: () => Theme;
   getFontSize: () => FontSize;
-  getModel: () => string;
+  getModel: () => string | { provider: AiProviderId; id: string } | undefined;
   getLocale: () => Locale;
   getAuth: () => { signedIn: boolean; email?: string; plan?: string };
-  loadModels: () => Promise<{ id: string; label?: string; provider?: string }[]>;
+  loadModels: (force?: boolean) => Promise<{ id: string; label?: string; provider?: string; contextWindow?: number }[]>;
   /** Open the AI providers + style settings modal. */
   onOpenSettings?: () => void;
   /** Toggle the left outline/footnote panel. */
@@ -94,7 +97,7 @@ const BUTTONS: ButtonSpec[] = [
   { kind: 'action', id: 'fmt-hr', html: ICONS.hr, tipKey: 'tip.hr', action: 'hr' },
 ];
 
-let cachedModels: { id: string; label?: string; provider?: string }[] = [];
+let cachedModels: { id: string; label?: string; provider?: string; contextWindow?: number }[] = [];
 
 export function createToolbar(parent: HTMLElement, h: ToolbarHandlers) {
   function renderToolbar() {
@@ -185,20 +188,38 @@ export function createToolbar(parent: HTMLElement, h: ToolbarHandlers) {
     const langBtn = controls.querySelector<HTMLButtonElement>('#hdr-lang')!;
 
     modelBtn.addEventListener('click', () => {
-      const current = h.getModel();
-      const PROVIDER_LABELS: Record<string, string> = { chatgpt: 'ChatGPT', claude: 'Claude', openrouter: 'OpenRouter' };
+      // Kick a non-blocking background refresh so newly started local servers
+      // appear on the next open; the menu below renders the current snapshot.
+      void h.loadModels(true).then((m) => { cachedModels = m; });
+      const PROVIDER_LABELS: Record<string, string> = {
+        chatgpt: 'ChatGPT', claude: 'Claude', openrouter: 'OpenRouter', ollama: 'Ollama', lmstudio: 'LM Studio',
+      };
+      const cur = h.getModel();
+      const currentKey =
+        cur && typeof cur === 'object'
+          ? modelKey({ provider: isAiProviderId(cur.provider) ? cur.provider : 'chatgpt', id: cur.id })
+          : modelKey({
+              provider:
+                (cachedModels.find((m) => m.id === ((typeof cur === 'string' ? cur : '') || 'gpt-5.4-mini'))
+                  ?.provider as AiProviderId | undefined) ?? 'chatgpt',
+              id: (typeof cur === 'string' ? cur : '') || 'gpt-5.4-mini',
+            });
       const sorted = [...cachedModels].sort(
         (a, b) =>
           (a.provider ?? '').localeCompare(b.provider ?? '') ||
           (a.label ?? a.id).localeCompare(b.label ?? b.id),
       );
-      const items: { value: string; label: string; hint?: string; selected?: boolean }[] = sorted.map((m) => ({
-        value: m.id,
-        label: m.label ?? m.id,
-        hint: m.provider ? PROVIDER_LABELS[m.provider] ?? m.provider : undefined,
-        selected: m.id === current,
-      }));
-      if (items.length === 0) items.push({ value: 'gpt-5.4-mini', label: 'gpt-5.4-mini', hint: 'ChatGPT', selected: true });
+      const items: { value: string; label: string; hint?: string; selected?: boolean }[] = sorted.map((m) => {
+        const provider = (m.provider as AiProviderId | undefined) ?? 'chatgpt';
+        const key = modelKey({ provider, id: m.id });
+        const badge = isAiProviderId(provider)
+          ? formatContextWindow(modelContextWindowTokens(provider, m.id, m.contextWindow))
+          : '';
+        const providerLabel = PROVIDER_LABELS[provider] ?? provider;
+        const hint = badge ? `${providerLabel} · ${badge}` : providerLabel;
+        return { value: key, label: m.label ?? m.id, hint, selected: key === currentKey };
+      });
+      if (items.length === 0) items.push({ value: 'chatgpt:gpt-5.4-mini', label: 'gpt-5.4-mini', hint: 'ChatGPT', selected: true });
       if (h.onOpenSettings) items.push({ value: '__settings__', label: 'Manage providers & custom model…' });
       openMenu({
         anchor: modelBtn,
@@ -292,7 +313,8 @@ export function createToolbar(parent: HTMLElement, h: ToolbarHandlers) {
   void (async () => {
     cachedModels = await h.loadModels();
     if (!h.getModel() && cachedModels[0]) {
-      h.onModelChange(h.getModel() || cachedModels[0].id);
+      const first = cachedModels[0];
+      h.onModelChange(modelKey({ provider: (first.provider as AiProviderId | undefined) ?? 'chatgpt', id: first.id }));
     }
   })();
 

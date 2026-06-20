@@ -39,6 +39,12 @@ describe('htmlExportMaxTokens', () => {
     expect(htmlExportMaxTokens('openrouter', 'google/gemini-2.5-pro')!).toBeGreaterThan(4096);
     expect(htmlExportMaxTokens('claude', 'unknown')!).toBeGreaterThan(4096);
   });
+
+  it('uses a finite per-provider default for local providers (they accept max_tokens)', () => {
+    expect(htmlExportMaxTokens('ollama', 'llama3:8b')).toBe(8_192);
+    expect(htmlExportMaxTokens('lmstudio', 'qwen2.5-7b-instruct')).toBe(8_192);
+    expect(htmlExportMaxTokens('ollama', 'any-model')!).toBeGreaterThan(4096);
+  });
 });
 
 describe('modelContextWindowTokens', () => {
@@ -50,6 +56,21 @@ describe('modelContextWindowTokens', () => {
     // Unknown/custom → provider default.
     expect(modelContextWindowTokens('claude', 'claude-future')).toBe(200_000);
     expect(modelContextWindowTokens('openrouter', 'meta/llama')).toBe(128_000);
+  });
+
+  it('falls back to a conservative per-provider default for local providers', () => {
+    expect(modelContextWindowTokens('ollama', 'llama3:8b')).toBe(32_768);
+    expect(modelContextWindowTokens('lmstudio', 'qwen2.5-7b-instruct')).toBe(32_768);
+  });
+
+  it('prefers a live ModelRef.contextWindow over the fallback table when known', () => {
+    // A live Ollama /api/show value wins over the per-provider default…
+    expect(modelContextWindowTokens('ollama', 'llama3:8b', 131_072)).toBe(131_072);
+    // …and a live value even overrides a curated cloud entry.
+    expect(modelContextWindowTokens('claude', 'claude-sonnet-4-5', 500_000)).toBe(500_000);
+    // Non-positive / missing live values are ignored (fall back to the table).
+    expect(modelContextWindowTokens('ollama', 'llama3:8b', 0)).toBe(32_768);
+    expect(modelContextWindowTokens('claude', 'claude-sonnet-4-5', undefined)).toBe(200_000);
   });
 });
 

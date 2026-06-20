@@ -108,3 +108,55 @@ describe('mountStyleSettingPanel — interactions', () => {
     expect(onChange).toHaveBeenCalledWith({ difficulty: 'college', naturalness: 'off' });
   });
 });
+
+describe('mountProviderSettingsPanel — local providers (G003)', () => {
+  const localStatuses: ProviderStatusView[] = [
+    { provider: 'ollama', label: 'Ollama', authKind: 'local', connected: true, localUrl: 'http://127.0.0.1:11434', localUrlDefault: 'http://127.0.0.1:11434', localModelCount: 0 },
+  ];
+
+  function mountLocal() {
+    const parent = document.createElement('div');
+    document.body.appendChild(parent);
+    const handlers = {
+      onChatgptSignIn: vi.fn(),
+      onChatgptSignOut: vi.fn(),
+      onSaveKey: vi.fn(),
+      onDeleteKey: vi.fn(),
+      onSetCustomModel: vi.fn(),
+      onSaveLocalUrl: vi.fn(),
+      onResetLocalUrl: vi.fn(),
+      statuses: localStatuses,
+    };
+    mountProviderSettingsPanel(parent, handlers);
+    return { parent, handlers };
+  }
+
+  it('saves a typed server URL via onSaveLocalUrl', () => {
+    const { parent, handlers } = mountLocal();
+    const input = parent.querySelector<HTMLInputElement>('input[data-prov-url="ollama"]')!;
+    input.value = 'http://localhost:11500';
+    parent.querySelector<HTMLButtonElement>('[data-prov-action="save-url"][data-prov="ollama"]')!.click();
+    expect(handlers.onSaveLocalUrl).toHaveBeenCalledWith('ollama', 'http://localhost:11500');
+  });
+
+  it('does not save an empty/whitespace URL', () => {
+    const { parent, handlers } = mountLocal();
+    const input = parent.querySelector<HTMLInputElement>('input[data-prov-url="ollama"]')!;
+    input.value = '   ';
+    parent.querySelector<HTMLButtonElement>('[data-prov-action="save-url"][data-prov="ollama"]')!.click();
+    expect(handlers.onSaveLocalUrl).not.toHaveBeenCalled();
+  });
+
+  it('resets the server URL via onResetLocalUrl', () => {
+    const { parent, handlers } = mountLocal();
+    parent.querySelector<HTMLButtonElement>('[data-prov-action="reset-url"][data-prov="ollama"]')!.click();
+    expect(handlers.onResetLocalUrl).toHaveBeenCalledWith('ollama');
+  });
+
+  it('never renders an API-key input or fires key handlers for a local row (offline is not auth)', () => {
+    const { parent, handlers } = mountLocal();
+    expect(parent.querySelector('input[data-prov-key="ollama"]')).toBeNull();
+    expect(handlers.onSaveKey).not.toHaveBeenCalled();
+    expect(handlers.onDeleteKey).not.toHaveBeenCalled();
+  });
+});

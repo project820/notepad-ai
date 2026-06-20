@@ -21,6 +21,10 @@ export function humanizeEngineIdForProvider(provider: AiProviderId): string {
       return 'claude';
     case 'openrouter':
       return 'openrouter';
+    case 'ollama':
+    case 'lmstudio':
+      // Local OpenAI-compatible servers reuse the OpenAI humanize engine for now.
+      return 'openai';
   }
 }
 

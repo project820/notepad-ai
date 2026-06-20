@@ -22,6 +22,7 @@ import {
 } from './html-export-state';
 
 import { formatContextWindow } from '../main/ai/output-budget';
+import { modelKey, parseModelKey } from './model-key';
 
 /** A model choice for HTML generation (provider + id, with optional context size). */
 export type HtmlModelChoice = { provider: string; id: string; label?: string; contextWindow?: number };
@@ -60,6 +61,11 @@ export type HtmlExportWizardHandle = {
 };
 
 const GALLERY_URL = 'https://getdesign.md/';
+
+/** A model whose context window is at/below this (tokens) is "small" for HTML
+ *  export — full documents may be weakened or truncated. Effectively flags local
+ *  models; cloud models all report far larger windows. */
+const HTML_SMALL_CONTEXT_TOKENS = 32_768;
 
 function esc(value: string): string {
   return value
@@ -115,17 +121,10 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
       });
   }
 
-  function modelKey(m: { provider: string; id: string }): string {
-    return `${m.provider}:${m.id}`;
-  }
   function defaultModelKey(): string | undefined {
     const d = deps.getDefaultModel?.();
     if (!d) return undefined;
     return typeof d === 'string' ? `chatgpt:${d}` : modelKey(d);
-  }
-  function parseModelKey(v: string): HtmlModelChoice {
-    const i = v.indexOf(':');
-    return i < 0 ? { provider: 'chatgpt', id: v } : { provider: v.slice(0, i), id: v.slice(i + 1) };
   }
   /** The model the user picked (or the default when no picker is shown). */
   function readSelectedModel(): HtmlModelChoice | undefined {
@@ -134,6 +133,13 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
     const d = deps.getDefaultModel?.();
     if (!d) return undefined;
     return typeof d === 'string' ? { provider: 'chatgpt', id: d } : d;
+  }
+  function isSmallContext(m: HtmlModelChoice | undefined): boolean {
+    return !!m && typeof m.contextWindow === 'number' && m.contextWindow > 0 && m.contextWindow <= HTML_SMALL_CONTEXT_TOKENS;
+  }
+  function modelNoteHtml(selectedKey: string | undefined): string {
+    const small = isSmallContext(htmlModels.find((m) => modelKey(m) === selectedKey));
+    return `<div class="he-model-note" data-he-note="model"${small ? '' : ' hidden'}>${small ? esc(t('he.smallContext')) : ''}</div>`;
   }
   function modelPickerHtml(): string {
     if (!htmlModels.length) return '';
@@ -146,8 +152,22 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
         return `<option value="${esc(k)}"${k === sel ? ' selected' : ''}>${esc(text)}</option>`;
       })
       .join('');
+    // The note reflects the option the browser shows selected: the default when
+    // it matches a listed model, otherwise the first option.
+    const effectiveSel = htmlModels.some((m) => modelKey(m) === sel) ? sel : modelKey(htmlModels[0]);
     return `<label class="he-model-label" for="he-model">${esc(t('he.model'))}</label>
-          <select class="he-select" id="he-model" data-he-field="model">${opts}</select>`;
+          <select class="he-select" id="he-model" data-he-field="model">${opts}</select>
+          ${modelNoteHtml(effectiveSel)}`;
+  }
+  /** Toggle the small-context advisory when the model selection changes. */
+  function onModelChange(event: Event) {
+    const el = event.target as HTMLElement | null;
+    if (!el || !host.contains(el) || el.dataset?.heField !== 'model') return;
+    const note = host.querySelector<HTMLElement>('[data-he-note="model"]');
+    if (!note) return;
+    const small = isSmallContext(htmlModels.find((m) => modelKey(m) === (el as HTMLSelectElement).value));
+    note.hidden = !small;
+    note.textContent = small ? t('he.smallContext') : '';
   }
 
   function dispatch(event: HtmlExportEvent) {
@@ -442,6 +462,7 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
   }
 
   host.addEventListener('click', onClick);
+  host.addEventListener('change', onModelChange);
   render();
 
   return {
@@ -450,6 +471,7 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
       currentJob?.cancel();
       currentJob = null;
       host.removeEventListener('click', onClick);
+      host.removeEventListener('change', onModelChange);
       host.innerHTML = '';
     },
     getState: () => state,

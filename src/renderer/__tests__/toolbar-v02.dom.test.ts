@@ -4,6 +4,7 @@ import { createToolbar, type ToolbarHandlers } from '../toolbar';
 import { createPreview } from '../preview';
 import { loadPrefs, savePrefs, migratePrefs } from '../prefs';
 import { t, setLocale } from '../i18n';
+import { closeOpenMenu } from '../dropdown';
 
 function stubHandlers(over: Partial<ToolbarHandlers> = {}): ToolbarHandlers {
   return {
@@ -191,5 +192,32 @@ describe('i18n — raw line alignment keys (#G005)', () => {
       expect(t('menu.rawLineAlign'), `menu @ ${loc}`).toBe(v.menu);
       expect(t('tip.rawLineAlign'), `tip @ ${loc}`).toBe(v.tip);
     }
+  });
+});
+
+describe('toolbar — model dropdown (G003 local providers)', () => {
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+  afterEach(() => closeOpenMenu());
+
+  it('lists local models with a provider+context hint and passes provider:id on select', async () => {
+    const onModelChange = vi.fn();
+    const { controls } = mountToolbar({
+      onModelChange,
+      getModel: () => 'gpt-5.4-mini',
+      onOpenSettings: vi.fn(),
+      loadModels: async () => [
+        { id: 'gpt-5.4-mini', label: 'GPT-5.4 mini', provider: 'chatgpt', contextWindow: 400_000 },
+        { id: 'llama3:latest', label: 'llama3:latest', provider: 'ollama', contextWindow: 32_000 },
+      ],
+    });
+    await flush(); // model cache warmed by the startup loadModels()
+    controls.querySelector<HTMLButtonElement>('#hdr-model')!.click();
+    const items = Array.from(document.querySelectorAll('.pm-item'));
+    const llama = items.find((i) => i.getAttribute('data-value') === 'ollama:llama3:latest');
+    expect(llama).toBeTruthy();
+    expect(llama!.textContent).toContain('Ollama'); // provider label
+    expect(llama!.textContent).toContain('32K'); // context badge
+    (llama as HTMLButtonElement).click();
+    expect(onModelChange).toHaveBeenCalledWith('ollama:llama3:latest');
   });
 });

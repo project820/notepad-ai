@@ -104,6 +104,17 @@ const DICTS: Record<Locale, Dict> = {
     'panel.footnotes': 'Footnotes',
     'panel.outlineEmpty': 'No headings yet',
     'panel.footnotesEmpty': 'No footnotes',
+    'panel.tab.outline': 'Outline',
+    'panel.tab.files': 'Files',
+    'panel.files.openFolder': 'Open folder',
+    'panel.files.refresh': 'Refresh',
+    'panel.files.filter': 'Filter files…',
+    'panel.files.empty': 'Open a folder to browse files',
+    'panel.files.emptyDir': 'No matching items',
+    'panel.files.loading': 'Loading…',
+    'panel.files.error': "Couldn't read this folder",
+    'panel.files.savePrompt': 'Save changes before opening another file?',
+    'panel.files.ownerFocused': 'Already open in another window — switched to it.',
     'tip.outline': 'Outline & footnotes',
     // Status
     'status.ready': 'Ready',
@@ -205,6 +216,14 @@ const DICTS: Record<Locale, Dict> = {
     'settings.mdHandler.button': 'Set as default .md editor',
     'settings.mdHandler.registered': 'Registered. To make it the default: in Finder, right-click any .md → Get Info → "Open with" → Notepad AI → "Change All".',
     'settings.mdHandler.unsupported': 'Not supported on this OS/build',
+    // v0.4 — local AI providers (Ollama / LM Studio) + small-context HTML notice
+    'settings.local.urlLabel': 'Server URL',
+    'settings.local.save': 'Save URL',
+    'settings.local.reset': 'Reset',
+    'settings.local.modelsFound': 'Models available',
+    'settings.local.hint': 'Runs on your machine — no API key needed.',
+    'settings.local.noModels': 'No local models found. Start Ollama or load a model in LM Studio.',
+    'he.smallContext': 'This model has a small context window — long documents may be weakened or truncated.',
   },
   ko: {
     'tip.model': 'AI 모델',
@@ -295,6 +314,17 @@ const DICTS: Record<Locale, Dict> = {
     'panel.footnotes': '각주',
     'panel.outlineEmpty': '제목이 없습니다',
     'panel.footnotesEmpty': '각주가 없습니다',
+    'panel.tab.outline': '개요',
+    'panel.tab.files': '파일',
+    'panel.files.openFolder': '폴더 열기',
+    'panel.files.refresh': '새로고침',
+    'panel.files.filter': '파일 필터…',
+    'panel.files.empty': '폴더를 열어 파일을 탐색하세요',
+    'panel.files.emptyDir': '일치하는 항목이 없습니다',
+    'panel.files.loading': '불러오는 중…',
+    'panel.files.error': '폴더를 읽지 못했습니다',
+    'panel.files.savePrompt': '다른 파일을 열기 전에 변경사항을 저장할까요?',
+    'panel.files.ownerFocused': '다른 창에서 이미 열려 있어 해당 창으로 전환했습니다.',
     'tip.outline': '개요 · 각주 패널',
     'status.ready': '준비됨',
     'status.signedOut': '로그아웃됨',
@@ -391,6 +421,14 @@ const DICTS: Record<Locale, Dict> = {
     'settings.mdHandler.button': '기본 .md 편집기로 설정',
     'settings.mdHandler.registered': '등록됨. 기본으로 쓰려면 Finder에서 .md 파일 우클릭 → 정보 가져오기 → "다음으로 열기" → Notepad AI → "모두 변경".',
     'settings.mdHandler.unsupported': '이 OS/빌드에서는 지원되지 않습니다',
+    // v0.4 — local AI providers (Ollama / LM Studio) + small-context HTML notice
+    'settings.local.urlLabel': '서버 URL',
+    'settings.local.save': 'URL 저장',
+    'settings.local.reset': '기본값',
+    'settings.local.modelsFound': '모델 사용 가능',
+    'settings.local.hint': '내 컴퓨터에서 실행 — API 키가 필요 없습니다.',
+    'settings.local.noModels': '로컬 모델이 없습니다. Ollama를 실행하거나 LM Studio에서 모델을 로드하세요.',
+    'he.smallContext': '이 모델은 컨텍스트 창이 작아 긴 문서는 품질이 떨어지거나 잘릴 수 있습니다.',
   },
   'zh-Hans': {
     'tip.model': 'AI 模型', 'tip.font': '字号', 'tip.theme': '主题', 'tip.account': '账户', 'tip.language': '语言',
@@ -417,6 +455,7 @@ const DICTS: Record<Locale, Dict> = {
     'update.title': '有可用更新', 'update.download': '下载', 'update.dismiss': '稍后',
     'type.title': '显示', 'type.letterSpacing': '字间距', 'type.charWidth': '字宽', 'type.lineHeight': '行距',
     'footnote.back': '← 返回', 'panel.outline': '大纲', 'panel.footnotes': '脚注', 'panel.outlineEmpty': '暂无标题', 'panel.footnotesEmpty': '暂无脚注', 'tip.outline': '大纲与脚注',
+    'panel.tab.outline': '大纲', 'panel.tab.files': '文件', 'panel.files.openFolder': '打开文件夹', 'panel.files.refresh': '刷新', 'panel.files.filter': '筛选文件…', 'panel.files.empty': '打开文件夹以浏览文件', 'panel.files.emptyDir': '没有匹配的项目', 'panel.files.loading': '加载中…', 'panel.files.error': '无法读取此文件夹', 'panel.files.savePrompt': '在打开其他文件前保存更改吗？', 'panel.files.ownerFocused': '已在另一个窗口中打开 — 已切换到该窗口。',
     'status.ready': '就绪', 'status.signedOut': '已退出登录',
     'login.lead': '使用你的 <strong>ChatGPT</strong> 账户登录以启用 AI 功能。需要个人 ChatGPT Plus 订阅。',
     'login.cta': '使用 ChatGPT 登录', 'login.hint': '浏览器将打开。请输入接下来显示的代码。', 'login.codeLead': '在浏览器中输入此代码。',
@@ -450,6 +489,8 @@ const DICTS: Record<Locale, Dict> = {
     'he.design.galleryLink': '打开 getdesign.md', 'he.error.open': '无法打开已保存的文件。文件仍保存在磁盘上。', 'he.error.save': '无法保存文件。请重试。',
     // v0.2 — settings: default .md editor
     'settings.mdHandler.title': '默认 .md 编辑器', 'settings.mdHandler.desc': '将 Notepad AI 注册为 Markdown 打开方式。未签名应用无法自动设为系统默认——先注册，再在访达中手动设置一次。', 'settings.mdHandler.button': '设为默认 .md 编辑器', 'settings.mdHandler.registered': '已注册。设为默认：在访达中右键任意 .md → 显示简介 → “打开方式” → Notepad AI → “全部更改”。', 'settings.mdHandler.unsupported': '此操作系统/版本不支持',
+    // v0.4 — local AI providers (Ollama / LM Studio) + small-context HTML notice
+    'settings.local.urlLabel': '服务器 URL', 'settings.local.save': '保存 URL', 'settings.local.reset': '默认值', 'settings.local.modelsFound': '可用模型', 'settings.local.hint': '在本机运行 — 无需 API 密钥。', 'settings.local.noModels': '未找到本地模型。请启动 Ollama 或在 LM Studio 中加载模型。', 'he.smallContext': '该模型的上下文窗口较小 — 长文档可能会被削弱或截断。',
   },
   'zh-Hant': {
     'tip.model': 'AI 模型', 'tip.font': '字級', 'tip.theme': '主題', 'tip.account': '帳戶', 'tip.language': '語言',
@@ -476,6 +517,7 @@ const DICTS: Record<Locale, Dict> = {
     'update.title': '有可用更新', 'update.download': '下載', 'update.dismiss': '稍後',
     'type.title': '顯示', 'type.letterSpacing': '字距', 'type.charWidth': '字寬', 'type.lineHeight': '行距',
     'footnote.back': '← 返回', 'panel.outline': '大綱', 'panel.footnotes': '註腳', 'panel.outlineEmpty': '尚無標題', 'panel.footnotesEmpty': '尚無註腳', 'tip.outline': '大綱與註腳',
+    'panel.tab.outline': '大綱', 'panel.tab.files': '檔案', 'panel.files.openFolder': '開啟資料夾', 'panel.files.refresh': '重新整理', 'panel.files.filter': '篩選檔案…', 'panel.files.empty': '開啟資料夾以瀏覽檔案', 'panel.files.emptyDir': '沒有符合的項目', 'panel.files.loading': '載入中…', 'panel.files.error': '無法讀取此資料夾', 'panel.files.savePrompt': '在開啟其他檔案前儲存變更嗎？', 'panel.files.ownerFocused': '已在另一個視窗中開啟 — 已切換到該視窗。',
     'status.ready': '就緒', 'status.signedOut': '已登出',
     'login.lead': '使用你的 <strong>ChatGPT</strong> 帳戶登入以啟用 AI 功能。需要個人 ChatGPT Plus 訂閱。',
     'login.cta': '使用 ChatGPT 登入', 'login.hint': '瀏覽器將開啟。請輸入接下來顯示的代碼。', 'login.codeLead': '在瀏覽器中輸入此代碼。',
@@ -509,6 +551,8 @@ const DICTS: Record<Locale, Dict> = {
     'he.design.galleryLink': '開啟 getdesign.md', 'he.error.open': '無法開啟已儲存的檔案。檔案仍儲存在磁碟上。', 'he.error.save': '無法儲存檔案。請重試。',
     // v0.2 — settings: default .md editor
     'settings.mdHandler.title': '預設 .md 編輯器', 'settings.mdHandler.desc': '將 Notepad AI 註冊為 Markdown 開啟方式。未簽署應用無法自動設為系統預設——先註冊，再在 Finder 手動設定一次。', 'settings.mdHandler.button': '設為預設 .md 編輯器', 'settings.mdHandler.registered': '已註冊。設為預設：在 Finder 右鍵任一 .md → 顯示簡介 → 「開啟方式」→ Notepad AI →「全部變更」。', 'settings.mdHandler.unsupported': '此作業系統/版本不支援',
+    // v0.4 — local AI providers (Ollama / LM Studio) + small-context HTML notice
+    'settings.local.urlLabel': '伺服器 URL', 'settings.local.save': '儲存 URL', 'settings.local.reset': '預設值', 'settings.local.modelsFound': '可用模型', 'settings.local.hint': '在本機執行 — 不需要 API 金鑰。', 'settings.local.noModels': '找不到本機模型。請啟動 Ollama 或在 LM Studio 中載入模型。', 'he.smallContext': '此模型的上下文視窗較小 — 長文件可能會被削弱或截斷。',
   },
   ja: {
     'tip.model': 'AI モデル', 'tip.font': '文字サイズ', 'tip.theme': 'テーマ', 'tip.account': 'アカウント', 'tip.language': '言語',
@@ -535,6 +579,7 @@ const DICTS: Record<Locale, Dict> = {
     'update.title': 'アップデートがあります', 'update.download': 'ダウンロード', 'update.dismiss': '後で',
     'type.title': '表示', 'type.letterSpacing': '字間', 'type.charWidth': '文字幅', 'type.lineHeight': '行間',
     'footnote.back': '← 戻る', 'panel.outline': 'アウトライン', 'panel.footnotes': '脚注', 'panel.outlineEmpty': '見出しがありません', 'panel.footnotesEmpty': '脚注がありません', 'tip.outline': 'アウトラインと脚注',
+    'panel.tab.outline': 'アウトライン', 'panel.tab.files': 'ファイル', 'panel.files.openFolder': 'フォルダーを開く', 'panel.files.refresh': '更新', 'panel.files.filter': 'ファイルを絞り込み…', 'panel.files.empty': 'フォルダーを開いてファイルを参照', 'panel.files.emptyDir': '一致する項目がありません', 'panel.files.loading': '読み込み中…', 'panel.files.error': 'このフォルダーを読み込めませんでした', 'panel.files.savePrompt': '他のファイルを開く前に変更を保存しますか？', 'panel.files.ownerFocused': '別のウィンドウで既に開いています — そのウィンドウに切り替えました。',
     'status.ready': '準備完了', 'status.signedOut': 'サインアウトしました',
     'login.lead': '<strong>ChatGPT</strong> アカウントでサインインして AI 機能を有効にします。個人の ChatGPT Plus サブスクリプションが必要です。',
     'login.cta': 'ChatGPT でサインイン', 'login.hint': 'ブラウザが開きます。次に表示されるコードを入力してください。', 'login.codeLead': 'このコードをブラウザに入力してください。',
@@ -568,6 +613,8 @@ const DICTS: Record<Locale, Dict> = {
     'he.design.galleryLink': 'getdesign.md を開く', 'he.error.open': '保存したファイルを開けませんでした。ファイルはディスクに保存されています。', 'he.error.save': 'ファイルを保存できませんでした。もう一度お試しください。',
     // v0.2 — settings: default .md editor
     'settings.mdHandler.title': '既定の .md エディター', 'settings.mdHandler.desc': 'Notepad AI を Markdown を開くアプリとして登録します。未署名アプリは自動で既定にできないため、登録後 Finder で一度設定してください。', 'settings.mdHandler.button': '既定の .md エディターに設定', 'settings.mdHandler.registered': '登録しました。既定にするには Finder で .md を右クリック → 情報を見る →「このアプリケーションで開く」→ Notepad AI →「すべてを変更」。', 'settings.mdHandler.unsupported': 'この OS/ビルドでは未対応',
+    // v0.4 — local AI providers (Ollama / LM Studio) + small-context HTML notice
+    'settings.local.urlLabel': 'サーバー URL', 'settings.local.save': 'URL を保存', 'settings.local.reset': '既定値', 'settings.local.modelsFound': '利用可能なモデル', 'settings.local.hint': 'お使いのマシンで実行 — API キーは不要です。', 'settings.local.noModels': 'ローカルモデルが見つかりません。Ollama を起動するか、LM Studio でモデルを読み込んでください。', 'he.smallContext': 'このモデルはコンテキストウィンドウが小さいため、長い文書は品質が低下したり切り詰められる場合があります。',
   },
 };
 

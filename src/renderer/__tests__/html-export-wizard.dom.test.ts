@@ -213,3 +213,51 @@ describe('mountHtmlExportWizard — open failure keeps the saved file', () => {
     expect(handle.getState().savedPath).toBeTruthy();
   });
 });
+
+describe('mountHtmlExportWizard — local model context badge + small-model notice (G003)', () => {
+  it('lists a local model with a context badge and warns when its context window is small', async () => {
+    const { host, handle } = setup({
+      listHtmlModels: async () => [
+        { provider: 'chatgpt', id: 'gpt-5.4', label: 'GPT-5.4', contextWindow: 1_000_000 },
+        { provider: 'ollama', id: 'llama3:latest', label: 'llama3:latest', contextWindow: 8_192 },
+      ],
+      getDefaultModel: () => ({ provider: 'ollama', id: 'llama3:latest' }),
+    });
+    click(host, 'orient-vertical');
+    click(host, 'layout-scroll');
+    click(host, 'design-skip');
+    await flush(); // model list resolves → style-tone re-renders with the picker
+    const select = host.querySelector<HTMLSelectElement>('[data-he-field="model"]');
+    expect(select).toBeTruthy();
+    // The small local model (the default) is preselected; provider:id key survives a colon-in-id.
+    expect(select!.value).toBe('ollama:llama3:latest');
+    const optText = Array.from(select!.querySelectorAll('option')).map((o) => o.textContent);
+    expect(optText).toContain('llama3:latest · 8K'); // local option + context badge
+    expect(optText).toContain('GPT-5.4 · 1M');
+    // Small-context advisory visible for the small local default (deps.t echoes the key).
+    const note = host.querySelector<HTMLElement>('[data-he-note="model"]');
+    expect(note).toBeTruthy();
+    expect(note!.hidden).toBe(false);
+    expect(note!.textContent).toContain('he.smallContext');
+    // Switching to the large cloud model hides the advisory.
+    select!.value = 'chatgpt:gpt-5.4';
+    select!.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(host.querySelector<HTMLElement>('[data-he-note="model"]')!.hidden).toBe(true);
+    expect(handle.getState().step).toBe('style-tone');
+  });
+
+  it('does not show the small-context notice for large cloud models', async () => {
+    const { host } = setup({
+      listHtmlModels: async () => [
+        { provider: 'chatgpt', id: 'gpt-5.4-mini', label: 'GPT-5.4 mini', contextWindow: 400_000 },
+      ],
+      getDefaultModel: () => ({ provider: 'chatgpt', id: 'gpt-5.4-mini' }),
+    });
+    click(host, 'orient-vertical');
+    click(host, 'layout-scroll');
+    click(host, 'design-skip');
+    await flush();
+    const note = host.querySelector<HTMLElement>('[data-he-note="model"]');
+    expect(note!.hidden).toBe(true);
+  });
+});

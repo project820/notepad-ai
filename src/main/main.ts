@@ -39,6 +39,13 @@ import {
 } from './safe-external';
 import { checkForUpdate } from './update-check';
 import { mdHandlerStatus, buildLsRegisterTarget, bundlePathFromExecPath } from './md-handler';
+import { OPENABLE_DOCUMENT_EXTS, CONVERTIBLE_EXTS as CONVERTIBLE_EXT_LIST } from '../shared/file-types';
+import {
+  listDirectory,
+  openFileInCurrentWindow,
+  isSafeLocalAbsolutePath,
+  type FileTreeEntry,
+} from './file-tree';
 
 const APP_DISPLAY_NAME = 'Notepad AI';
 const APP_STORAGE_NAME = 'notepad-ai';
@@ -298,7 +305,7 @@ function buildMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-const CONVERTIBLE_EXTS = new Set(['hwp', 'hwpx', 'hwpml', 'docx', 'pdf', 'xlsx', 'xls']);
+const CONVERTIBLE_EXTS = new Set<string>(CONVERTIBLE_EXT_LIST);
 
 /**
  * Smarter conversion from kordoc IR blocks → Markdown.
@@ -436,9 +443,9 @@ async function handleOpen() {
   const dialogOpts: Electron.OpenDialogOptions = {
     properties: ['openFile'],
     filters: [
-      { name: 'Documents', extensions: ['md', 'markdown', 'mdx', 'txt', 'hwp', 'hwpx', 'hwpml', 'docx', 'pdf', 'xlsx', 'xls'] },
+      { name: 'Documents', extensions: [...OPENABLE_DOCUMENT_EXTS] },
       { name: 'Markdown', extensions: ['md', 'markdown', 'mdx'] },
-      { name: 'Korean / Office', extensions: ['hwp', 'hwpx', 'hwpml', 'docx', 'pdf', 'xlsx', 'xls'] },
+      { name: 'Korean / Office', extensions: [...CONVERTIBLE_EXT_LIST] },
       { name: 'Text', extensions: ['txt'] },
       { name: 'All Files', extensions: ['*'] },
     ],
@@ -572,6 +579,59 @@ ipcMain.handle('file:open-path', async (_event, filePath: string) => {
   return { filePath, content };
 });
 
+// ---------- Workspace / file-tree IPC (G004 — left-panel file tree) ----------
+
+ipcMain.handle('workspace:open-folder', async (event) => {
+  const parent =
+    windowFromRecord(registry.getByWebContents(event.sender.id)) ??
+    windowFromRecord(registry.focusedOrLast());
+  const opts: Electron.OpenDialogOptions = {
+    properties: ['openDirectory', 'createDirectory'],
+  };
+  const result = parent
+    ? await dialog.showOpenDialog(parent, opts)
+    : await dialog.showOpenDialog(opts);
+  if (result.canceled || result.filePaths.length === 0) return null;
+  return result.filePaths[0];
+});
+
+ipcMain.handle(
+  'workspace:list-dir',
+  async (_event, args: { rootPath: string; dirPath: string }) => {
+    try {
+      const entries = await listDirectory({ rootPath: args.rootPath, dirPath: args.dirPath });
+      return { ok: true as const, entries };
+    } catch (e: any) {
+      return { ok: false as const, entries: [] as FileTreeEntry[], error: String(e?.message ?? e) };
+    }
+  },
+);
+
+ipcMain.handle('file:open-in-current', async (event, target: unknown) => {
+  const rec = registry.getByWebContents(event.sender.id);
+  const win = windowFromRecord(rec);
+  if (!rec || !win) return { opened: false as const, error: 'no-window' as const };
+  // The duplicate-path guard lives in `openFileInCurrentWindow`: when another
+  // live window owns the target it focuses that owner and never opens a second
+  // writer (`openFilePath` is not called).
+  return openFileInCurrentWindow(rec.windowId, target, {
+    ownerOfPath: (p) => registry.ownerOfPath(p),
+    focusOwner: (ownerWindowId) => {
+      windowFromRecord(registry.get(ownerWindowId))?.focus();
+    },
+    openInRequester: (absPath) => openFilePath(absPath, win),
+  });
+});
+
+ipcMain.handle('shell:open-path', async (_event, filePath: unknown) => {
+  if (!isSafeLocalAbsolutePath(filePath)) {
+    return { ok: false as const, error: 'invalid-path' as const };
+  }
+  // shell.openPath resolves to '' on success or an error message string.
+  const result = await shell.openPath(path.resolve(filePath as string));
+  return result === '' ? { ok: true as const } : { ok: false as const, error: result };
+});
+
 // ---------- Codex OAuth IPC ----------
 
 ipcMain.handle('auth:status', async () => getStatus());
@@ -664,7 +724,17 @@ ipcMain.handle('ai:cancel', async (event, id: string) => {
   activeChats.delete(key);
 });
 
-ipcMain.handle('ai:models', async () => getRegistry().getAvailableModels());
+ipcMain.handle('ai:models', async (_e, force?: boolean) => getRegistry().getAvailableModels(force === true));
+
+// ---------- Local AI provider config IPC (Ollama / LM Studio) ----------
+
+ipcMain.handle('local-ai:get-config', async () => getRegistry().getLocalConfig());
+
+ipcMain.handle(
+  'local-ai:set-config',
+  async (_e, partial: { ollama?: string; lmstudio?: string }) =>
+    getRegistry().setLocalConfig(partial ?? {}),
+);
 
 // ---------- Prompt-assembly context IPC (v1.1 Phase 1) ----------
 

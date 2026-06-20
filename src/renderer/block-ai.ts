@@ -6,6 +6,22 @@ import { type Quality } from './quality';
 import { openMenu } from './dropdown';
 import { buildBlockAiInstructions } from './block-ai-prompt-handler';
 import { styleDirective, detectLanguage, type Naturalness } from './humanize-engine';
+import { isAiProviderId, type AiProviderId } from '../main/ai/types';
+import { modelKey } from './model-key';
+import { formatContextWindow, modelContextWindowTokens } from '../main/ai/output-budget';
+
+/** Provider labels for the Block AI model menu. */
+const BLOCK_PROVIDER_LABELS: Record<string, string> = {
+  chatgpt: 'ChatGPT', claude: 'Claude', openrouter: 'OpenRouter', ollama: 'Ollama', lmstudio: 'LM Studio',
+};
+
+/** Provider-aware menu label: ChatGPT uses the compact prettyModel naming; other
+ *  providers (Claude / OpenRouter / local) show the raw label/id, which is already
+ *  meaningful (e.g. "llama3:latest"). */
+function modelLabelFor(provider: string | undefined, id: string, label?: string): string {
+  if (!provider || provider === 'chatgpt') return prettyModel(id);
+  return label ?? id;
+}
 
 /** Approx. char budget for the selected fragment to stay under ~1000 tokens. */
 const SELECTION_CHAR_CAP = 2500;
@@ -68,9 +84,10 @@ export type BlockAiDeps = {
   view: EditorView;
   previewEl: HTMLElement;
   getModel: () => string | undefined;
-  getBlockModel: () => string;
+  /** Structured Block AI model (provider+id). String/undefined fall back to ChatGPT routing. */
+  getBlockModel: () => string | { provider: AiProviderId; id: string } | undefined;
   onBlockModelChange: (id: string) => void;
-  loadModels: () => Promise<{ id: string; label?: string }[]>;
+  loadModels: (force?: boolean) => Promise<{ id: string; label?: string; provider?: string; contextWindow?: number }[]>;
   getQuality: () => Quality;
   /** Optional always-on humanize strength (from the unified Style setting). Defaults to 'balanced'. */
   getNaturalness?: () => Naturalness;
@@ -211,12 +228,15 @@ export function installBlockAi(deps: BlockAiDeps) {
 
     const root = document.createElement('div');
     root.className = 'ba-popup';
-    const currentModel = deps.getBlockModel();
+    const cmRaw = deps.getBlockModel();
+    const cmProvider = typeof cmRaw === 'object' && cmRaw ? cmRaw.provider : 'chatgpt';
+    const cmId = (typeof cmRaw === 'string' ? cmRaw : cmRaw?.id) ?? 'gpt-5.4-mini';
+    const currentModel = modelLabelFor(cmProvider, cmId);
     root.innerHTML = `
       <div class="ba-popup-head">
         <div class="ba-popup-title">${t('block.title')}</div>
         <div class="ba-popup-head-spacer"></div>
-        <button class="ba-model-icon" id="ba-model" type="button" title="${escapeHtml(prettyModel(currentModel))}" aria-label="${t('block.model')}">
+        <button class="ba-model-icon" id="ba-model" type="button" title="${escapeHtml(currentModel)}" aria-label="${t('block.model')}">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2 L 9.2 6.4 L 13.6 7.6 L 9.2 8.8 L 8 13.2 L 6.8 8.8 L 2.4 7.6 L 6.8 6.4 Z"/></svg>
         </button>
         <button class="ba-iconbtn" id="ba-close" aria-label="${t('block.close')}">
@@ -261,16 +281,35 @@ export function installBlockAi(deps: BlockAiDeps) {
     // Model dropdown wiring — round sparkle icon button
     const modelBtn = root.querySelector<HTMLButtonElement>('#ba-model')!;
     modelBtn.addEventListener('click', async () => {
-      const models = await deps.loadModels();
-      const cur = deps.getBlockModel();
-      const items = models.map((m) => ({ value: m.id, label: prettyModel(m.id), selected: m.id === cur }));
-      if (items.length === 0) items.push({ value: cur || 'gpt-5.4-mini', label: prettyModel(cur || 'gpt-5.4-mini'), selected: true });
+      // loadModels(true) returns the current snapshot immediately AND kicks a
+      // background local-cache refresh (non-blocking) so newly loaded local
+      // models appear on the next open.
+      const models = await deps.loadModels(true);
+      const curRaw = deps.getBlockModel();
+      const curKey =
+        typeof curRaw === 'string'
+          ? `chatgpt:${curRaw}`
+          : curRaw
+            ? modelKey(curRaw)
+            : 'chatgpt:gpt-5.4-mini';
+      const items = models.map((m) => {
+        const provider = m.provider ?? 'chatgpt';
+        const key = modelKey({ provider, id: m.id });
+        const badge = isAiProviderId(provider)
+          ? formatContextWindow(modelContextWindowTokens(provider, m.id, m.contextWindow))
+          : '';
+        const providerLabel = BLOCK_PROVIDER_LABELS[provider] ?? provider;
+        const hint = badge ? `${providerLabel} · ${badge}` : providerLabel;
+        return { value: key, label: modelLabelFor(provider, m.id, m.label), hint, selected: key === curKey };
+      });
+      if (items.length === 0) items.push({ value: curKey, label: modelLabelFor('chatgpt', 'gpt-5.4-mini'), hint: '', selected: true });
       openMenu({
         anchor: modelBtn,
         items,
         onSelect: (v) => {
           deps.onBlockModelChange(v);
-          modelBtn.title = prettyModel(v);
+          const chosen = items.find((it) => it.value === v);
+          modelBtn.title = chosen?.label ?? v;
         },
         minWidth: 200,
       });

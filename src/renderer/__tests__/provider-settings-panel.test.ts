@@ -85,3 +85,76 @@ describe('renderProviderSettingsPanel', () => {
     expect(html).toContain('No AI provider connected');
   });
 });
+
+const localOffline: ProviderStatusView[] = [
+  { provider: 'ollama', label: 'Ollama', authKind: 'local', connected: true, localUrl: 'http://127.0.0.1:11434', localUrlDefault: 'http://127.0.0.1:11434', localModelCount: 0 },
+  { provider: 'lmstudio', label: 'LM Studio', authKind: 'local', connected: true, localUrl: 'http://127.0.0.1:1234', localUrlDefault: 'http://127.0.0.1:1234', localModelCount: 0 },
+];
+
+describe('renderProviderSettingsPanel — local providers (G003)', () => {
+  it('renders a URL input + save/reset per local provider instead of an API key', () => {
+    const html = renderProviderSettingsPanel({ statuses: localOffline });
+    expect(html).toContain('data-prov-url="ollama"');
+    expect(html).toContain('data-prov-url="lmstudio"');
+    expect(html).toContain('data-prov-action="save-url"');
+    expect(html).toContain('data-prov-action="reset-url"');
+    // Local rows never offer an API-key input.
+    expect(html).not.toContain('data-prov-key="ollama"');
+    expect(html).not.toContain('data-prov-key="lmstudio"');
+  });
+
+  it('prefills the configured server URL', () => {
+    const html = renderProviderSettingsPanel({
+      statuses: [
+        { provider: 'ollama', label: 'Ollama', authKind: 'local', connected: true, localUrl: 'http://127.0.0.1:9999', localUrlDefault: 'http://127.0.0.1:11434', localModelCount: 0 },
+      ],
+    });
+    expect(html).toContain('value="http://127.0.0.1:9999"');
+  });
+
+  it('shows an offline state as friendly guidance, never an auth error or "Not connected"', () => {
+    const html = renderProviderSettingsPanel({ statuses: localOffline });
+    expect(html).toContain('No local models found. Start Ollama or load a model in LM Studio.');
+    expect(html).toContain('prov-local-note');
+    expect(html).not.toContain('prov-error');
+    expect(html).not.toContain('Not connected');
+  });
+
+  it('shows a positive "models available" status when local models are discovered', () => {
+    const html = renderProviderSettingsPanel({
+      statuses: [
+        { provider: 'ollama', label: 'Ollama', authKind: 'local', connected: true, localUrl: 'http://127.0.0.1:11434', localUrlDefault: 'http://127.0.0.1:11434', localModelCount: 2 },
+      ],
+    });
+    expect(html).toContain('Models available');
+    expect(html).toContain('prov-status-on');
+  });
+
+  it('suppresses the zero-auth notice when a local provider has models, even with no cloud auth', () => {
+    const statuses: ProviderStatusView[] = [
+      { provider: 'chatgpt', label: 'ChatGPT', authKind: 'oauth', connected: false },
+      { provider: 'ollama', label: 'Ollama', authKind: 'local', connected: true, localModelCount: 1 },
+    ];
+    expect(renderProviderSettingsPanel({ statuses })).not.toContain('No AI provider connected');
+  });
+
+  it('still shows the zero-auth notice when cloud is off and local has no models', () => {
+    const statuses: ProviderStatusView[] = [
+      { provider: 'chatgpt', label: 'ChatGPT', authKind: 'oauth', connected: false },
+      { provider: 'ollama', label: 'Ollama', authKind: 'local', connected: true, localModelCount: 0 },
+    ];
+    expect(renderProviderSettingsPanel({ statuses })).toContain('No AI provider connected');
+  });
+
+  it('keeps cloud rows (API key + custom model) intact alongside local rows (no regression)', () => {
+    const statuses: ProviderStatusView[] = [
+      { provider: 'claude', label: 'Claude (API key)', authKind: 'api_key', connected: false },
+      { provider: 'ollama', label: 'Ollama', authKind: 'local', connected: true, localModelCount: 0 },
+    ];
+    const html = renderProviderSettingsPanel({ statuses });
+    expect(html).toContain('data-prov-key="claude"');
+    expect(html).toContain('data-prov-custom="claude"');
+    // The local row gets no custom-model input.
+    expect(html).not.toContain('data-prov-custom="ollama"');
+  });
+});

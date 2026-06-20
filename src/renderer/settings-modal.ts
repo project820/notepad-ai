@@ -13,7 +13,13 @@ import { openLoginModal } from './login-modal';
 import type { StyleSetting } from './humanize-engine';
 import { stepTypography, type TypographyPref } from './typography';
 import { t } from './i18n';
-import type { AiProviderId, ProviderAuthStatus } from '../main/ai/types';
+import type { AiProviderId, ModelRef, ProviderAuthStatus } from '../main/ai/types';
+
+// Default local server URLs. Mirrors src/main/ai/local-config.ts but defined
+// here so the renderer never imports the Electron-bound local-config module
+// (which uses `require('electron')`). Ollama / LM Studio use fixed default ports.
+const DEFAULT_OLLAMA_BASE_URL = 'http://127.0.0.1:11434';
+const DEFAULT_LMSTUDIO_BASE_URL = 'http://127.0.0.1:1234';
 
 export type SettingsModalDeps = {
   getStyle: () => StyleSetting;
@@ -27,7 +33,27 @@ export type SettingsModalDeps = {
   onTypographyChange: (next: TypographyPref) => void;
 };
 
-function toView(s: ProviderAuthStatus): ProviderStatusView {
+type LocalViewContext = {
+  config: { ollama: string; lmstudio: string };
+  modelCount: (provider: AiProviderId) => number;
+};
+
+function toView(s: ProviderAuthStatus, local: LocalViewContext): ProviderStatusView | null {
+  if (s.authKind === 'local' && (s.provider === 'ollama' || s.provider === 'lmstudio')) {
+    // Local servers are discovery, not auth: render a URL row + run-server hint.
+    return {
+      provider: s.provider,
+      label: s.label,
+      authKind: 'local',
+      connected: s.connected,
+      error: s.error,
+      localUrl: s.provider === 'ollama' ? local.config.ollama : local.config.lmstudio,
+      localUrlDefault: s.provider === 'ollama' ? DEFAULT_OLLAMA_BASE_URL : DEFAULT_LMSTUDIO_BASE_URL,
+      localModelCount: local.modelCount(s.provider),
+    };
+  }
+  if (s.provider !== 'chatgpt' && s.provider !== 'claude' && s.provider !== 'openrouter') return null;
+  if (s.authKind !== 'oauth' && s.authKind !== 'api_key') return null;
   return {
     provider: s.provider,
     label: s.label,
@@ -82,13 +108,35 @@ export function openSettingsModal(deps: SettingsModalDeps): void {
   async function renderProviders() {
     provHandle?.destroy();
     let statuses: ProviderAuthStatus[] = [];
+    let localConfig: { ollama: string; lmstudio: string } = {
+      ollama: DEFAULT_OLLAMA_BASE_URL,
+      lmstudio: DEFAULT_LMSTUDIO_BASE_URL,
+    };
+    let models: ModelRef[] = [];
     try {
       statuses = await window.api.aiProvidersStatus();
     } catch {
       /* leave empty → panel shows zero-auth notice */
     }
+    try {
+      localConfig = await window.api.localAiGetConfig();
+    } catch {
+      /* keep default localhost URLs */
+    }
+    try {
+      // Snapshot for per-provider model counts + a background refresh kick so a
+      // freshly started local server appears on the next settings open. Never
+      // blocks: the registry returns the current cache snapshot immediately.
+      models = await window.api.aiModels(true);
+    } catch {
+      /* no counts → local rows show the run-server hint */
+    }
+    const local: LocalViewContext = {
+      config: localConfig,
+      modelCount: (provider) => models.filter((m) => m.provider === provider).length,
+    };
     provHandle = mountProviderSettingsPanel(provHost, {
-      statuses: statuses.map(toView),
+      statuses: statuses.map((s) => toView(s, local)).filter((v): v is ProviderStatusView => v !== null),
       onChatgptSignIn: () =>
         openLoginModal({
           onAfterLogin: () => {
@@ -118,6 +166,25 @@ export function openSettingsModal(deps: SettingsModalDeps): void {
       onSetCustomModel: (provider, modelId) => {
         deps.onSetCustomModel(provider, modelId);
         close();
+      },
+      onSaveLocalUrl: async (provider, url) => {
+        try {
+          await window.api.localAiSetConfig({ [provider]: url });
+        } catch {
+          /* invalid URL rejected in main; re-render keeps the prior value */
+        }
+        deps.onAfterAuthChange?.();
+        void renderProviders();
+      },
+      onResetLocalUrl: async (provider) => {
+        const def = provider === 'ollama' ? DEFAULT_OLLAMA_BASE_URL : DEFAULT_LMSTUDIO_BASE_URL;
+        try {
+          await window.api.localAiSetConfig({ [provider]: def });
+        } catch {
+          /* ignore */
+        }
+        deps.onAfterAuthChange?.();
+        void renderProviders();
       },
     });
   }

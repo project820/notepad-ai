@@ -2,8 +2,9 @@ import type { Theme, FontSize } from './toolbar';
 import type { Quality } from './quality';
 import type { Naturalness } from './humanize-engine';
 import { clampTypography, type TypographyPref } from './typography';
+import type { AiProviderId } from '../main/ai/types';
 
-export type SelectedModel = { provider: 'chatgpt' | 'claude' | 'openrouter'; id: string };
+export type SelectedModel = { provider: AiProviderId; id: string };
 export type StylePref = { difficulty: Quality; naturalness: Naturalness };
 
 export type Prefs = {
@@ -31,6 +32,8 @@ export type Prefs = {
   /** v0.3.5 HTML-export model override (picked in the HTML wizard). Falls back to
    *  the main `selectedModel`/`model` when unset. */
   htmlModel?: SelectedModel;
+  /** v0.4 workspace root path for the file-tree panel (back-filled lazily; no default). */
+  workspaceRoot?: string;
 };
 
 const KEY = 'notepad-ai:prefs:v1';

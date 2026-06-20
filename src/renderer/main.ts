@@ -22,9 +22,11 @@ import type { Quality } from './quality';
 import { typographyCssVars, clampTypography, type TypographyPref } from './typography';
 import { wirePreviewLinks } from './preview-links';
 import { mountLeftPanel } from './left-panel';
+import type { FileTreeEntry } from '../shared/file-types';
 import type { AiProviderId, ModelRef, ProviderAuthStatus } from '../main/ai/types';
 import { isAiProviderId } from '../main/ai/types';
 import { modelContextWindowTokens } from '../main/ai/output-budget';
+import { parseModelKey } from './model-key';
 import {
   renderEditableDraft,
   renderManualExplanationPrompt,
@@ -91,6 +93,10 @@ type Api = {
   onTogglePreview: (cb: () => void) => void;
   windowReady: () => void;
   saveFile: (filePath: string | null, content: string) => Promise<{ saved: boolean; filePath?: string; error?: string; ownerWindowId?: number }>;
+  openFolder: () => Promise<string | null>;
+  listDir: (rootPath: string, dirPath: string) => Promise<{ ok: boolean; entries: FileTreeEntry[]; error?: string }>;
+  openFileInCurrent: (filePath: string) => Promise<{ opened: boolean; focusedOwner?: boolean; ownerWindowId?: number; error?: string }>;
+  openPath: (filePath: string) => Promise<{ ok: boolean; error?: string }>;
   authStatus: () => Promise<AuthSnapshot>;
   authLogin: () => Promise<void>;
   authCancelLogin: () => Promise<void>;
@@ -104,6 +110,8 @@ type Api = {
   aiHasAnyAuth: () => Promise<boolean>;
   aiSetApiKey: (provider: AiProviderId, key: string) => Promise<{ persisted: boolean }>;
   aiDeleteProviderKey: (provider: AiProviderId) => Promise<void>;
+  localAiGetConfig: () => Promise<{ ollama: string; lmstudio: string }>;
+  localAiSetConfig: (partial: { ollama?: string; lmstudio?: string }) => Promise<{ ollama: string; lmstudio: string }>;
   getPromptAssemblyContext: () => Promise<{ enabled: boolean; systemlawContent: string; ownerContent: string }>;
   projectWizardStart: (projectFolder: string) => Promise<ProjectWizardStateResult>;
   projectWizardSaveApprovedDraft: (input: ProjectWizardSaveApprovedDraftInput) => Promise<ProjectWizardSaveApprovedDraftResult>;
@@ -307,12 +315,59 @@ wirePreviewLinks(preview.el, {
   scroller: previewHost,
 });
 
-// ----- Left panel: outline + footnotes (#7) -----
+// ----- Left panel: tabs (Outline + footnotes / Files) (#7, v0.4) -----
 const leftPanelHost = document.getElementById('left-panel') as HTMLDivElement;
+
+/** Prompt to save the current doc if dirty before another file replaces it.
+ *  Returns true to proceed with opening, false to abort (user cancelled, or the
+ *  save was blocked because another window owns the path). */
+async function saveIfDirtyBeforeReplace(): Promise<boolean> {
+  if (!dirty) return true;
+  if (!window.confirm(t('panel.files.savePrompt'))) return false;
+  await save();
+  // save() clears `dirty` on success; if it stayed dirty the save was blocked.
+  return !dirty;
+}
+
+/** True when `p` is `r` itself or nested under it (workspace containment). */
+function isWithinRoot(p: string, r: string): boolean {
+  if (p === r) return true;
+  return p.startsWith(r.endsWith('/') ? r : r + '/');
+}
+
 const leftPanel = mountLeftPanel(leftPanelHost, {
   getPreviewRoot: () => preview.el,
   onJump: (el) => el.scrollIntoView({ block: 'center' }),
+  files: {
+    getCurrentPath: () => currentPath,
+    getWorkspaceRoot: () => prefs.workspaceRoot ?? null,
+    onWorkspaceRootChange: (root) => {
+      if (root) prefs.workspaceRoot = root;
+      else delete prefs.workspaceRoot;
+      savePrefs(prefs);
+    },
+    listDir: (rootPath, dirPath) => window.api.listDir(rootPath, dirPath),
+    openFolder: () => window.api.openFolder(),
+    openFileInCurrent: (filePath) => window.api.openFileInCurrent(filePath),
+    openExternalPath: (filePath) => window.api.openPath(filePath),
+    saveIfDirtyBeforeReplace,
+  },
 });
+
+/** Keep the file-tree root aligned with the open document: adopt the file's
+ *  parent folder as root unless the file already lives under the current root. */
+function syncWorkspaceRootToCurrent(): void {
+  if (!currentPath) return;
+  const parent = folderFromFilePath(currentPath);
+  if (!parent) return;
+  const existing = prefs.workspaceRoot ?? null;
+  const desired = existing && isWithinRoot(currentPath, existing) ? existing : parent;
+  if (desired !== existing) {
+    prefs.workspaceRoot = desired;
+    savePrefs(prefs);
+  }
+  leftPanel.setWorkspaceRoot(desired);
+}
 preview.onAfterRender(() => leftPanel.refresh());
 let leftPanelOpen = true;
 function setLeftPanelOpen(open: boolean) {
@@ -635,9 +690,20 @@ let cachedAuth: AuthSnapshot = { signedIn: false };
 // Shared in-renderer cache for the model list so toolbar AND block-AI both
 // return synchronously instead of doing an IPC roundtrip on every dropdown
 // open. Fired off once at startup so the first click is also instant.
-let rendererModels: { id: string; label?: string; provider?: string }[] | null = null;
-let rendererModelsPromise: Promise<{ id: string; label?: string; provider?: string }[]> | null = null;
-async function loadModelsCached(): Promise<{ id: string; label?: string; provider?: string }[]> {
+type RendererModel = { id: string; label?: string; provider?: string; contextWindow?: number };
+let rendererModels: RendererModel[] | null = null;
+let rendererModelsPromise: Promise<RendererModel[]> | null = null;
+async function loadModelsCached(force = false): Promise<RendererModel[]> {
+  if (force) {
+    // Kick a background local-cache refresh in main and adopt the returned
+    // snapshot. Non-blocking by design: the registry returns the current cache
+    // snapshot immediately, so a slow/offline local server never freezes the UI.
+    rendererModelsPromise = window.api.aiModels(true).then((m) => {
+      rendererModels = m;
+      return m;
+    });
+    return rendererModelsPromise;
+  }
   if (rendererModels) return rendererModels;
   if (!rendererModelsPromise) {
     rendererModelsPromise = window.api.aiModels(false).then((m) => {
@@ -653,12 +719,14 @@ void loadModelsCached();
 createToolbar(toolbarHost, {
   getTheme: () => prefs.theme,
   getFontSize: () => prefs.fontSize,
-  getModel: () => prefs.model ?? 'gpt-5.4-mini',
+  getModel: () => prefs.selectedModel ?? prefs.model ?? 'gpt-5.4-mini',
   getLocale: () => getLocale(),
   getAuth: () => cachedAuth,
-  loadModels: () => loadModelsCached(),
-  onModelChange: (id) => {
-    prefs.model = id;
+  loadModels: (force) => loadModelsCached(force),
+  onModelChange: (key) => {
+    const { provider, id } = parseModelKey(key);
+    prefs.selectedModel = { provider, id };
+    if (provider === 'chatgpt') prefs.model = id;
     savePrefs(prefs);
     statusEl.textContent = `Model · ${id}`;
   },
@@ -820,6 +888,7 @@ window.api.onFileOpened((payload: any) => {
     return;
   }
   currentPath = filePath ?? null;
+  syncWorkspaceRootToCurrent();
   pendingTitle = null;
   let docMd = content;
   if (html && converted) {
@@ -942,9 +1011,14 @@ installBlockAi({
   view: editor.view,
   previewEl: preview.el,
   getModel: () => prefs.model,
-  getBlockModel: () => prefs.blockModel ?? 'gpt-5.4-mini',
-  onBlockModelChange: (id) => { prefs.blockModel = id; savePrefs(prefs); },
-  loadModels: () => loadModelsCached(),
+  getBlockModel: () => prefs.blockSelectedModel ?? prefs.blockModel ?? 'gpt-5.4-mini',
+  onBlockModelChange: (key) => {
+    const { provider, id } = parseModelKey(key);
+    prefs.blockSelectedModel = { provider, id };
+    if (provider === 'chatgpt') prefs.blockModel = id;
+    savePrefs(prefs);
+  },
+  loadModels: (force) => loadModelsCached(force),
   getQuality: () => currentStyle().difficulty,
   getNaturalness: () => currentStyle().naturalness,
   // v1.1 Phase 1: fetch toggle state + userData file contents from main process.
@@ -1075,7 +1149,7 @@ function openSettings() {
     onAfterAuthChange: () => {
       rendererModels = null;
       rendererModelsPromise = null;
-      void loadModelsCached();
+      void loadModelsCached(true);
       void (async () => {
         cachedAuth = await window.api.authStatus();
         paintAuthPill(cachedAuth);
@@ -1288,14 +1362,14 @@ async function startHtmlExportWizard() {
     getMarkdown: () => editor.getDoc(),
     maxSourceCharsForModel: (m) => htmlExportSourceCharBudget(m ?? currentModelArg()),
     listHtmlModels: async () => {
-      const ms = await loadModelsCached();
+      const ms = await loadModelsCached(true);
       return ms.map((m) => {
         const provider = m.provider ?? 'chatgpt';
         return {
           provider,
           id: m.id,
           label: m.label,
-          contextWindow: isAiProviderId(provider) ? modelContextWindowTokens(provider, m.id) : undefined,
+          contextWindow: isAiProviderId(provider) ? modelContextWindowTokens(provider, m.id, m.contextWindow) : undefined,
         };
       });
     },

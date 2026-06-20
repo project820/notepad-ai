@@ -32,6 +32,21 @@ import {
 import { ProviderRegistry, type ProviderMap } from '../main/ai/provider-registry';
 import { ClaudeProvider } from '../main/ai/claude-provider';
 import { OpenRouterProvider } from '../main/ai/openrouter-provider';
+import { LmStudioProvider } from '../main/ai/lmstudio-provider';
+import {
+  OllamaProvider,
+  extractOllamaChatDelta,
+  ollamaChatErrorMessage,
+  isOllamaChatDone,
+  extractOllamaContextLength,
+} from '../main/ai/ollama-provider';
+import { LocalModelCache } from '../main/ai/local-model-cache';
+import {
+  normalizeLocalBaseUrl,
+  parseLocalConfig,
+  LocalConfigStore,
+  type LocalConfigBackend,
+} from '../main/ai/local-config';
 
 // ---------------------------------------------------------------------------
 // types.classifyHttpError — actionable, classified errors (AC24)
@@ -59,10 +74,12 @@ describe('classifyHttpError', () => {
 });
 
 describe('isAiProviderId', () => {
-  it('accepts the three provider ids and rejects others', () => {
+  it('accepts all five provider ids and rejects others', () => {
     expect(isAiProviderId('chatgpt')).toBe(true);
     expect(isAiProviderId('claude')).toBe(true);
     expect(isAiProviderId('openrouter')).toBe(true);
+    expect(isAiProviderId('ollama')).toBe(true);
+    expect(isAiProviderId('lmstudio')).toBe(true);
     expect(isAiProviderId('gemini')).toBe(false);
     expect(isAiProviderId(undefined)).toBe(false);
   });
@@ -428,5 +445,443 @@ describe('OpenRouterProvider streaming (mocked fetch)', () => {
     const events: AiChatEvent[] = [];
     await provider.streamChat(baseReq('openrouter'), (e) => events.push(e));
     expect(events[0]).toMatchObject({ kind: 'error', errorKind: 'auth' });
+  });
+});
+
+// ===========================================================================
+// LOCAL PROVIDERS (G002 / Phase A1) — Ollama + LM Studio
+// ===========================================================================
+
+/** JSON Response helper for mocked discovery endpoints. */
+function jsonResponse(obj: unknown, status = 200): Response {
+  return new Response(JSON.stringify(obj), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+/** A fake local provider with static-connected auth and a custom listModels. */
+function localFakeProvider(
+  id: 'ollama' | 'lmstudio',
+  listModels: () => Promise<ModelRef[]>,
+): AiProvider {
+  return {
+    id,
+    authKind: 'local',
+    async getAuthStatus() {
+      return { provider: id, authKind: 'local', connected: true, label: id } as ProviderAuthStatus;
+    },
+    listModels,
+    async streamChat() {
+      /* unused */
+    },
+  } as AiProvider;
+}
+
+/** A local provider whose listModels is a spy (for cache dedup assertions). */
+function cacheFakeProvider(id: 'ollama' | 'lmstudio', listImpl: () => Promise<ModelRef[]>) {
+  return {
+    id,
+    authKind: 'local',
+    getAuthStatus: async () =>
+      ({ provider: id, authKind: 'local', connected: true, label: id }) as ProviderAuthStatus,
+    listModels: vi.fn(listImpl),
+    streamChat: async () => {},
+  } as unknown as AiProvider & { listModels: ReturnType<typeof vi.fn> };
+}
+
+function localModelRef(provider: 'ollama' | 'lmstudio', id: string): ModelRef {
+  return { provider, id, label: id, humanizeEngineId: 'openai', requiresAuth: false };
+}
+
+// ---------------------------------------------------------------------------
+// local-config — localhost-only URL validation
+// ---------------------------------------------------------------------------
+describe('normalizeLocalBaseUrl', () => {
+  it('accepts localhost http(s) URLs and strips path / trailing slash', () => {
+    expect(normalizeLocalBaseUrl('http://127.0.0.1:11434')).toBe('http://127.0.0.1:11434');
+    expect(normalizeLocalBaseUrl('http://127.0.0.1:11434/')).toBe('http://127.0.0.1:11434');
+    expect(normalizeLocalBaseUrl('http://localhost:1234/v1/')).toBe('http://localhost:1234');
+    expect(normalizeLocalBaseUrl('https://localhost')).toBe('https://localhost');
+    expect(normalizeLocalBaseUrl('http://[::1]:1234')).toBe('http://[::1]:1234');
+  });
+  it('rejects remote hosts, file URLs, non-http schemes, and malformed input', () => {
+    expect(normalizeLocalBaseUrl('http://example.com:11434')).toBeNull();
+    expect(normalizeLocalBaseUrl('http://127.0.0.1.evil.com')).toBeNull();
+    expect(normalizeLocalBaseUrl('file:///etc/passwd')).toBeNull();
+    expect(normalizeLocalBaseUrl('ftp://localhost')).toBeNull();
+    expect(normalizeLocalBaseUrl('not a url')).toBeNull();
+    expect(normalizeLocalBaseUrl('')).toBeNull();
+    expect(normalizeLocalBaseUrl(undefined)).toBeNull();
+  });
+});
+
+describe('parseLocalConfig', () => {
+  it('falls back to defaults for malformed JSON or remote URLs', () => {
+    expect(parseLocalConfig('not json')).toEqual({
+      ollama: 'http://127.0.0.1:11434',
+      lmstudio: 'http://127.0.0.1:1234',
+    });
+    expect(
+      parseLocalConfig(JSON.stringify({ ollama: 'http://evil.com', lmstudio: 'http://localhost:4321' })),
+    ).toEqual({ ollama: 'http://127.0.0.1:11434', lmstudio: 'http://localhost:4321' });
+  });
+});
+
+describe('LocalConfigStore', () => {
+  function memConfigBackend(initial: string | null = null) {
+    const state = { raw: initial };
+    const backend: LocalConfigBackend & { state: { raw: string | null } } = {
+      state,
+      readFile: async () => state.raw,
+      writeFile: async (json: string) => {
+        state.raw = json;
+      },
+    };
+    return backend;
+  }
+
+  it('returns defaults when nothing is stored', async () => {
+    const store = new LocalConfigStore(memConfigBackend());
+    expect(await store.get()).toEqual({
+      ollama: 'http://127.0.0.1:11434',
+      lmstudio: 'http://127.0.0.1:1234',
+    });
+  });
+
+  it('normalizes and persists valid localhost URLs', async () => {
+    const backend = memConfigBackend();
+    const store = new LocalConfigStore(backend);
+    const next = await store.set({ ollama: 'http://localhost:9999/' });
+    expect(next.ollama).toBe('http://localhost:9999');
+    expect(JSON.parse(backend.state.raw!).ollama).toBe('http://localhost:9999');
+    // lmstudio untouched
+    expect(next.lmstudio).toBe('http://127.0.0.1:1234');
+  });
+
+  it('rejects remote / file URLs and persists nothing', async () => {
+    const backend = memConfigBackend();
+    const store = new LocalConfigStore(backend);
+    await expect(store.set({ lmstudio: 'http://evil.com' })).rejects.toThrow();
+    await expect(store.set({ ollama: 'file:///etc/hosts' })).rejects.toThrow();
+    expect(backend.state.raw).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// LocalModelCache — instant snapshot, in-flight dedup, 500ms hard timeout
+// ---------------------------------------------------------------------------
+describe('LocalModelCache', () => {
+  it('snapshot is empty before refresh and populated after', async () => {
+    const cache = new LocalModelCache();
+    const ollama = cacheFakeProvider('ollama', async () => [localModelRef('ollama', 'llama3')]);
+    expect(cache.snapshot()).toEqual([]);
+    await cache.refreshInBackground([ollama]);
+    expect(cache.snapshot().map((m) => m.id)).toEqual(['llama3']);
+  });
+
+  it('isStale is true before any refresh and false right after', async () => {
+    const cache = new LocalModelCache();
+    expect(cache.isStale()).toBe(true);
+    await cache.refreshInBackground([cacheFakeProvider('ollama', async () => [])]);
+    expect(cache.isStale()).toBe(false);
+  });
+
+  it('dedups concurrent in-flight refreshes (joins, calls listModels once)', async () => {
+    const cache = new LocalModelCache();
+    const ollama = cacheFakeProvider('ollama', async () => [localModelRef('ollama', 'llama3')]);
+    const a = cache.refreshInBackground([ollama]);
+    const b = cache.refreshInBackground([ollama]);
+    expect(a).toBe(b);
+    await a;
+    expect(ollama.listModels).toHaveBeenCalledTimes(1);
+  });
+
+  it('applies a 500ms hard timeout and converges to [] when a provider hangs', async () => {
+    vi.useFakeTimers();
+    try {
+      const cache = new LocalModelCache();
+      const ollama = cacheFakeProvider('ollama', () => new Promise<ModelRef[]>(() => {}));
+      const p = cache.refreshInBackground([ollama]);
+      await vi.advanceTimersByTimeAsync(500);
+      await p;
+      expect(cache.snapshot()).toEqual([]);
+      expect(cache.lastError('ollama')).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// local discovery 500ms timeout (provider level) — never-resolving fetch
+// ---------------------------------------------------------------------------
+describe('local fetch 500ms timeout', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('returns [] when the local server never responds (hard timeout aborts discovery)', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
+    const ollama = new OllamaProvider(() => 'http://127.0.0.1:11434');
+    const lmstudio = new LmStudioProvider(() => 'http://127.0.0.1:1234');
+    const op = ollama.listModels();
+    const lp = lmstudio.listModels();
+    await vi.advanceTimersByTimeAsync(500);
+    await expect(op).resolves.toEqual([]);
+    await expect(lp).resolves.toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Non-blocking discovery + zero-auth invariants
+// ---------------------------------------------------------------------------
+describe('ProviderRegistry local discovery is non-blocking', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('getAvailableModels returns cloud models while local discovery hangs', async () => {
+    vi.useFakeTimers();
+    const hang = () => new Promise<ModelRef[]>(() => {});
+    const reg = new ProviderRegistry(fakeKeyStore(), {
+      chatgpt: fakeProvider('chatgpt', true, () => {}, []),
+      claude: fakeProvider('claude', true, () => {}),
+      openrouter: fakeProvider('openrouter', true, () => {}),
+      ollama: localFakeProvider('ollama', hang),
+      lmstudio: localFakeProvider('lmstudio', hang),
+    });
+    const models = await reg.getAvailableModels(true);
+    // Cloud catalog is present immediately…
+    expect(models.some((m) => m.provider === 'claude')).toBe(true);
+    expect(models.some((m) => m.provider === 'chatgpt')).toBe(true);
+    expect(models.some((m) => m.provider === 'openrouter')).toBe(true);
+    // …and local models are simply absent (cache snapshot still empty), not awaited.
+    expect(models.some((m) => m.provider === 'ollama')).toBe(false);
+    expect(models.some((m) => m.provider === 'lmstudio')).toBe(false);
+    // Drain the hung background refresh so it times out cleanly.
+    await vi.advanceTimersByTimeAsync(500);
+  });
+
+  it('merges the local cache snapshot, deduped by provider:id', async () => {
+    const cache = new LocalModelCache();
+    await cache.refreshInBackground([
+      cacheFakeProvider('ollama', async () => [
+        localModelRef('ollama', 'llama3'),
+        localModelRef('ollama', 'llama3'),
+      ]),
+    ]);
+    const reg = new ProviderRegistry(
+      fakeKeyStore(),
+      {
+        chatgpt: fakeProvider('chatgpt', true, () => {}),
+        claude: fakeProvider('claude', true, () => {}),
+        openrouter: fakeProvider('openrouter', true, () => {}),
+        ollama: localFakeProvider('ollama', async () => []),
+      },
+      cache,
+    );
+    const models = await reg.getAvailableModels();
+    expect(models.filter((m) => m.provider === 'ollama').map((m) => m.id)).toEqual(['llama3']);
+  });
+
+  it('local providers report static connected auth without a network probe', async () => {
+    const fetchSpy = vi.fn(() => Promise.reject(new Error('ECONNREFUSED')));
+    vi.stubGlobal('fetch', fetchSpy);
+    const ollama = new OllamaProvider(() => 'http://127.0.0.1:11434');
+    const lmstudio = new LmStudioProvider(() => 'http://127.0.0.1:1234');
+    expect(await ollama.getAuthStatus()).toMatchObject({
+      provider: 'ollama',
+      authKind: 'local',
+      connected: true,
+      label: 'Ollama',
+    });
+    expect(await lmstudio.getAuthStatus()).toMatchObject({
+      provider: 'lmstudio',
+      authKind: 'local',
+      connected: true,
+      label: 'LM Studio',
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('hasAnyAuth is not affected by local server offline', async () => {
+    const fetchSpy = vi.fn(() => Promise.reject(new Error('ECONNREFUSED')));
+    vi.stubGlobal('fetch', fetchSpy);
+    const reg = new ProviderRegistry(fakeKeyStore(), {
+      // every cloud provider disconnected
+      chatgpt: fakeProvider('chatgpt', false, () => {}),
+      claude: fakeProvider('claude', false, () => {}),
+      openrouter: fakeProvider('openrouter', false, () => {}),
+      ollama: new OllamaProvider(() => 'http://127.0.0.1:11434'),
+      lmstudio: new LmStudioProvider(() => 'http://127.0.0.1:1234'),
+    });
+    // A real discovery probe fails (offline) → empty list, NOT an auth failure.
+    expect(await (reg.getProvider('ollama') as AiProvider).listModels()).toEqual([]);
+    // hasAnyAuth is true purely because local auth is static-connected; the auth
+    // path itself never probes the network.
+    const fetchCallsBeforeAuth = fetchSpy.mock.calls.length;
+    expect(await reg.hasAnyAuth()).toBe(true);
+    expect(fetchSpy.mock.calls.length).toBe(fetchCallsBeforeAuth); // no auth-time fetch
+    const localStatuses = (await reg.getAuthStatuses()).filter((s) => s.authKind === 'local');
+    expect(localStatuses.length).toBe(2);
+    expect(localStatuses.every((s) => s.connected)).toBe(true);
+  });
+
+  it('setApiKey rejects local providers (run locally, no API key)', async () => {
+    const reg = new ProviderRegistry(fakeKeyStore(), {
+      ollama: localFakeProvider('ollama', async () => []),
+      lmstudio: localFakeProvider('lmstudio', async () => []),
+    });
+    await expect(reg.setApiKey('ollama', 'x')).rejects.toThrow(/do not use an API key/);
+    await expect(reg.setApiKey('lmstudio', 'x')).rejects.toThrow(/do not use an API key/);
+  });
+
+  it('streamProviderChat surfaces a NETWORK error (not auth) for an offline local server', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('ECONNREFUSED'))));
+    const reg = new ProviderRegistry(fakeKeyStore(), {
+      ollama: new OllamaProvider(() => 'http://127.0.0.1:11434'),
+    });
+    const events: AiChatEvent[] = [];
+    await reg.streamProviderChat(baseReq('ollama', 'llama3'), (e) => events.push(e));
+    expect(events.some((e) => e.kind === 'error' && (e as { errorKind?: string }).errorKind === 'auth')).toBe(false);
+    expect(events.at(-1)).toMatchObject({ kind: 'error', errorKind: 'network' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Ollama provider — /api/tags + /api/show discovery, /api/chat NDJSON streaming
+// ---------------------------------------------------------------------------
+describe('Ollama NDJSON parsing (pure)', () => {
+  it('extracts message.content deltas', () => {
+    expect(extractOllamaChatDelta(JSON.stringify({ message: { content: '안녕' } }))).toBe('안녕');
+    expect(extractOllamaChatDelta(JSON.stringify({ message: {} }))).toBe('');
+    expect(extractOllamaChatDelta('not json')).toBe('');
+  });
+  it('detects done and error lines', () => {
+    expect(isOllamaChatDone(JSON.stringify({ done: true }))).toBe(true);
+    expect(isOllamaChatDone(JSON.stringify({ done: false }))).toBe(false);
+    expect(isOllamaChatDone('not json')).toBe(false);
+    expect(ollamaChatErrorMessage(JSON.stringify({ error: 'model not found' }))).toBe('model not found');
+    expect(ollamaChatErrorMessage(JSON.stringify({ message: { content: 'x' } }))).toBeNull();
+  });
+  it('extracts a context length from /api/show model_info', () => {
+    expect(extractOllamaContextLength({ model_info: { 'llama.context_length': 8192 } })).toBe(8192);
+    expect(extractOllamaContextLength({ model_info: { 'llama.context_length': 0 } })).toBeUndefined();
+    expect(extractOllamaContextLength({})).toBeUndefined();
+    expect(extractOllamaContextLength(null)).toBeUndefined();
+  });
+});
+
+describe('OllamaProvider (mocked fetch)', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('lists /api/tags models and enriches context window from /api/show', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: { body?: string }) => {
+        if (url.endsWith('/api/tags')) {
+          return jsonResponse({ models: [{ name: 'llama3:8b' }, { name: 'qwen2' }] });
+        }
+        if (url.endsWith('/api/show')) {
+          const name = JSON.parse(init!.body!).name;
+          const ctx = name === 'llama3:8b' ? 8192 : 0;
+          return jsonResponse({ model_info: { 'llama.context_length': ctx } });
+        }
+        return new Response('not found', { status: 404 });
+      }),
+    );
+    const provider = new OllamaProvider(() => 'http://127.0.0.1:11434');
+    const models = await provider.listModels();
+    expect(models.map((m) => m.id)).toEqual(['llama3:8b', 'qwen2']);
+    expect(models.every((m) => m.provider === 'ollama' && m.requiresAuth === false)).toBe(true);
+    expect(models.find((m) => m.id === 'llama3:8b')?.contextWindow).toBe(8192);
+    expect(models.find((m) => m.id === 'qwen2')?.contextWindow).toBeUndefined();
+  });
+
+  it('returns [] when /api/tags fails (server offline), without throwing', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('ECONNREFUSED'))));
+    const provider = new OllamaProvider(() => 'http://127.0.0.1:11434');
+    await expect(provider.listModels()).resolves.toEqual([]);
+  });
+
+  it('streams NDJSON deltas and finishes on done:true', async () => {
+    const lines = [
+      JSON.stringify({ message: { role: 'assistant', content: '안' }, done: false }) + '\n',
+      JSON.stringify({ message: { role: 'assistant', content: '녕' }, done: false }) + '\n',
+      JSON.stringify({ message: { role: 'assistant', content: '' }, done: true }) + '\n',
+    ];
+    vi.stubGlobal('fetch', vi.fn(async () => streamingResponse(lines)));
+    const provider = new OllamaProvider(() => 'http://127.0.0.1:11434');
+    const events: AiChatEvent[] = [];
+    await provider.streamChat(baseReq('ollama', 'llama3'), (e) => events.push(e));
+    const deltas = events.filter((e) => e.kind === 'delta').map((e) => (e as { text: string }).text);
+    expect(deltas.join('')).toBe('안녕');
+    expect((events.find((e) => e.kind === 'done') as { text: string } | undefined)?.text).toBe('안녕');
+  });
+
+  it('surfaces an in-stream NDJSON error as a provider error', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => streamingResponse([JSON.stringify({ error: 'model not found' }) + '\n'])),
+    );
+    const provider = new OllamaProvider(() => 'http://127.0.0.1:11434');
+    const events: AiChatEvent[] = [];
+    await provider.streamChat(baseReq('ollama', 'nope'), (e) => events.push(e));
+    expect(events[0]).toMatchObject({ kind: 'error', errorKind: 'provider' });
+    expect((events[0] as { message: string }).message).toContain('model not found');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// LM Studio provider — /v1/models discovery, OpenAI-compatible SSE streaming
+// ---------------------------------------------------------------------------
+describe('LmStudioProvider (mocked fetch)', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('lists loaded /v1/models', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse({ data: [{ id: 'qwen2.5-7b-instruct' }, { id: 'llama-3.1-8b' }] })),
+    );
+    const provider = new LmStudioProvider(() => 'http://127.0.0.1:1234');
+    const models = await provider.listModels();
+    expect(models.map((m) => m.id)).toEqual(['qwen2.5-7b-instruct', 'llama-3.1-8b']);
+    expect(models.every((m) => m.provider === 'lmstudio' && m.requiresAuth === false)).toBe(true);
+  });
+
+  it('returns [] when /v1/models fails (server offline)', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('ECONNREFUSED'))));
+    const provider = new LmStudioProvider(() => 'http://127.0.0.1:1234');
+    await expect(provider.listModels()).resolves.toEqual([]);
+  });
+
+  it('streams OpenAI-compatible SSE deltas and finishes on [DONE]', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        streamingResponse([
+          `data: ${JSON.stringify({ choices: [{ delta: { content: 'He' } }] })}\n\n`,
+          `data: ${JSON.stringify({ choices: [{ delta: { content: 'llo' } }] })}\n\n`,
+          'data: [DONE]\n\n',
+        ]),
+      ),
+    );
+    const provider = new LmStudioProvider(() => 'http://127.0.0.1:1234');
+    const events: AiChatEvent[] = [];
+    await provider.streamChat(baseReq('lmstudio', 'qwen2.5'), (e) => events.push(e));
+    const deltas = events.filter((e) => e.kind === 'delta').map((e) => (e as { text: string }).text);
+    expect(deltas.join('')).toBe('Hello');
+  });
+
+  it('surfaces a classified network error when the server is offline', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('ECONNREFUSED'))));
+    const provider = new LmStudioProvider(() => 'http://127.0.0.1:1234');
+    const events: AiChatEvent[] = [];
+    await provider.streamChat(baseReq('lmstudio', 'qwen2.5'), (e) => events.push(e));
+    expect(events[0]).toMatchObject({ kind: 'error', errorKind: 'network' });
   });
 });

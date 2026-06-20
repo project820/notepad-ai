@@ -52,4 +52,86 @@ describe('i18n — 5 locales (#3)', () => {
       }
     }
   });
+
+  it('exposes v0.4 local-provider + small-context keys in all five locales (G003)', () => {
+    const expected: Record<string, Record<string, string>> = {
+      'settings.local.urlLabel': { en: 'Server URL', ko: '서버 URL', 'zh-Hans': '服务器 URL', 'zh-Hant': '伺服器 URL', ja: 'サーバー URL' },
+      'settings.local.save': { en: 'Save URL', ko: 'URL 저장', 'zh-Hans': '保存 URL', 'zh-Hant': '儲存 URL', ja: 'URL を保存' },
+      'settings.local.reset': { en: 'Reset', ko: '기본값', 'zh-Hans': '默认值', 'zh-Hant': '預設值', ja: '既定値' },
+      'settings.local.modelsFound': { en: 'Models available', ko: '모델 사용 가능', 'zh-Hans': '可用模型', 'zh-Hant': '可用模型', ja: '利用可能なモデル' },
+      'settings.local.hint': {
+        en: 'Runs on your machine — no API key needed.',
+        ko: '내 컴퓨터에서 실행 — API 키가 필요 없습니다.',
+        'zh-Hans': '在本机运行 — 无需 API 密钥。',
+        'zh-Hant': '在本機執行 — 不需要 API 金鑰。',
+        ja: 'お使いのマシンで実行 — API キーは不要です。',
+      },
+      'settings.local.noModels': {
+        en: 'No local models found. Start Ollama or load a model in LM Studio.',
+        ko: '로컬 모델이 없습니다. Ollama를 실행하거나 LM Studio에서 모델을 로드하세요.',
+        'zh-Hans': '未找到本地模型。请启动 Ollama 或在 LM Studio 中加载模型。',
+        'zh-Hant': '找不到本機模型。請啟動 Ollama 或在 LM Studio 中載入模型。',
+        ja: 'ローカルモデルが見つかりません。Ollama を起動するか、LM Studio でモデルを読み込んでください。',
+      },
+      'he.smallContext': {
+        en: 'This model has a small context window — long documents may be weakened or truncated.',
+        ko: '이 모델은 컨텍스트 창이 작아 긴 문서는 품질이 떨어지거나 잘릴 수 있습니다.',
+        'zh-Hans': '该模型的上下文窗口较小 — 长文档可能会被削弱或截断。',
+        'zh-Hant': '此模型的上下文視窗較小 — 長文件可能會被削弱或截斷。',
+        ja: 'このモデルはコンテキストウィンドウが小さいため、長い文書は品質が低下したり切り詰められる場合があります。',
+      },
+    };
+    for (const [key, perLocale] of Object.entries(expected)) {
+      for (const [loc, label] of Object.entries(perLocale)) {
+        setLocale(loc as never);
+        expect(t(key), `${key} @ ${loc}`).toBe(label);
+      }
+    }
+  });
+
+  it('exposes v0.4 file-tree panel keys in all five locales (G005)', () => {
+    const expected: Record<string, Record<string, string>> = {
+      'panel.tab.outline': { en: 'Outline', ko: '개요', 'zh-Hans': '大纲', 'zh-Hant': '大綱', ja: 'アウトライン' },
+      'panel.tab.files': { en: 'Files', ko: '파일', 'zh-Hans': '文件', 'zh-Hant': '檔案', ja: 'ファイル' },
+      'panel.files.openFolder': { en: 'Open folder', ko: '폴더 열기', 'zh-Hans': '打开文件夹', 'zh-Hant': '開啟資料夾', ja: 'フォルダーを開く' },
+      'panel.files.refresh': { en: 'Refresh', ko: '새로고침', 'zh-Hans': '刷新', 'zh-Hant': '重新整理', ja: '更新' },
+      'panel.files.filter': { en: 'Filter files…', ko: '파일 필터…', 'zh-Hans': '筛选文件…', 'zh-Hant': '篩選檔案…', ja: 'ファイルを絞り込み…' },
+      'panel.files.empty': {
+        en: 'Open a folder to browse files',
+        ko: '폴더를 열어 파일을 탐색하세요',
+        'zh-Hans': '打开文件夹以浏览文件',
+        'zh-Hant': '開啟資料夾以瀏覽檔案',
+        ja: 'フォルダーを開いてファイルを参照',
+      },
+      'panel.files.emptyDir': { en: 'No matching items', ko: '일치하는 항목이 없습니다', 'zh-Hans': '没有匹配的项目', 'zh-Hant': '沒有符合的項目', ja: '一致する項目がありません' },
+      'panel.files.loading': { en: 'Loading…', ko: '불러오는 중…', 'zh-Hans': '加载中…', 'zh-Hant': '載入中…', ja: '読み込み中…' },
+      'panel.files.error': {
+        en: "Couldn't read this folder",
+        ko: '폴더를 읽지 못했습니다',
+        'zh-Hans': '无法读取此文件夹',
+        'zh-Hant': '無法讀取此資料夾',
+        ja: 'このフォルダーを読み込めませんでした',
+      },
+      'panel.files.savePrompt': {
+        en: 'Save changes before opening another file?',
+        ko: '다른 파일을 열기 전에 변경사항을 저장할까요?',
+        'zh-Hans': '在打开其他文件前保存更改吗？',
+        'zh-Hant': '在開啟其他檔案前儲存變更嗎？',
+        ja: '他のファイルを開く前に変更を保存しますか？',
+      },
+      'panel.files.ownerFocused': {
+        en: 'Already open in another window — switched to it.',
+        ko: '다른 창에서 이미 열려 있어 해당 창으로 전환했습니다.',
+        'zh-Hans': '已在另一个窗口中打开 — 已切换到该窗口。',
+        'zh-Hant': '已在另一個視窗中開啟 — 已切換到該視窗。',
+        ja: '別のウィンドウで既に開いています — そのウィンドウに切り替えました。',
+      },
+    };
+    for (const [key, perLocale] of Object.entries(expected)) {
+      for (const [loc, label] of Object.entries(perLocale)) {
+        setLocale(loc as never);
+        expect(t(key), `${key} @ ${loc}`).toBe(label);
+      }
+    }
+  });
 });
