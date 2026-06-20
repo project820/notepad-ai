@@ -51,7 +51,7 @@ export function openMenu<T extends string>(opts: OpenMenuOptions<T>): void {
   menu.innerHTML = opts.items
     .map(
       (it) => `
-        <button class="pm-item ${it.selected ? 'pm-item-selected' : ''}" role="menuitemradio" data-value="${it.value}">
+        <button class="pm-item ${it.selected ? 'pm-item-selected' : ''}" role="menuitemradio" aria-checked="${it.selected ? 'true' : 'false'}" tabindex="-1" data-value="${it.value}">
           <span class="pm-check" aria-hidden="true">${it.selected ? '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="2.5,6.5 5,9 9.5,3.5"/></svg>' : ''}</span>
           <span class="pm-label">${escape(it.label)}</span>
           ${it.hint ? `<span class="pm-hint">${escape(it.hint)}</span>` : ''}
@@ -87,12 +87,42 @@ export function openMenu<T extends string>(opts: OpenMenuOptions<T>): void {
   menu.style.left = `${left}px`;
   menu.style.top = `${top}px`;
 
-  menu.querySelectorAll<HTMLButtonElement>('.pm-item').forEach((btn) => {
+  const items = Array.from(menu.querySelectorAll<HTMLButtonElement>('.pm-item'));
+  items.forEach((btn) => {
     btn.addEventListener('click', () => {
       const value = btn.dataset.value as T;
       closeOpenMenu();
       opts.onSelect(value);
     });
+  });
+
+  // Keyboard operability (WAI-ARIA menu): focus the selected item (or the first)
+  // on open, move with Arrow/Home/End, activate with Enter/Space.
+  const focusItem = (i: number) => {
+    if (items.length === 0) return;
+    const idx = ((i % items.length) + items.length) % items.length;
+    items[idx].focus();
+  };
+  const selectedIdx = items.findIndex((b) => b.classList.contains('pm-item-selected'));
+  setTimeout(() => focusItem(selectedIdx >= 0 ? selectedIdx : 0), 0);
+  menu.addEventListener('keydown', (e) => {
+    const cur = items.indexOf(document.activeElement as HTMLButtonElement);
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      focusItem(cur < 0 ? 0 : cur + 1);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      focusItem(cur < 0 ? items.length - 1 : cur - 1);
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      focusItem(0);
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      focusItem(items.length - 1);
+    } else if ((e.key === 'Enter' || e.key === ' ') && cur >= 0) {
+      e.preventDefault();
+      items[cur].click();
+    }
   });
 
   const onOutside = (e: MouseEvent) => {

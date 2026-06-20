@@ -200,6 +200,15 @@ async function createWindow(
 
   win.on('focus', () => registry.touchFocus(win.id, Date.now()));
   win.on('closed', () => {
+    // Abort any AI streams this window started so they don't leak network/memory
+    // after the window is gone (chat keys are scoped `${webContentsId}:${id}`).
+    const wcPrefix = `${record.webContentsId}:`;
+    for (const [key, controller] of activeChats) {
+      if (key.startsWith(wcPrefix)) {
+        controller.abort();
+        activeChats.delete(key);
+      }
+    }
     registry.unregister(win.id);
     if (launchWindowId === win.id) launchWindowId = null;
     console.log(`[window] closed id=${win.id}`);
@@ -548,6 +557,11 @@ ipcMain.handle('file:save', async (event, args: { filePath: string | null; conte
   const rec = registry.getByWebContents(event.sender.id);
   const win = windowFromRecord(rec);
   let target = args.filePath;
+  // A renderer-supplied path MUST be a safe local absolute path — never trust it
+  // to write anywhere on disk (path traversal / arbitrary overwrite guard).
+  if (target && !isSafeLocalAbsolutePath(target)) {
+    return { saved: false as const, error: 'invalid-path' as const };
+  }
   if (!target) {
     if (!win) return { saved: false as const };
     const result = await dialog.showSaveDialog(win, {
@@ -569,14 +583,27 @@ ipcMain.handle('file:save', async (event, args: { filePath: string | null; conte
       return { saved: false as const, error: 'already-open' as const, ownerWindowId: decision.ownerWindowId };
     }
   }
-  await fs.writeFile(target, args.content, 'utf-8');
+  try {
+    await fs.writeFile(target, args.content, 'utf-8');
+  } catch (e) {
+    return { saved: false as const, error: e instanceof Error ? e.message : 'write-failed' };
+  }
   if (rec) registry.claimPath(rec.windowId, target);
   return { saved: true as const, filePath: target };
 });
 
-ipcMain.handle('file:open-path', async (_event, filePath: string) => {
-  const content = await fs.readFile(filePath, 'utf-8');
-  return { filePath, content };
+ipcMain.handle('file:open-path', async (_event, filePath: unknown) => {
+  // Renderer-supplied path: validate before reading so a compromised renderer
+  // cannot exfiltrate arbitrary files (path traversal / arbitrary read guard).
+  if (!isSafeLocalAbsolutePath(filePath)) {
+    return { error: 'invalid-path' as const };
+  }
+  try {
+    const content = await fs.readFile(filePath, 'utf-8');
+    return { filePath, content };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : 'read-failed' };
+  }
 });
 
 // ---------- Workspace / file-tree IPC (G004 — left-panel file tree) ----------
@@ -974,7 +1001,11 @@ ipcMain.handle('html:save', async (event, args: { html?: string; defaultName?: s
   if (result.canceled || !result.filePath) return { saved: false as const };
   let target = result.filePath;
   if (!/\.html?$/i.test(target)) target += '.html';
-  await fs.writeFile(target, args.html, 'utf-8');
+  try {
+    await fs.writeFile(target, args.html, 'utf-8');
+  } catch (e) {
+    return { saved: false as const, error: e instanceof Error ? e.message : 'write-failed' };
+  }
   return { saved: true as const, filePath: target };
 });
 

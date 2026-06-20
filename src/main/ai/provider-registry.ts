@@ -64,7 +64,12 @@ export class ProviderRegistry {
 
   async hasAnyAuth(): Promise<boolean> {
     const statuses = await this.getAuthStatuses();
-    return statuses.some((s) => s.connected);
+    // A cloud provider (oauth/api_key) reporting connected means usable.
+    if (statuses.some((s) => s.connected && s.authKind !== 'local')) return true;
+    // Local providers always report `connected: true` (discovery, not auth), so
+    // they must NOT alone satisfy "has auth" — only count them when the server is
+    // actually up AND has discovered models (mirrors the renderer's zero-auth notice).
+    return this.localCache.snapshot().length > 0;
   }
 
   /**

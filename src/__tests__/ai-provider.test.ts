@@ -708,7 +708,7 @@ describe('ProviderRegistry local discovery is non-blocking', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it('hasAnyAuth is not affected by local server offline', async () => {
+  it('hasAnyAuth: offline local with no discovered models does not satisfy auth (and never probes the network)', async () => {
     const fetchSpy = vi.fn(() => Promise.reject(new Error('ECONNREFUSED')));
     vi.stubGlobal('fetch', fetchSpy);
     const reg = new ProviderRegistry(fakeKeyStore(), {
@@ -721,14 +721,33 @@ describe('ProviderRegistry local discovery is non-blocking', () => {
     });
     // A real discovery probe fails (offline) → empty list, NOT an auth failure.
     expect(await (reg.getProvider('ollama') as AiProvider).listModels()).toEqual([]);
-    // hasAnyAuth is true purely because local auth is static-connected; the auth
-    // path itself never probes the network.
+    // With no cloud auth AND no discovered local models, the app has nothing the
+    // user can actually use, so hasAnyAuth is false (the renderer shows the sign-in
+    // nudge instead of letting a chat fail). Local providers report a static
+    // connected:true, but that alone must NOT spoof auth. Crucially, the auth path
+    // still never probes the network — it only reads the local-model cache snapshot.
     const fetchCallsBeforeAuth = fetchSpy.mock.calls.length;
-    expect(await reg.hasAnyAuth()).toBe(true);
+    expect(await reg.hasAnyAuth()).toBe(false);
     expect(fetchSpy.mock.calls.length).toBe(fetchCallsBeforeAuth); // no auth-time fetch
+    // Local providers themselves still report a static connected status (discovery).
     const localStatuses = (await reg.getAuthStatuses()).filter((s) => s.authKind === 'local');
     expect(localStatuses.length).toBe(2);
     expect(localStatuses.every((s) => s.connected)).toBe(true);
+  });
+
+  it('hasAnyAuth stays true when cloud is connected even if the local server is offline', async () => {
+    const fetchSpy = vi.fn(() => Promise.reject(new Error('ECONNREFUSED')));
+    vi.stubGlobal('fetch', fetchSpy);
+    const reg = new ProviderRegistry(fakeKeyStore(), {
+      chatgpt: fakeProvider('chatgpt', true, () => {}), // cloud connected
+      ollama: new OllamaProvider(() => 'http://127.0.0.1:11434'),
+      lmstudio: new LmStudioProvider(() => 'http://127.0.0.1:1234'),
+    });
+    // Cloud auth alone satisfies hasAnyAuth; a dead local server is irrelevant and
+    // the auth path performs no network probe.
+    const before = fetchSpy.mock.calls.length;
+    expect(await reg.hasAnyAuth()).toBe(true);
+    expect(fetchSpy.mock.calls.length).toBe(before);
   });
 
   it('setApiKey rejects local providers (run locally, no API key)', async () => {

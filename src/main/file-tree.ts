@@ -89,7 +89,7 @@ export async function listDirectory(args: {
  * `shell.openPath` or to open in a window. Rejects non-strings, empty/whitespace,
  * URL/`file:` schemes, control characters, and relative paths.
  */
-export function isSafeLocalAbsolutePath(input: unknown): boolean {
+export function isSafeLocalAbsolutePath(input: unknown): input is string {
   if (typeof input !== 'string') return false;
   const value = input.trim();
   if (value.length === 0) return false;

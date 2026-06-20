@@ -14,6 +14,7 @@ import type { StyleSetting } from './humanize-engine';
 import { stepTypography, type TypographyPref } from './typography';
 import { t } from './i18n';
 import type { AiProviderId, ModelRef, ProviderAuthStatus } from '../main/ai/types';
+import { trapModalFocus } from './modal-a11y';
 
 // Default local server URLs. Mirrors src/main/ai/local-config.ts but defined
 // here so the renderer never imports the Electron-bound local-config module
@@ -95,7 +96,10 @@ export function openSettingsModal(deps: SettingsModalDeps): void {
   let provHandle: ProviderSettingsHandle | null = null;
   let styleHandle: StyleSettingHandle | null = null;
 
+  let releaseFocusTrap: (() => void) | null = null;
   const close = () => {
+    releaseFocusTrap?.();
+    releaseFocusTrap = null;
     provHandle?.destroy();
     styleHandle?.destroy();
     root.remove();
@@ -103,6 +107,10 @@ export function openSettingsModal(deps: SettingsModalDeps): void {
   root.querySelector('#settings-close')!.addEventListener('click', close);
   root.addEventListener('mousedown', (e) => {
     if (e.target === root) close();
+  });
+  releaseFocusTrap = trapModalFocus({
+    dialog: root.querySelector('.settings-modal') as HTMLElement,
+    onEscape: close,
   });
 
   async function renderProviders() {

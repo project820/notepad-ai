@@ -266,14 +266,19 @@ export function mountLeftPanel(host: HTMLElement, opts: LeftPanelOpts): LeftPane
 
   function tabButton(id: Tab, label: string): string {
     const on = activeTab === id;
-    return `<button class="lp-tab${on ? ' active' : ''}" data-tab="${id}" type="button" role="tab" aria-selected="${on}">${escapeHtml(label)}</button>`;
+    return `<button class="lp-tab${on ? ' active' : ''}" id="lp-tab-${id}" data-tab="${id}" type="button" role="tab" aria-selected="${on}" aria-controls="lp-panel">${escapeHtml(label)}</button>`;
   }
 
   function renderShell(): void {
     const tabs = hasFiles
       ? `<div class="lp-tabs" role="tablist">${tabButton('outline', t('panel.tab.outline'))}${tabButton('files', t('panel.tab.files'))}</div>`
       : '';
-    host.innerHTML = `${tabs}<div class="lp-body"></div>`;
+    // When tabs exist the body is the tabpanel for the active tab; without tabs
+    // it is a plain region (no orphan tabpanel role without a tablist).
+    const bodyAttrs = hasFiles
+      ? ` id="lp-panel" role="tabpanel" tabindex="0" aria-labelledby="lp-tab-${activeTab}"`
+      : '';
+    host.innerHTML = `${tabs}<div class="lp-body"${bodyAttrs}></div>`;
     renderActive();
   }
 
@@ -285,6 +290,8 @@ export function mountLeftPanel(host: HTMLElement, opts: LeftPanelOpts): LeftPane
       b.classList.toggle('active', on);
       b.setAttribute('aria-selected', String(on));
     });
+    // Keep the tabpanel labelled by the now-active tab.
+    bodyEl()?.setAttribute('aria-labelledby', `lp-tab-${tab}`);
     renderActive();
   }
 

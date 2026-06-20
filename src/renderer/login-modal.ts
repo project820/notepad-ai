@@ -1,3 +1,5 @@
+import { trapModalFocus } from './modal-a11y';
+
 type AuthSnapshot = {
   signedIn: boolean;
   email?: string;
@@ -25,7 +27,7 @@ export function openLoginModal(cb: ModalCallbacks) {
   const root = document.createElement('div');
   root.className = 'login-modal-root';
   root.innerHTML = `
-    <div class="login-modal">
+    <div class="login-modal" role="dialog" aria-label="Sign in">
       <div class="login-modal-header">
         <div class="brand">
           <div class="brand-mark">md</div>
@@ -53,9 +55,22 @@ export function openLoginModal(cb: ModalCallbacks) {
   const cta = root.querySelector('#login-cta') as HTMLButtonElement;
   const closeBtn = root.querySelector('#login-close') as HTMLButtonElement;
 
+  const releaseFocusTrap = trapModalFocus({
+    dialog: root.querySelector('.login-modal') as HTMLElement,
+    onEscape: () => {
+      void window.api.authCancelLogin();
+      dismiss();
+    },
+  });
+  // Remove the modal AND release the focus trap / restore focus to the opener.
+  function dismiss(): void {
+    releaseFocusTrap();
+    root.remove();
+  }
+
   closeBtn.addEventListener('click', () => {
     void window.api.authCancelLogin();
-    root.remove();
+    dismiss();
   });
 
   cta.addEventListener('click', () => {
@@ -79,7 +94,7 @@ export function openLoginModal(cb: ModalCallbacks) {
       `;
       body.querySelector('#login-cancel')?.addEventListener('click', () => {
         void window.api.authCancelLogin();
-        root.remove();
+        dismiss();
       });
     } else if (update.kind === 'success') {
       body.innerHTML = `
@@ -90,13 +105,13 @@ export function openLoginModal(cb: ModalCallbacks) {
         <button class="login-cta" id="login-done">Continue</button>
       `;
       body.querySelector('#login-done')?.addEventListener('click', () => {
-        root.remove();
+        dismiss();
         cb.onAfterLogin(update.auth);
       });
       // also auto-close after 2.5s
       setTimeout(() => {
         if (document.body.contains(root)) {
-          root.remove();
+          dismiss();
           cb.onAfterLogin(update.auth);
         }
       }, 2500);
@@ -108,9 +123,10 @@ export function openLoginModal(cb: ModalCallbacks) {
         <button class="login-cta" id="login-retry">Try again</button>
       `;
       body.querySelector('#login-retry')?.addEventListener('click', () => {
-        root.remove();
+        dismiss();
         openLoginModal(cb);
       });
     }
   });
 }
+
