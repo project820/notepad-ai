@@ -160,10 +160,23 @@ export function mountUnifiedChat(parent: HTMLElement, handlers: UnifiedChatHandl
         return buffer;
       },
       fail(message: string) {
-        const body = node.querySelector<HTMLElement>('.uc-body')!;
-        body.textContent = `⚠ ${message}`;
-        body.classList.add('uc-err');
         node.classList.remove('uc-streaming');
+        const body = node.querySelector<HTMLElement>('.uc-body')!;
+        if (buffer.trim()) {
+          // Preserve whatever streamed in before the error — the user can still
+          // read/copy the partial answer. Append the error as a separate note
+          // rather than overwriting the content (which silently lost it).
+          node.dataset.text = buffer.trim();
+          renderBody(node, buffer, true);
+          const note = document.createElement('div');
+          note.className = 'uc-err';
+          note.textContent = `⚠ ${message}`;
+          body.appendChild(note);
+          if (actions) actions.style.display = '';
+        } else {
+          body.textContent = `⚠ ${message}`;
+          body.classList.add('uc-err');
+        }
         scrollToEnd();
       },
     };

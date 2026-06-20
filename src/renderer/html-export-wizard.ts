@@ -340,6 +340,10 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
       case 'back':
         return dispatch({ type: 'BACK' });
       case 'cancel':
+        // Abort any in-flight generation so a slow AI request doesn't keep
+        // streaming in the background after the user cancels the wizard.
+        currentJob?.cancel();
+        currentJob = null;
         dispatch({ type: 'CANCEL' });
         deps.onCancel?.();
         return;

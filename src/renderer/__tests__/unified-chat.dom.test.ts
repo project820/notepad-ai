@@ -171,6 +171,23 @@ describe('mountUnifiedChat — streaming assistant', () => {
     expect(body.classList.contains('uc-err')).toBe(true);
     expect(parent.querySelector<HTMLElement>('.uc-assistant')!.classList.contains('uc-streaming')).toBe(false);
   });
+
+  it('fail() after partial streaming preserves the partial answer + exposes copy actions', () => {
+    const { parent, handle } = mount();
+    const stream = handle.beginAssistant();
+    stream.pushDelta('Here is the start of the answer');
+    stream.fail('connection lost');
+    const node = parent.querySelector<HTMLElement>('.uc-assistant')!;
+    const body = node.querySelector<HTMLElement>('.uc-body')!;
+    // partial content is kept (not wiped), the error is shown as a separate note,
+    // streaming state is cleared, the copyable text is retained, and actions are shown.
+    expect(body.textContent).toContain('Here is the start of the answer');
+    expect(body.querySelector('.uc-err')?.textContent).toContain('connection lost');
+    expect(node.dataset.text).toContain('Here is the start of the answer');
+    expect(node.classList.contains('uc-streaming')).toBe(false);
+    const actions = node.querySelector<HTMLElement>('.uc-actions');
+    expect(actions && actions.style.display).not.toBe('none');
+  });
 });
 
 describe('mountUnifiedChat — showPanel', () => {
