@@ -84,6 +84,16 @@ describe('cellHtmlToInlineMarkdown (AC4: formatting persists)', () => {
     cell.textContent = 'just text';
     expect(cellHtmlToInlineMarkdown(cell)).toBe('just text');
   });
+  it('keeps emphasis markers flush against the text (whitespace would break Markdown)', () => {
+    const cell = document.createElement('td');
+    cell.innerHTML = '<strong> padded </strong>';
+    // Old behavior produced "** padded **" — markers padded by spaces render as
+    // literal asterisks. Markers must hug the text: "**padded**".
+    expect(cellHtmlToInlineMarkdown(cell)).toBe('**padded**');
+    const cell2 = document.createElement('td');
+    cell2.innerHTML = 'a <em> b </em> c';
+    expect(cellHtmlToInlineMarkdown(cell2)).toBe('a *b* c');
+  });
 });
 
 describe('wirePreviewTables — cell edit syncs to MD source (with formatting)', () => {

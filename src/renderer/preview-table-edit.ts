@@ -51,9 +51,12 @@ export function cellHtmlToInlineMarkdown(cell: HTMLElement): string {
     const italic = tag === 'em' || tag === 'i' || /font-style:\s*italic/.test(style);
     const code = tag === 'code';
     let s = inner;
-    if (code) s = '`' + s + '`';
-    if (italic && s.trim()) s = '*' + s + '*';
-    if (bold && s.trim()) s = '**' + s + '**';
+    // Keep any surrounding whitespace OUTSIDE the markers — `* foo *` / `** x **`
+    // are not valid emphasis (Markdown needs the marker flush against the text),
+    // so a padded run would round-trip to literal asterisks.
+    if (code) s = s.replace(/^(\s*)([\s\S]*?)(\s*)$/, '$1`$2`$3');
+    if (italic && s.trim()) s = s.replace(/^(\s*)([\s\S]*?)(\s*)$/, '$1*$2*$3');
+    if (bold && s.trim()) s = s.replace(/^(\s*)([\s\S]*?)(\s*)$/, '$1**$2**$3');
     return s;
   };
   let out = '';

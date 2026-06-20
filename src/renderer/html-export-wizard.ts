@@ -179,6 +179,9 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
   // ---- side-effect drivers (explicit; not render-driven) ----
 
   async function submitDesign() {
+    // Guard against a double-submit (e.g. rapid double-click before re-render):
+    // only act while we are still on the design step.
+    if (state.step !== 'choose-design') return;
     const input = field<HTMLInputElement>('design')?.value.trim() ?? '';
     if (!input) {
       dispatch({ type: 'SKIP_DESIGN' });
@@ -201,6 +204,9 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
 
   function submitTone() {
     if (!state.orientation || !state.layout) return;
+    // Guard against a double-submit: once we leave the tone step the first
+    // submission already started generation; a second must not orphan a job.
+    if (state.step !== 'style-tone') return;
     const tone = field<HTMLTextAreaElement>('tone')?.value.trim() ?? '';
     pendingModel = readSelectedModel();
     if (pendingModel) deps.onModelChosen?.(pendingModel);
