@@ -1128,32 +1128,52 @@ const HTML_EXPORT_INSTRUCTIONS =
 
 /** Run one HTML generation over the streaming aiChat IPC, resolving with the full reply. */
 function runHtmlGeneration(prompt: string): { result: Promise<string>; cancel: () => void } {
-  const id = ucId();
-  let buffer = '';
-  let cleanup = () => {};
-  const result = new Promise<string>((resolve, reject) => {
-    cleanup = window.api.onAiChatEvent(id, (e) => {
-      if (e.kind === 'delta' && e.text) {
-        buffer += e.text;
-      } else if (e.kind === 'done') {
-        const final = e.text ?? buffer;
+  let cancelled = false;
+  let activeCancel = () => {};
+  // undici/codex streams sometimes drop mid-generation ("terminated") on long
+  // outputs or flaky networks. Retry once before surfacing the error.
+  const isTransient = (m: string) => /terminated|network|stream error|econnreset|socket hang/i.test(m);
+
+  const attempt = (): Promise<string> =>
+    new Promise<string>((resolve, reject) => {
+      const id = ucId();
+      let buffer = '';
+      const cleanup = window.api.onAiChatEvent(id, (e) => {
+        if (e.kind === 'delta' && e.text) {
+          buffer += e.text;
+        } else if (e.kind === 'done') {
+          cleanup();
+          resolve(e.text ?? buffer);
+        } else if (e.kind === 'error') {
+          cleanup();
+          reject(new Error(e.message ?? 'AI error'));
+        }
+      });
+      activeCancel = () => {
+        void window.api.aiCancel(id);
         cleanup();
-        resolve(final);
-      } else if (e.kind === 'error') {
+      };
+      window.api.aiChat(id, HTML_EXPORT_INSTRUCTIONS, [], prompt, currentModelArg()).catch((err) => {
         cleanup();
-        reject(new Error(e.message ?? 'AI error'));
-      }
+        reject(err instanceof Error ? err : new Error(String(err)));
+      });
     });
-    window.api.aiChat(id, HTML_EXPORT_INSTRUCTIONS, [], prompt, currentModelArg()).catch((err) => {
-      cleanup();
-      reject(err instanceof Error ? err : new Error(String(err)));
-    });
-  });
+
+  const result = (async () => {
+    try {
+      return await attempt();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!cancelled && isTransient(msg)) return await attempt(); // one retry on a transient stream drop
+      throw err;
+    }
+  })();
+
   return {
     result,
     cancel: () => {
-      void window.api.aiCancel(id);
-      cleanup();
+      cancelled = true;
+      activeCancel();
     },
   };
 }
@@ -1379,11 +1399,11 @@ void snapshottingDocChange; // referenced to satisfy linter
 function showRestoreBanner(snap: any) {
   const root = document.createElement('div');
   root.className = 'restore-banner';
-  const preview = (snap.doc as string).slice(0, 80).replace(/\n+/g, ' • ').trim();
+  const docPreview = (snap.doc as string).slice(0, 80).replace(/\n+/g, ' • ').trim();
   root.innerHTML = `
     <div class="restore-banner-text">
       <strong>${t('restore.title')}</strong>
-      <span>${preview || '(empty)'} · ${new Date(snap.savedAt).toLocaleString()}</span>
+      <span>${docPreview || '(empty)'} · ${new Date(snap.savedAt).toLocaleString()}</span>
     </div>
     <div class="restore-banner-actions">
       <button class="restore-yes">${t('restore.yes')}</button>
@@ -1395,7 +1415,7 @@ function showRestoreBanner(snap: any) {
     suppressEditorChange = true;
     editor.setDoc(snap.doc ?? '');
     suppressEditorChange = false;
-    preview && preview.length > 0;
+    if (!editingInPreview) preview.setDoc(snap.doc ?? '');
     if (snap.path) currentPath = snap.path;
     if (snap.title) pendingTitle = snap.title;
     if (snap.view) { previewMode = snap.view; applyPreviewMode(); }
