@@ -78,6 +78,82 @@ describe('preview source map — top-level blocks get data-src/map attributes', 
   });
 });
 
+describe('preview source map — nested sub-block tagging (li / tr / paragraphs)', () => {
+  it('tags list items with their own source span but no map-id', () => {
+    const preview = mount();
+    preview.setDoc(DOC); // ul [5,7] holding li [5,5] and li [6,7]
+    const lis = Array.from(preview.el.querySelectorAll('li'));
+    expect(lis.map((li) => [li.getAttribute('data-src-start'), li.getAttribute('data-src-end')])).toEqual([
+      ['5', '5'],
+      ['6', '7'],
+    ]);
+    // map-id is a top-level identity only; nested elements carry source spans alone.
+    expect(lis.every((li) => li.getAttribute('data-map-id') === null)).toBe(true);
+    // The enclosing <ul> keeps its top-level span + id (collectPreviewBlocks unaffected).
+    const ul = preview.el.querySelector('ul')!;
+    expect([
+      ul.getAttribute('data-src-start'),
+      ul.getAttribute('data-src-end'),
+      ul.getAttribute('data-map-id'),
+    ]).toEqual(['5', '7', '2']);
+    expect(collectPreviewBlocks(preview.el).map((b) => b.mapId)).toEqual([0, 1, 2, 3]);
+  });
+
+  it('leaves a single-paragraph block as one unit (no inner <p> tag)', () => {
+    const preview = mount();
+    preview.setDoc(DOC);
+    const bqP = preview.el.querySelector('blockquote > p')!;
+    expect(bqP.hasAttribute('data-src-start')).toBe(false);
+  });
+
+  it('tags table rows but never cells', () => {
+    const preview = mount();
+    // 1:header 2:separator 3:row a 4:row b
+    preview.setDoc(['| H1 | H2 |', '| -- | -- |', '| a1 | a2 |', '| b1 | b2 |'].join('\n'));
+    const rows = Array.from(preview.el.querySelectorAll('tr'));
+    expect(rows.map((tr) => [tr.getAttribute('data-src-start'), tr.getAttribute('data-src-end')])).toEqual([
+      ['1', '1'], // header row
+      ['3', '3'],
+      ['4', '4'],
+    ]);
+    expect(Array.from(preview.el.querySelectorAll('td, th')).every((c) => !c.hasAttribute('data-src-start'))).toBe(
+      true,
+    );
+    // Structural wrappers are recursed through, not tagged as a selectable unit.
+    expect(preview.el.querySelector('thead')!.hasAttribute('data-src-start')).toBe(false);
+    expect(preview.el.querySelector('tbody')!.hasAttribute('data-src-start')).toBe(false);
+  });
+
+  it('splits a multi-paragraph block per paragraph', () => {
+    const preview = mount();
+    // 1:> p1  2:>  3:> p2  → blockquote [1,3] with p [1,1] and p [3,3]
+    preview.setDoc(['> p1', '>', '> p2'].join('\n'));
+    const ps = Array.from(preview.el.querySelectorAll('blockquote > p'));
+    expect(ps.map((p) => [p.getAttribute('data-src-start'), p.getAttribute('data-src-end')])).toEqual([
+      ['1', '1'],
+      ['3', '3'],
+    ]);
+  });
+
+  it('readable back through previewElementToLineRange', () => {
+    const preview = mount();
+    preview.setDoc(DOC);
+    const firstLi = preview.el.querySelector('li')!;
+    expect(previewElementToLineRange(firstLi)).toEqual({ startLine: 5, endLine: 5 });
+  });
+
+  it('does not leak nested data-src attributes into htmlToMarkdown output', () => {
+    const preview = mount();
+    preview.setDoc(['| H1 | H2 |', '| -- | -- |', '| a1 | a2 |', '', '- one', '- two'].join('\n'));
+    const out = htmlToMarkdown(preview.el.innerHTML);
+    expect(out).not.toMatch(/data-src/);
+    expect(out).not.toMatch(/data-map/);
+    // Content still round-trips.
+    expect(out).toContain('| H1 | H2 |');
+    expect(out).toMatch(/-\s+one/);
+  });
+});
+
 describe('preview source map — coexistence and isolation guarantees', () => {
   it('coexists with the line-number gutter toggle without dropping attributes', () => {
     const preview = mount();

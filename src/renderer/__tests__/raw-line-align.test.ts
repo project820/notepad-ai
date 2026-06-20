@@ -87,6 +87,62 @@ describe('computeLineAlignmentSpacers — pure spacer geometry (no DOM)', () => 
   });
 });
 
+describe('computeLineAlignmentSpacers — post-spacer alignment (preview is truth)', () => {
+  /** Apply the emitted spacers to the natural editor tops; a block at `line` is
+   *  pushed down by every spacer inserted at or before it. */
+  const appliedTops = (
+    blocks: ReadonlyArray<{ line: number; previewTop: number; editorTop: number }>,
+    spacers: ReadonlyArray<{ line: number; heightPx: number }>,
+  ): number[] =>
+    blocks.map(
+      (b) => b.editorTop + spacers.filter((s) => s.line <= b.line).reduce((sum, s) => sum + s.heightPx, 0),
+    );
+
+  it('pads every block onto its preview top, including the first block', () => {
+    const blocks = [
+      { line: 1, previewTop: 20, editorTop: 4 }, // padding gap → first spacer 16
+      { line: 5, previewTop: 140, editorTop: 90 }, // wants cumulative 50 → +34
+      { line: 9, previewTop: 200, editorTop: 180 }, // wants cumulative 20 < 50 → +0 (overshoot)
+      { line: 13, previewTop: 400, editorTop: 300 }, // wants cumulative 100 → +50
+    ];
+    const spacers = computeLineAlignmentSpacers({ blocks });
+    // The first block is padded by its real gap — not normalized away to 0.
+    expect(spacers).toEqual([
+      { line: 1, heightPx: 16 },
+      { line: 5, heightPx: 34 },
+      { line: 13, heightPx: 50 },
+    ]);
+
+    const tops = appliedTops(blocks, spacers);
+    // Blocks that received their full spacer land exactly on the preview top.
+    expect(tops[0]).toBe(20);
+    expect(tops[1]).toBe(140);
+    expect(tops[3]).toBe(400);
+    // The no-compression block sits at/below its preview top, never above it.
+    expect(tops[2]).toBeGreaterThanOrEqual(200);
+    // No block is ever pulled above its preview top (would require compression).
+    blocks.forEach((b, i) => expect(tops[i]).toBeGreaterThanOrEqual(b.previewTop));
+    // Cumulative spacer offset only grows (monotonic, strictly positive heights).
+    let running = 0;
+    for (const s of spacers) {
+      expect(s.heightPx).toBeGreaterThan(0);
+      expect(s.heightPx).toBeLessThanOrEqual(MAX_SPACER_PX);
+      running += s.heightPx;
+    }
+    expect(running).toBe(100);
+  });
+
+  it('emits no leading spacer when the first editor line already sits at/below its preview top', () => {
+    const spacers = computeLineAlignmentSpacers({
+      blocks: [
+        { line: 1, previewTop: 10, editorTop: 40 }, // editor already below preview → no compression
+        { line: 4, previewTop: 120, editorTop: 60 }, // wants cumulative 60 → +60
+      ],
+    });
+    expect(spacers).toEqual([{ line: 4, heightPx: 60 }]);
+  });
+});
+
 const DOC = ['line 1', 'line 2', 'line 3', 'line 4'].join('\n');
 
 function mountEditor(doc: string, extra: Extension[] = []): EditorView {

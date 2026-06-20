@@ -2484,6 +2484,24 @@ html[data-theme='dark'] .preview-sync-highlight {
     background: color-mix(in srgb, var(--color-primary) 15%, transparent);
   }
 }
+
+/* Finer selection sync also lights nested blocks (li, paragraphs, table rows).
+ * The base wash above covers li / p directly; table rows need a cell-level wash
+ * so it shows through border-collapse regardless of any cell background. */
+.preview tr.preview-sync-highlight > th,
+.preview tr.preview-sync-highlight > td {
+  background: color-mix(in srgb, var(--color-primary) 8%, transparent);
+}
+html[data-theme='dark'] .preview tr.preview-sync-highlight > th,
+html[data-theme='dark'] .preview tr.preview-sync-highlight > td {
+  background: color-mix(in srgb, var(--color-primary) 15%, transparent);
+}
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme='light']) .preview tr.preview-sync-highlight > th,
+  html:not([data-theme='light']) .preview tr.preview-sync-highlight > td {
+    background: color-mix(in srgb, var(--color-primary) 15%, transparent);
+  }
+}
 /* =============================================================
  * Raw line alignment (G005) — split-view spacers, display-only.
  * Block widgets injected into the raw editor to push source lines

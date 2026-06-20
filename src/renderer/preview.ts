@@ -1,5 +1,5 @@
 import { createMarkdownIt } from './markdown-it';
-import { buildTokenLineRanges, tagPreviewBlocks, type SourceLineRange } from './source-preview-map';
+import { buildTokenLineRanges, tagPreviewBlocks, tagNestedPreviewBlocks, type SourceLineRange } from './source-preview-map';
 
 export type PreviewHandle = {
   el: HTMLDivElement;
@@ -39,6 +39,11 @@ export function createPreview(parent: HTMLElement): PreviewHandle {
       // stay in lock-step with what was rendered.
       sourceMap = buildTokenLineRanges(md, text);
       tagPreviewBlocks(el, sourceMap);
+      // Additionally tag nested sub-blocks (list items, table rows, paragraphs in
+      // multi-paragraph blocks) so selection sync can highlight only the selected
+      // part instead of the whole top-level block. Display-only (Turndown ignores
+      // data-*), so the saved markdown stays pristine.
+      tagNestedPreviewBlocks(el, md, text);
       callbacks.forEach((cb) => cb());
     },
     onAfterRender: (cb: () => void) => {

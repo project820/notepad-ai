@@ -188,3 +188,116 @@ export function tagPreviewBlocks(root: Element, ranges: readonly SourceLineRange
     el.setAttribute(MAP_ID_ATTR, String(r.mapId));
   }
 }
+
+/** Block tags rendered as pure structural wrappers: they enclose the finer units
+ *  that carry the real selectable granularity (list items, table rows), so the
+ *  nested tagger recurses through them but never tags them as a unit. */
+const STRUCTURAL_TAGS = new Set(['ul', 'ol', 'table', 'thead', 'tbody']);
+
+/** A markdown-it token (derived from the parser's return type to avoid a deep
+ *  import path). */
+type MdToken = ReturnType<MarkdownIt['parse']>[number];
+
+/** A block-level token kept for the DOM walk: its HTML `tag`, 1-based inclusive
+ *  source span (when it carries a map) and block-level children. Inline tokens
+ *  and tight-list (hidden) paragraphs are dropped — they produce no standalone
+ *  element — so the tree mirrors the rendered block DOM. */
+type BlockToken = {
+  tag: string;
+  startLine: number;
+  endLine: number;
+  hasMap: boolean;
+  children: BlockToken[];
+};
+
+/**
+ * Build the tree of block-level tokens. The top-level entries (with a map) are
+ * exactly the set {@link buildTokenLineRanges} keeps, in the same document order,
+ * so they line up 1:1 with the tagged top-level preview children.
+ */
+function buildBlockTokenTree(md: MarkdownIt, markdown: string): BlockToken[] {
+  const tokens = md.parse(markdown, {});
+  const root: BlockToken = { tag: '', startLine: 0, endLine: 0, hasMap: false, children: [] };
+  const stack: BlockToken[] = [root];
+  const make = (t: MdToken): BlockToken => ({
+    tag: t.tag ?? '',
+    startLine: t.map ? t.map[0] + 1 : 0,
+    endLine: t.map ? t.map[1] : 0,
+    hasMap: t.map != null,
+    children: [],
+  });
+  for (const token of tokens) {
+    if (token.type === 'inline') continue;
+    if (token.hidden) continue; // tight-list paragraphs render no element
+    if (token.nesting === 1) {
+      const node = make(token);
+      stack[stack.length - 1].children.push(node);
+      stack.push(node);
+    } else if (token.nesting === -1) {
+      if (stack.length > 1) stack.pop();
+    } else {
+      stack[stack.length - 1].children.push(make(token));
+    }
+  }
+  return root.children;
+}
+
+/** Recursively tag the mapped block children of `domEl` (matched to `node`'s
+ *  children by tag, in order). `ancestor` is the span of the nearest already-
+ *  tagged element, used to skip redundant equal-span tags. */
+function tagBlockChildren(domEl: Element, node: BlockToken, ancestor: { startLine: number; endLine: number }): void {
+  if (node.children.length === 0) return;
+  const domKids = Array.from(domEl.children);
+  // Only split paragraphs when a container holds more than one: a lone <p> (a
+  // single-paragraph blockquote / list item) stays one highlightable unit, while
+  // a multi-paragraph block splits per paragraph.
+  const paragraphCount = node.children.reduce((acc, c) => (c.tag === 'p' && c.hasMap ? acc + 1 : acc), 0);
+  let di = 0;
+  for (const child of node.children) {
+    if (!child.tag) continue;
+    let dom: Element | null = null;
+    while (di < domKids.length) {
+      const cand = domKids[di++];
+      if (cand.tagName.toLowerCase() === child.tag) {
+        dom = cand;
+        break;
+      }
+    }
+    if (!dom) continue;
+    let next = ancestor;
+    const structural = STRUCTURAL_TAGS.has(child.tag);
+    const loneParagraph = child.tag === 'p' && paragraphCount < 2;
+    const redundant = child.startLine === ancestor.startLine && child.endLine === ancestor.endLine;
+    if (child.hasMap && !structural && !loneParagraph && !redundant) {
+      dom.setAttribute(SRC_START_ATTR, String(child.startLine));
+      dom.setAttribute(SRC_END_ATTR, String(child.endLine));
+      next = { startLine: child.startLine, endLine: child.endLine };
+    }
+    tagBlockChildren(dom, child, next);
+  }
+}
+
+/**
+ * Tag line-bearing *nested* preview elements — list items, table rows, and
+ * paragraphs inside multi-paragraph containers — with `data-src-start/end` so
+ * selection sync can highlight exactly the selected sub-blocks instead of the
+ * whole top-level block.
+ *
+ * Top-level blocks keep their `data-map-id` from {@link tagPreviewBlocks}; nested
+ * elements carry source spans only. Mirrors that function's positional contract:
+ * the leading top-level children correspond 1:1 to the mapped top-level tokens
+ * (the footnote section, appended last with no map, is skipped). Structural
+ * containers (ul/ol/table/thead/tbody) are recursed through but never tagged, and
+ * a lone paragraph is left to its enclosing unit (single `<p>` ⇒ one layer).
+ *
+ * Display-only: `data-*` never leaks into the saved markdown (Turndown ignores
+ * it), so calling this after {@link tagPreviewBlocks} keeps the source pristine.
+ */
+export function tagNestedPreviewBlocks(root: Element, md: MarkdownIt, markdown: string): void {
+  const top = buildBlockTokenTree(md, markdown).filter((n) => n.hasMap);
+  const domKids = Array.from(root.children);
+  for (let i = 0; i < top.length && i < domKids.length; i++) {
+    const node = top[i];
+    tagBlockChildren(domKids[i], node, { startLine: node.startLine, endLine: node.endLine });
+  }
+}

@@ -6,6 +6,7 @@ import https from 'node:https';
 import { startLogin, cancelLogin, getStatus, logout, type LoginUpdate } from './codex-auth';
 import type { ChatTurn } from './codex-client';
 import { getRegistry } from './ai/provider-registry';
+import { htmlExportMaxTokens, isHtmlExportInstructions } from './ai/output-budget';
 import { isAiProviderId, type AiProviderId } from './ai/types';
 import { readSessionV2, writeSessionV2 } from './session-store';
 import {
@@ -645,6 +646,9 @@ ipcMain.handle(
           userText: payload.userText,
           model,
           signal: controller.signal,
+          maxOutputTokens: isHtmlExportInstructions(payload.instructions)
+            ? htmlExportMaxTokens(model.provider)
+            : undefined,
         },
         (e) => sender.send(`ai:chat:${payload.id}`, e),
       );

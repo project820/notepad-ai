@@ -60,6 +60,8 @@ export type AiChatRequest = {
   /** Provider+model selection. */
   model: { provider: AiProviderId; id: string };
   signal?: AbortSignal;
+  /** Escalated output-token cap (HTML export). Omitted → provider default. */
+  maxOutputTokens?: number;
 };
 
 export type AiChatEvent =

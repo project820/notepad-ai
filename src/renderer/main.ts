@@ -348,7 +348,6 @@ function createRafThrottle(): (cb: () => void) => void {
 
 const selectionSync = createSelectionSync({
   getPreviewRoot: () => preview.el,
-  getSourceMap: () => preview.getSourceMap(),
   editor: {
     setHighlightedLines: (lines) => editor.setHighlightedLines(lines),
     clearHighlight: () => editor.clearHighlight(),
@@ -379,7 +378,6 @@ editorHost.addEventListener('focusout', () => {
 // with the rendered preview blocks (built on the same G003 map A consumes). The
 // spacers are CM block widgets — never document text — so they never touch the
 // saved markdown or the undo history.
-const ALIGN_OVERSCAN_PX = 800; // measure a little past the viewport so scrolling stays aligned
 const MAX_ALIGN_SPACERS = 400; // long-document guard: cap spacers measured per pass
 
 function lineAlignActive(): boolean {
@@ -395,30 +393,30 @@ function measureLineAlignBlocks(): LineAlignmentBlock[] {
   if (preview.getSourceMap().length === 0) return [];
   const view = editor.view;
   const docLines = view.state.doc.lines;
-  const vp = preview.el.getBoundingClientRect();
-  const visTop = vp.top - ALIGN_OVERSCAN_PX;
-  const visBottom = vp.bottom + ALIGN_OVERSCAN_PX;
+  // Same-origin content-space: measure each pane against its OWN scroller (rect
+  // top + scrollTop) so each top is the block's absolute offset within that
+  // pane's scrollable content — directly comparable and scroll-invariant. This
+  // replaces the old viewport coords + normalize-to-first-block, which discarded
+  // the real first-block gap (preview vs editor padding) and accumulated error
+  // down the page. Because the tops are scroll-invariant, a single pass measures
+  // the WHOLE document (capped) instead of a scroll-dependent window, so the
+  // spacers stay valid as the user scrolls. The editor tops are NATURAL
+  // positions: applyLineAlign() clears the previous spacers before this runs.
+  const pRect = preview.el.getBoundingClientRect();
+  const cmScroller = view.scrollDOM;
+  const eRect = cmScroller.getBoundingClientRect();
+  const pScrollTop = preview.el.scrollTop;
+  const eScrollTop = cmScroller.scrollTop;
   const out: LineAlignmentBlock[] = [];
   for (const block of collectPreviewBlocks(preview.el)) {
     if (block.startLine < 1 || block.startLine > docLines) continue;
-    const rect = (block.el as HTMLElement).getBoundingClientRect();
-    if (rect.top > visBottom) break; // past the window (blocks are in document order) → stop
-    if (rect.bottom < visTop) continue; // above the visible window → skip
     const coords = view.coordsAtPos(view.state.doc.line(block.startLine).from);
     if (!coords) continue;
-    out.push({ line: block.startLine, previewTop: rect.top, editorTop: coords.top });
+    const rect = (block.el as HTMLElement).getBoundingClientRect();
+    const previewTop = rect.top - pRect.top + pScrollTop;
+    const editorTop = coords.top - eRect.top + eScrollTop;
+    out.push({ line: block.startLine, previewTop, editorTop });
     if (out.length >= MAX_ALIGN_SPACERS) break;
-  }
-  // Normalize both axes to the first measured block so the preview's viewport
-  // frame and the editor's become directly comparable — only relative distances
-  // matter, so constant origin/padding offsets cancel out.
-  if (out.length > 0) {
-    const p0 = out[0].previewTop;
-    const e0 = out[0].editorTop;
-    for (const b of out) {
-      b.previewTop -= p0;
-      b.editorTop -= e0;
-    }
   }
   return out;
 }

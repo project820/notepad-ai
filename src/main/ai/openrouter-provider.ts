@@ -72,6 +72,7 @@ export class OpenRouterProvider implements AiProvider {
           model: req.model.id,
           messages,
           stream: true,
+          ...(req.maxOutputTokens ? { max_tokens: req.maxOutputTokens } : {}),
         },
         mapEvent: (payload) => {
           if (isOpenAiDone(payload)) return { delta: '', done: true };

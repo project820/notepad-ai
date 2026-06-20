@@ -53,6 +53,7 @@ export class ChatGptProvider implements AiProvider {
         userText: req.userText,
         model: req.model.id,
         signal: req.signal,
+        maxOutputTokens: req.maxOutputTokens,
       },
       (e) => onEvent(e),
     );

@@ -67,7 +67,7 @@ export class ClaudeProvider implements AiProvider {
         },
         body: {
           model: req.model.id,
-          max_tokens: MAX_TOKENS,
+          max_tokens: req.maxOutputTokens ?? MAX_TOKENS,
           system: req.instructions,
           messages,
           stream: true,

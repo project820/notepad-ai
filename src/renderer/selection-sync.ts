@@ -1,9 +1,4 @@
-import {
-  collectPreviewBlocks,
-  previewElementToLineRange,
-  rangeToLineSpan,
-  type SourceLineRange,
-} from './source-preview-map';
+import { previewElementToLineRange, SRC_START_ATTR } from './source-preview-map';
 
 /**
  * Selection synchronization wiring (G004 — Selection sync A).
@@ -31,26 +26,51 @@ export type LineSpan = { fromLine: number; toLine: number };
 export type LineRange = { startLine: number; endLine: number };
 
 /**
- * Map an editor selection span to the `mapId`s of the preview blocks it covers.
- * Returns the (capped) ids in document order; a null/empty span yields `[]`.
- * Pure — no DOM.
+ * Collect the *finest* tagged preview elements whose source range intersects the
+ * editor selection `span`. "Finest" means leaf elements: when a tagged block has
+ * a tagged descendant that also intersects, only the descendant is returned — so
+ * selecting one list item lights that `<li>`, not the whole `<ul>`. A block with
+ * no finer tagged child (a paragraph, a heading) is returned whole. Document
+ * order, capped at {@link SYNC_HIGHLIGHT_CAP}. Reads the DOM but stays framework-
+ * free (testable under happy-dom).
  */
-export function computeSyncTargets(map: readonly SourceLineRange[], span: LineSpan | null): number[] {
-  if (!span || map.length === 0) return [];
-  const ids = rangeToLineSpan(map, span.fromLine, span.toLine).map((r) => r.mapId);
-  return ids.length > SYNC_HIGHLIGHT_CAP ? ids.slice(0, SYNC_HIGHLIGHT_CAP) : ids;
+export function computePreviewHighlightTargets(previewRoot: Element, span: LineSpan | null): Element[] {
+  if (!span) return [];
+  const lo = Math.min(span.fromLine, span.toLine);
+  const hi = Math.max(span.fromLine, span.toLine);
+  const hits: Element[] = [];
+  for (const el of Array.from(previewRoot.querySelectorAll('[' + SRC_START_ATTR + ']'))) {
+    const r = previewElementToLineRange(el);
+    if (!r) continue;
+    const s = Math.min(r.startLine, r.endLine);
+    const e = Math.max(r.startLine, r.endLine);
+    if (e < lo || s > hi) continue; // disjoint from the selection
+    hits.push(el);
+  }
+  // `querySelectorAll` yields preorder (document) order, so any tagged descendant
+  // of `hits[i]` is the very next hit — keep an element only when it has no such
+  // descendant in the set. O(n), and the cap bounds a select-all.
+  const leaves: Element[] = [];
+  for (let i = 0; i < hits.length; i++) {
+    const next = hits[i + 1];
+    if (next && hits[i].contains(next)) continue; // has a finer hit inside → not a leaf
+    leaves.push(hits[i]);
+    if (leaves.length >= SYNC_HIGHLIGHT_CAP) break;
+  }
+  return leaves;
 }
 
 /**
- * Reconcile {@link PREVIEW_SYNC_CLASS} on the preview's top-level blocks so that
- * exactly the blocks in `mapIds` carry it (diff: blocks no longer targeted lose
- * the class). Idempotent.
+ * Reconcile {@link PREVIEW_SYNC_CLASS} so that exactly the elements in `targets`
+ * carry it — elements no longer targeted lose the class. Idempotent. `targets`
+ * may be top-level blocks or nested sub-blocks (list items, table rows).
  */
-export function applyPreviewHighlight(previewRoot: Element, mapIds: readonly number[]): void {
-  const want = new Set(mapIds);
-  for (const { el, mapId } of collectPreviewBlocks(previewRoot)) {
-    el.classList.toggle(PREVIEW_SYNC_CLASS, want.has(mapId));
+export function applyPreviewHighlight(previewRoot: Element, targets: Iterable<Element>): void {
+  const want = new Set(targets);
+  for (const el of Array.from(previewRoot.querySelectorAll('.' + PREVIEW_SYNC_CLASS))) {
+    if (!want.has(el)) el.classList.remove(PREVIEW_SYNC_CLASS);
   }
+  for (const el of want) el.classList.add(PREVIEW_SYNC_CLASS);
 }
 
 /** Remove {@link PREVIEW_SYNC_CLASS} from every preview block carrying it. */
@@ -59,8 +79,9 @@ export function clearPreviewHighlight(previewRoot: Element): void {
 }
 
 /**
- * Walk up from `node` to the nearest preview top-level block carrying a source
- * range (stopping at `previewRoot`), returning its 1-based inclusive line range.
+ * Walk up from `node` to the nearest preview element carrying a source range
+ * (a nested sub-block or, failing that, the top-level block), stopping at
+ * `previewRoot`, and return its 1-based inclusive line range.
  */
 export function previewNodeToLineRange(node: Node | null, previewRoot: Element): LineRange | null {
   let el: Element | null =
@@ -98,7 +119,6 @@ export type EditorHighlightTarget = {
 
 export type SelectionSyncDeps = {
   getPreviewRoot: () => Element;
-  getSourceMap: () => readonly SourceLineRange[];
   editor: EditorHighlightTarget;
   /** True only in split view with the markdown (not converted-HTML) preview shown. */
   isActive: () => boolean;
@@ -128,7 +148,7 @@ export function createSelectionSync(deps: SelectionSyncDeps): SelectionSync {
       clearPreviewHighlight(root);
       return;
     }
-    applyPreviewHighlight(root, computeSyncTargets(deps.getSourceMap(), span));
+    applyPreviewHighlight(root, computePreviewHighlightTargets(root, span));
   }
 
   function syncPreviewToEditor(): void {

@@ -32,9 +32,18 @@ export type LineSpacer = { line: number; heightPx: number };
 export type LineAlignmentBlock = {
   /** 1-based source line the block starts on (the spacer is inserted before it). */
   line: number;
-  /** Top of the rendered preview block, in any consistent axis (px). */
+  /**
+   * Top of the rendered preview block in the preview pane's **content space**
+   * (block rect top − preview-scroller rect top + preview scrollTop), so it is
+   * the block's absolute offset within the scrollable content — scroll-invariant.
+   */
   previewTop: number;
-  /** Top of the editor line for this block, measured WITHOUT spacers, same axis (px). */
+  /**
+   * Top of this block's editor line in the editor pane's content space
+   * (line coords top − cm-scroller rect top + cm scrollTop), measured WITHOUT
+   * spacers (its natural position). Same per-pane content-space convention as
+   * `previewTop`, so the difference `previewTop − editorTop` is a real gap.
+   */
   editorTop: number;
 };
 
@@ -51,7 +60,8 @@ function clampCap(v: number | undefined): number {
 
 /**
  * Pure: compute the spacer heights that align each editor block top with its
- * preview block top, **without ever compressing** (spacers only add space).
+ * preview block top, **without ever compressing** (spacers only add space). The
+ * rendered preview is the source of truth; the raw editor is padded down to it.
  *
  * For block `i`, the desired total spacer height above it is
  * `previewTop[i] - editorTop[i]`. Because earlier spacers also push block `i`
@@ -60,8 +70,14 @@ function clampCap(v: number | undefined): number {
  * past its preview block) gets a 0 spacer, never a negative one. Each individual
  * spacer is clamped to `[0, maxSpacerPx]`. Zero-height spacers are omitted.
  *
- * No DOM: the caller supplies tops measured against a consistent per-pane origin
- * (e.g. normalized relative to the first measured block).
+ * The FIRST block participates like any other — its `previewTop - editorTop`
+ * becomes the first spacer (absorbing the per-pane origin/padding difference), so
+ * alignment is correct from the first block. Tops MUST therefore be same-origin
+ * content-space values (see {@link LineAlignmentBlock}); do NOT pre-normalize
+ * them to the first block, which would force its gap to 0 and leave every block
+ * shifted by that error.
+ *
+ * No DOM.
  */
 export function computeLineAlignmentSpacers(input: LineAlignmentInput): LineSpacer[] {
   const blocks = input?.blocks ?? [];

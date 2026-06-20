@@ -48,6 +48,7 @@ export type ChatRequest = {
   userText: string;
   model?: string;
   signal?: AbortSignal;
+  maxOutputTokens?: number;
 };
 
 export type ChatEvent =
@@ -89,6 +90,7 @@ export async function streamChat(req: ChatRequest, onEvent: (e: ChatEvent) => vo
     input: inputItems,
     store: false,
     stream: true,
+    ...(req.maxOutputTokens ? { max_output_tokens: req.maxOutputTokens } : {}),
   };
 
   let resp: Response;
