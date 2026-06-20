@@ -192,6 +192,20 @@ describe('setLineSpacers / clearLineSpacers — CM block-widget spacers', () => 
     view.destroy();
   });
 
+  it('drops a mapped spacer that an edit pushes off a line start (block-widget invariant; no crash)', () => {
+    const view = mountEditor(DOC);
+    setLineSpacers(view, [{ line: 3, heightPx: 30 }]); // widget at the start of "line 3"
+    expect(view.state.field(lineAlignmentField).size).toBe(1);
+    // Delete the newline before "line 3" (merges line 2 + line 3). The widget's
+    // mapped position is now mid-line — a `block: true` widget there would make CM6
+    // throw on the view update, so the field must drop it instead. This dispatch
+    // must NOT throw.
+    expect(() => view.dispatch({ changes: { from: 13, to: 14 } })).not.toThrow();
+    expect(view.state.doc.toString()).toBe('line 1\nline 2line 3\nline 4');
+    expect(view.state.field(lineAlignmentField).size).toBe(0);
+    view.destroy();
+  });
+
   it('ignores out-of-range line numbers', () => {
     const view = mountEditor(DOC);
     setLineSpacers(view, [{ line: 999, heightPx: 30 }]);

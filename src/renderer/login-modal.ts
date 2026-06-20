@@ -63,9 +63,15 @@ export function openLoginModal(cb: ModalCallbacks) {
       dismiss();
     },
   });
-  // Remove the modal AND release the focus trap / restore focus to the opener.
+  // Remove the modal AND release the focus trap, unsubscribe the IPC listener,
+  // and restore focus to the opener. Safe to call multiple times.
+  let unsubUpdate: (() => void) | null = null;
+  let dismissed = false;
   function dismiss(): void {
+    if (dismissed) return;
+    dismissed = true;
     releaseFocusTrap();
+    unsubUpdate?.();
     root.remove();
   }
 
@@ -80,7 +86,7 @@ export function openLoginModal(cb: ModalCallbacks) {
     void window.api.authLogin();
   });
 
-  window.api.onAuthLoginUpdate((update) => {
+  unsubUpdate = window.api.onAuthLoginUpdate((update) => {
     if (update.kind === 'usercode') {
       body.innerHTML = `
         <p class="lead">${esc(t('login.codeLead'))}</p>

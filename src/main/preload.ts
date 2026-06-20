@@ -100,8 +100,10 @@ const api = {
   authLogin: (): Promise<void> => ipcRenderer.invoke('auth:login'),
   authCancelLogin: (): Promise<void> => ipcRenderer.invoke('auth:cancel-login'),
   authLogout: (): Promise<void> => ipcRenderer.invoke('auth:logout'),
-  onAuthLoginUpdate: (cb: (u: LoginUpdate) => void) => {
-    ipcRenderer.on('auth:login-update', (_e, u: LoginUpdate) => cb(u));
+  onAuthLoginUpdate: (cb: (u: LoginUpdate) => void): (() => void) => {
+    const listener = (_e: unknown, u: LoginUpdate) => cb(u);
+    ipcRenderer.on('auth:login-update', listener);
+    return () => ipcRenderer.removeListener('auth:login-update', listener);
   },
 
   // AI Chat — streaming

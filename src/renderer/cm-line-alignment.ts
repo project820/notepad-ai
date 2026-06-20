@@ -177,8 +177,22 @@ const spacerField = StateField.define<DecorationSet>({
     // A document edit shifts line positions: map the held spacer widgets through
     // the change so the established vertical geometry travels WITH the text instead
     // of collapsing on the first keystroke (which jerks the text up until the
-    // debounced realignment runs). The next measurement cleanly replaces them.
-    if (tr.docChanged) return deco.map(tr.changes);
+    // debounced realignment runs). BUT a `block: true` widget must sit exactly at a
+    // line start — an edit that merges/splits lines can move a widget off a line
+    // boundary, which CM6 rejects during the next view update (throws). So after
+    // mapping we drop any widget that no longer lands on a line start; the debounced
+    // realignment re-adds correct spacers on the next frame.
+    if (tr.docChanged) {
+      return deco.map(tr.changes).update({
+        filter: (from) => {
+          try {
+            return tr.state.doc.lineAt(from).from === from;
+          } catch {
+            return false;
+          }
+        },
+      });
+    }
     return deco;
   },
   provide: (f) => EditorView.decorations.from(f),

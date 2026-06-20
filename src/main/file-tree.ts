@@ -96,7 +96,11 @@ export function isSafeLocalAbsolutePath(input: unknown): input is string {
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) return false; // scheme://…
   if (/^file:/i.test(value)) return false;
   if (/[\u0000-\u001f]/.test(value)) return false; // control chars / newlines
-  return path.isAbsolute(value);
+  if (!path.isAbsolute(value)) return false;
+  // Reject any '..' segment: a legitimate absolute target (dialog/session/tree)
+  // is already normalized, so a traversal segment signals a crafted path.
+  if (value.split(/[\\/]/).includes('..')) return false;
+  return true;
 }
 
 /** Result of {@link openFileInCurrentWindow}. */

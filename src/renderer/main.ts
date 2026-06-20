@@ -102,7 +102,7 @@ type Api = {
   authLogin: () => Promise<void>;
   authCancelLogin: () => Promise<void>;
   authLogout: () => Promise<void>;
-  onAuthLoginUpdate: (cb: (u: LoginUpdate) => void) => void;
+  onAuthLoginUpdate: (cb: (u: LoginUpdate) => void) => () => void;
   aiChat: (id: string, instructions: string, history: { role: 'user' | 'assistant'; text: string }[], userText: string, model?: string | { provider: AiProviderId; id: string }) => Promise<void>;
   aiCancel: (id: string) => Promise<void>;
   onAiChatEvent: (id: string, cb: (e: { kind: 'delta' | 'done' | 'error'; text?: string; message?: string; errorKind?: string }) => void) => () => void;

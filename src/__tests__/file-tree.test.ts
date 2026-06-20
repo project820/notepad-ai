@@ -163,6 +163,16 @@ describe('isSafeLocalAbsolutePath', () => {
     expect(isSafeLocalAbsolutePath('javascript:alert(1)')).toBe(false);
   });
 
+  it('rejects paths containing a .. traversal segment', () => {
+    expect(isSafeLocalAbsolutePath('/Users/me/../../etc/passwd')).toBe(false);
+    expect(isSafeLocalAbsolutePath('/Users/me/docs/../secret.md')).toBe(false);
+    expect(isSafeLocalAbsolutePath('/..')).toBe(false);
+    // a directory literally named ".." segment is rejected; legitimate names with
+    // dots elsewhere are still fine.
+    expect(isSafeLocalAbsolutePath('/Users/me/..hidden/x.md')).toBe(true);
+    expect(isSafeLocalAbsolutePath('/Users/me/a..b/x.md')).toBe(true);
+  });
+
   it('rejects empty, control-char, and non-string input', () => {
     expect(isSafeLocalAbsolutePath('')).toBe(false);
     expect(isSafeLocalAbsolutePath('   ')).toBe(false);
