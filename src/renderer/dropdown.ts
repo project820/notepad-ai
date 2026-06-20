@@ -143,6 +143,64 @@ export function openMenu<T extends string>(opts: OpenMenuOptions<T>): void {
   }, 0);
 }
 
+export type OpenPanelOptions = {
+  anchor: HTMLElement;
+  /** Caller-built panel contents (already wired). Appended into the popover. */
+  content: HTMLElement;
+  minWidth?: number;
+  align?: 'start' | 'end';
+};
+
+/**
+ * Like {@link openMenu}, but hosts arbitrary caller-built content (steppers,
+ * segmented controls, …) instead of a flat item list. Shares the same
+ * single-popover state, viewport clamping, and outside-click / Esc dismissal.
+ */
+export function openPanel(opts: OpenPanelOptions): void {
+  const sameAnchor = activeAnchor === opts.anchor;
+  closeOpenMenu();
+  if (sameAnchor) return;
+  activeAnchor = opts.anchor;
+
+  const menu = document.createElement('div');
+  menu.className = 'pm-menu pm-panel';
+  menu.setAttribute('role', 'dialog');
+  menu.appendChild(opts.content);
+  if (opts.minWidth) menu.style.minWidth = `${opts.minWidth}px`;
+  document.body.appendChild(menu);
+  activeMenu = menu;
+  document.body.classList.add('menu-open');
+
+  const rect = opts.anchor.getBoundingClientRect();
+  const menuRect = menu.getBoundingClientRect();
+  const align = opts.align ?? 'end';
+  let top = rect.bottom + 6;
+  let left = align === 'end' ? rect.right - menuRect.width : rect.left;
+  if (left + menuRect.width > window.innerWidth - 8) left = window.innerWidth - menuRect.width - 8;
+  if (left < 8) left = 8;
+  if (top + menuRect.height > window.innerHeight - 8) {
+    top = rect.top - menuRect.height - 6;
+    if (top < 8) top = 8;
+  }
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+
+  const onOutside = (e: MouseEvent) => {
+    const node = e.target as Node;
+    if (opts.anchor.contains(node) || opts.anchor === node) return;
+    if (menu.contains(node)) return;
+    closeOpenMenu();
+  };
+  const onEsc = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') closeOpenMenu();
+  };
+  activeOutsideHandler = onOutside;
+  activeEscHandler = onEsc;
+  setTimeout(() => {
+    document.addEventListener('mousedown', onOutside, true);
+    document.addEventListener('keydown', onEsc);
+  }, 0);
+}
 function escape(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
 }

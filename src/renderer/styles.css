@@ -2654,6 +2654,133 @@ html[data-theme='dark'] .preview tr.preview-sync-highlight > td {
   user-select: none;
 }
 /* =============================================================
+ * Text-settings popover (font size + typography) — anchored to the Aa button.
+ * Hosts custom content inside the shared .pm-menu popover chrome.
+ * ============================================================= */
+.pm-panel {
+  padding: 12px;
+  gap: 0;
+}
+.text-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 220px;
+}
+.ts-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ts-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-mute);
+}
+.ts-seg {
+  display: flex;
+  gap: 4px;
+}
+.ts-seg-btn {
+  flex: 1;
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 8px;
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--r-sm);
+  background: var(--color-surface-bone);
+  color: var(--color-body);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.ts-seg-btn:hover {
+  border-color: var(--color-primary);
+}
+.ts-seg-btn.ts-seg-on {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: var(--color-on-primary);
+}
+.ts-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.ts-row-label {
+  font-size: 13.5px;
+  color: var(--color-body);
+}
+.ts-stepper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ts-step-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-full);
+  border: 1px solid var(--color-hairline);
+  background: var(--color-surface-card);
+  color: var(--color-ink);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s;
+}
+.ts-step-btn:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+.ts-step-val {
+  min-width: 52px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--color-ink);
+}
+
+/* =============================================================
+ * Inline Style settings in the AI chat (difficulty + naturalness).
+ * ============================================================= */
+.uc-style-toggle {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--r-full);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--color-mute);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.uc-style-toggle:hover,
+.uc-style-toggle[aria-expanded='true'] {
+  background: var(--color-surface-bone);
+  color: var(--color-ink);
+  border-color: var(--color-hairline);
+}
+.uc-style-panel {
+  padding: 4px 12px 12px;
+  border-bottom: 1px solid var(--color-hairline);
+}
+.uc-style-panel .style-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-mute);
+  margin: 8px 0 2px;
+}
+.uc-style-panel .style-select {
+  min-width: 150px;
+}
+
+/* =============================================================
  * Reduced motion (a11y) — honor prefers-reduced-motion
  * ============================================================= */
 @media (prefers-reduced-motion: reduce) {

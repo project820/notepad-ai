@@ -834,6 +834,13 @@ createToolbar(toolbarHost, {
     scheduleLineAlign();
   },
   getRawLineAlign: () => prefs.rawLineAlign ?? false,
+  getTypography: () => clampTypography(prefs.typography),
+  onTypographyChange: (next) => {
+    prefs.typography = clampTypography(next);
+    savePrefs(prefs);
+    applyTypography(prefs.typography);
+    scheduleLineAlign();
+  },
   onOpenSettings: () => openSettings(),
   onSignIn: () => openLoginModal({ onAfterLogin: (a) => { cachedAuth = a; paintAuthPill(a); } }),
   onSignOut: async () => {
@@ -1209,8 +1216,6 @@ function applyStyle(next: { difficulty: Quality; naturalness: Naturalness }) {
 
 function openSettings() {
   openSettingsModal({
-    getStyle: () => currentStyle(),
-    onStyleChange: (s) => applyStyle(s),
     onAfterAuthChange: () => {
       rendererModels = null;
       rendererModelsPromise = null;
@@ -1225,13 +1230,6 @@ function openSettings() {
       if (provider === 'chatgpt') prefs.model = modelId;
       savePrefs(prefs);
       statusEl.textContent = `Model · ${provider} · ${modelId}`;
-    },
-    getTypography: () => clampTypography(prefs.typography),
-    onTypographyChange: (next) => {
-      prefs.typography = clampTypography(next);
-      savePrefs(prefs);
-      applyTypography(prefs.typography);
-      scheduleLineAlign();
     },
   });
 }
@@ -1341,6 +1339,7 @@ const unifiedChat = mountUnifiedChat(unifiedChatHost, {
   onCopy: (md) => void navigator.clipboard.writeText(md),
   onProjectSetup: () => void startProjectWizard(),
   onHtmlExport: () => void startHtmlExportWizard(),
+  style: { get: () => currentStyle(), onChange: (s) => applyStyle(s) },
 });
 
 let htmlExportWizard: HtmlExportWizardHandle | null = null;

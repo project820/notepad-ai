@@ -1,7 +1,8 @@
 import type { FormatAction } from './formatting';
-import { openMenu } from './dropdown';
+import { openMenu, openPanel } from './dropdown';
 import { t, getLocale, setLocale, onLocaleChange, type Locale } from './i18n';
 import { modelKey } from './model-key';
+import { stepTypography, type TypographyPref } from './typography';
 import { formatContextWindow, modelContextWindowTokens } from '../main/ai/output-budget';
 import { isAiProviderId, type AiProviderId } from '../main/ai/types';
 
@@ -37,6 +38,9 @@ export type ToolbarHandlers = {
   onToggleRawLineAlign?: () => void;
   /** Current raw line-alignment state (drives aria-pressed). */
   getRawLineAlign?: () => boolean;
+  /** Typography (letter-spacing / char-width / line-height) for the text-size panel. */
+  getTypography?: () => import('./typography').TypographyPref;
+  onTypographyChange?: (next: import('./typography').TypographyPref) => void;
 };
 
 // ---- SVG glyphs (no emoji) ----
@@ -233,17 +237,8 @@ export function createToolbar(parent: HTMLElement, h: ToolbarHandlers) {
     });
 
     fontBtn.addEventListener('click', () => {
-      const cur = h.getFontSize();
-      openMenu<FontSize>({
-        anchor: fontBtn,
-        items: [
-          { value: 'sm', label: t('menu.font.sm'), hint: '13.5px', selected: cur === 'sm' },
-          { value: 'md', label: t('menu.font.md'), hint: '15px', selected: cur === 'md' },
-          { value: 'lg', label: t('menu.font.lg'), hint: '17px', selected: cur === 'lg' },
-        ],
-        onSelect: (v) => h.onFontSizeChange(v),
-        minWidth: 170,
-      });
+      // openPanel toggles itself when re-opened from the same anchor.
+      openPanel({ anchor: fontBtn, content: buildTextSettingsPanel(h), minWidth: 240 });
     });
 
     themeBtn.addEventListener('click', () => {
@@ -416,4 +411,106 @@ function openTablePicker(anchor: HTMLElement, onPick: (rows: number, cols: numbe
     }
   };
   setTimeout(() => document.addEventListener('mousedown', onOutside, true), 0);
+}
+
+/**
+ * Build the text-settings popover content: font-size segmented control plus the
+ * letter-spacing / character-width / line-height steppers. Moved out of the
+ * Settings modal so display tweaks live next to the text-size (Aa) button.
+ */
+function buildTextSettingsPanel(h: ToolbarHandlers): HTMLElement {
+  const root = document.createElement('div');
+  root.className = 'text-settings';
+  root.dataset.panel = 'text';
+
+  // ----- font size (segmented) -----
+  const sizes: { v: FontSize; label: string }[] = [
+    { v: 'sm', label: t('menu.font.sm') },
+    { v: 'md', label: t('menu.font.md') },
+    { v: 'lg', label: t('menu.font.lg') },
+  ];
+  const sizeWrap = document.createElement('div');
+  sizeWrap.className = 'ts-section';
+  const sizeLabel = document.createElement('div');
+  sizeLabel.className = 'ts-label';
+  sizeLabel.textContent = t('tip.font');
+  const seg = document.createElement('div');
+  seg.className = 'ts-seg';
+  const paintSeg = () => {
+    const cur = h.getFontSize();
+    seg.querySelectorAll<HTMLButtonElement>('button').forEach((b) => {
+      const on = b.dataset.size === cur;
+      b.classList.toggle('ts-seg-on', on);
+      b.setAttribute('aria-pressed', String(on));
+    });
+  };
+  for (const s of sizes) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'ts-seg-btn';
+    b.dataset.size = s.v;
+    b.textContent = s.label;
+    b.addEventListener('click', () => {
+      h.onFontSizeChange(s.v);
+      paintSeg();
+    });
+    seg.appendChild(b);
+  }
+  sizeWrap.append(sizeLabel, seg);
+  root.appendChild(sizeWrap);
+  paintSeg();
+
+  // ----- typography steppers (optional; only when wired) -----
+  const getTypo = h.getTypography;
+  const onTypo = h.onTypographyChange;
+  if (getTypo && onTypo) {
+    const rows: { key: keyof TypographyPref; label: string; fmt: (v: number) => string }[] = [
+      { key: 'letterSpacing', label: t('type.letterSpacing'), fmt: (v) => `${v}px` },
+      { key: 'charScaleX', label: t('type.charWidth'), fmt: (v) => `${Math.round(v * 100)}%` },
+      { key: 'lineHeight', label: t('type.lineHeight'), fmt: (v) => `${v.toFixed(1)}×` },
+    ];
+    const typoWrap = document.createElement('div');
+    typoWrap.className = 'ts-section';
+    const typoLabel = document.createElement('div');
+    typoLabel.className = 'ts-label';
+    typoLabel.textContent = t('type.title');
+    typoWrap.appendChild(typoLabel);
+    for (const r of rows) {
+      const row = document.createElement('div');
+      row.className = 'ts-row';
+      const name = document.createElement('span');
+      name.className = 'ts-row-label';
+      name.textContent = r.label;
+      const stepper = document.createElement('div');
+      stepper.className = 'ts-stepper';
+      const minus = document.createElement('button');
+      minus.type = 'button';
+      minus.className = 'ts-step-btn';
+      minus.textContent = '−';
+      minus.setAttribute('aria-label', `${r.label} −`);
+      const val = document.createElement('span');
+      val.className = 'ts-step-val';
+      const plus = document.createElement('button');
+      plus.type = 'button';
+      plus.className = 'ts-step-btn';
+      plus.textContent = '+';
+      plus.setAttribute('aria-label', `${r.label} +`);
+      const paintVal = () => {
+        val.textContent = r.fmt(getTypo()[r.key]);
+      };
+      const step = (dir: 1 | -1) => {
+        onTypo(stepTypography(getTypo(), r.key, dir));
+        paintVal();
+      };
+      minus.addEventListener('click', () => step(-1));
+      plus.addEventListener('click', () => step(1));
+      stepper.append(minus, val, plus);
+      row.append(name, stepper);
+      typoWrap.appendChild(row);
+      paintVal();
+    }
+    root.appendChild(typoWrap);
+  }
+
+  return root;
 }

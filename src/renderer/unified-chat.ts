@@ -17,6 +17,8 @@ import { t } from './i18n';
 // @ts-expect-error — no types
 import taskLists from 'markdown-it-task-lists';
 import { restoreUnifiedThread, type UnifiedChatItem, type UnifiedThreadSnapshot } from './unified-chat-history';
+import { mountStyleSettingPanel, type StyleSettingHandle } from './style-setting-panel';
+import type { StyleSetting } from './humanize-engine';
 
 export type ChatMode = 'write' | 'advise' | 'project';
 
@@ -31,6 +33,8 @@ export type UnifiedChatHandlers = {
   onProjectSetup?: () => void;
   /** Open the HTML-export wizard (⑤). */
   onHtmlExport?: () => void;
+  /** AI writing style (difficulty + naturalness), surfaced inline in the chat. */
+  style?: { get: () => StyleSetting; onChange: (s: StyleSetting) => void };
 };
 
 /** Live streaming handle for one assistant turn. */
@@ -76,6 +80,10 @@ md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
   return defaultLinkOpen(tokens, idx, options, env, self);
 };
 
+/** Sliders/settings glyph for the inline style toggle (no emoji). */
+const STYLE_GEAR_ICON =
+  '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="2" y1="4.5" x2="14" y2="4.5"/><circle cx="6" cy="4.5" r="1.6" fill="currentColor" stroke="none"/><line x1="2" y1="11.5" x2="14" y2="11.5"/><circle cx="10.5" cy="11.5" r="1.6" fill="currentColor" stroke="none"/></svg>';
+
 export function renderUnifiedChat(): string {
   return `<div class="uc-root">
   <div class="uc-modes" role="tablist">
@@ -83,7 +91,9 @@ export function renderUnifiedChat(): string {
     <button class="uc-mode" data-mode="advise" aria-selected="false" type="button">${t('uc.advise')}</button>
     <button class="uc-mode" data-mode="project" aria-selected="false" type="button">${t('uc.project')}</button>
     <button class="uc-html-export" type="button">${t('he.button')}</button>
+    <button class="uc-style-toggle" type="button" hidden data-tooltip="${t('style.title')}" aria-label="${t('style.title')}" aria-expanded="false">${STYLE_GEAR_ICON}</button>
   </div>
+  <div class="uc-style-panel" hidden></div>
   <div class="uc-thread" role="log"></div>
   <div class="uc-composer">
     <textarea class="uc-input" rows="2" placeholder="${t('uc.placeholder')}" aria-label="${t('uc.write')}"></textarea>
@@ -212,7 +222,31 @@ export function mountUnifiedChat(parent: HTMLElement, handlers: UnifiedChatHandl
     scrollToEnd();
   }
 
+  // ----- inline style settings (difficulty + naturalness) -----
+  const styleToggle = parent.querySelector<HTMLButtonElement>('.uc-style-toggle')!;
+  const stylePanel = parent.querySelector<HTMLElement>('.uc-style-panel')!;
+  let styleHandle: StyleSettingHandle | null = null;
+  if (handlers.style) styleToggle.hidden = false;
+  const toggleStylePanel = () => {
+    if (!handlers.style) return;
+    const show = stylePanel.hidden;
+    if (show) {
+      // Re-mount on each open so it reflects the latest setting (Block AI shares it).
+      styleHandle?.destroy();
+      styleHandle = mountStyleSettingPanel(stylePanel, {
+        setting: handlers.style.get(),
+        onChange: (s) => handlers.style!.onChange(s),
+      });
+    }
+    stylePanel.hidden = !show;
+    styleToggle.setAttribute('aria-expanded', String(show));
+  };
+
   const onModeClick = (e: Event) => {
+    if ((e.target as HTMLElement).closest('.uc-style-toggle')) {
+      toggleStylePanel();
+      return;
+    }
     if ((e.target as HTMLElement).closest('.uc-html-export')) {
       handlers.onHtmlExport?.();
       return;
@@ -270,6 +304,7 @@ export function mountUnifiedChat(parent: HTMLElement, handlers: UnifiedChatHandl
     },
     showPanel,
     destroy: () => {
+      styleHandle?.destroy();
       parent.innerHTML = '';
     },
   };

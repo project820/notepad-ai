@@ -11,23 +11,30 @@
 
 import { QUALITY_ORDER, type Quality } from './quality';
 import type { Naturalness, StyleSetting } from './humanize-engine';
+import { t } from './i18n';
 
 const NATURALNESS_ORDER: Naturalness[] = ['off', 'light', 'balanced', 'strong'];
 
-const DIFFICULTY_LABELS: Record<Quality, string> = {
-  elementary: 'Elementary',
-  highschool: 'High school',
-  college: 'College',
-  professor: 'Academic',
-  professional: 'Professional',
-};
+/** Difficulty option labels, resolved from i18n at render time (quality.* keys). */
+function difficultyLabels(): Record<Quality, string> {
+  return {
+    elementary: t('quality.elementary'),
+    highschool: t('quality.highschool'),
+    college: t('quality.college'),
+    professor: t('quality.professor'),
+    professional: t('quality.professional'),
+  };
+}
 
-const NATURALNESS_LABELS: Record<Naturalness, string> = {
-  off: 'Off (raw AI)',
-  light: 'Light',
-  balanced: 'Balanced',
-  strong: 'Strong',
-};
+/** Naturalness option labels, resolved from i18n at render time (naturalness.* keys). */
+function naturalnessLabels(): Record<Naturalness, string> {
+  return {
+    off: t('naturalness.off'),
+    light: t('naturalness.light'),
+    balanced: t('naturalness.balanced'),
+    strong: t('naturalness.strong'),
+  };
+}
 
 export type StyleSettingRenderOptions = { setting: StyleSetting };
 export type StyleSettingOptions = StyleSettingRenderOptions & {
@@ -51,21 +58,21 @@ function options<T extends string>(values: T[], current: T, labels: Record<T, st
 export function renderStyleSettingPanel(opts: StyleSettingRenderOptions): string {
   const { difficulty, naturalness } = opts.setting;
   return `<div class="style-root">
-  <h2 class="style-title">Style</h2>
+  <h2 class="style-title">${escapeHTML(t('style.title'))}</h2>
   <label class="style-field">
-    <span class="style-label">Difficulty</span>
+    <span class="style-label">${escapeHTML(t('style.difficulty'))}</span>
     <select class="style-select" data-style="difficulty">${options(
       QUALITY_ORDER,
       difficulty,
-      DIFFICULTY_LABELS,
+      difficultyLabels(),
     )}</select>
   </label>
   <label class="style-field">
-    <span class="style-label">Naturalness (humanize)</span>
+    <span class="style-label">${escapeHTML(t('style.naturalness'))}</span>
     <select class="style-select" data-style="naturalness">${options(
       NATURALNESS_ORDER,
       naturalness,
-      NATURALNESS_LABELS,
+      naturalnessLabels(),
     )}</select>
   </label>
 </div>`;
