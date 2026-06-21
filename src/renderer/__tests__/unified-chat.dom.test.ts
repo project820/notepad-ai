@@ -25,13 +25,15 @@ function mount(over: Partial<UnifiedChatHandlers> = {}) {
 }
 
 describe('renderUnifiedChat', () => {
-  it('renders thread, composer, and three modes', () => {
+  it('renders thread, composer, and four mode tabs (no separate HTML button)', () => {
     const html = renderUnifiedChat();
     expect(html).toContain('uc-thread');
     expect(html).toContain('uc-input');
     expect(html).toContain('data-mode="write"');
     expect(html).toContain('data-mode="advise"');
     expect(html).toContain('data-mode="project"');
+    expect(html).toContain('data-mode="html"');
+    expect(html).not.toContain('uc-html-export');
   });
 });
 
@@ -41,7 +43,7 @@ describe('mountUnifiedChat — composer', () => {
     const input = parent.querySelector<HTMLTextAreaElement>('.uc-input')!;
     input.value = 'draft an intro';
     parent.querySelector<HTMLButtonElement>('.uc-send')!.click();
-    expect(handlers.onSend).toHaveBeenCalledWith('draft an intro', 'write');
+    expect(handlers.onSend).toHaveBeenCalledWith('draft an intro', 'write', undefined);
     expect(input.value).toBe('');
   });
 
@@ -80,13 +82,37 @@ describe('mountUnifiedChat — modes', () => {
     const input = parent.querySelector<HTMLTextAreaElement>('.uc-input')!;
     input.value = 'what do you think?';
     parent.querySelector<HTMLButtonElement>('.uc-send')!.click();
-    expect(handlers.onSend).toHaveBeenCalledWith('what do you think?', 'advise');
+    expect(handlers.onSend).toHaveBeenCalledWith('what do you think?', 'advise', undefined);
   });
 
   it('project mode triggers the Project Wizard handler', () => {
     const { parent, handlers } = mount();
     parent.querySelector<HTMLButtonElement>('.uc-mode[data-mode="project"]')!.click();
     expect(handlers.onProjectSetup).toHaveBeenCalledTimes(1);
+  });
+
+  it('html tab triggers the HTML-export handler', () => {
+    const { parent, handlers } = mount({ onHtmlExport: vi.fn() });
+    parent.querySelector<HTMLButtonElement>('.uc-mode[data-mode="html"]')!.click();
+    expect(handlers.onHtmlExport).toHaveBeenCalledTimes(1);
+  });
+
+  it('switching to write clears a transient panel and notifies onModeChange', () => {
+    const onModeChange = vi.fn();
+    const { parent, handle } = mount({ onModeChange });
+    handle.showPanel('<div data-pw-action="x">P</div>');
+    expect(parent.querySelectorAll('.uc-panel-msg').length).toBe(1);
+    parent.querySelector<HTMLButtonElement>('.uc-mode[data-mode="write"]')!.click();
+    expect(parent.querySelectorAll('.uc-panel-msg').length).toBe(0);
+    expect(onModeChange).toHaveBeenCalledWith('write');
+  });
+
+  it('clearPanel runs the panel onDestroy cleanup', () => {
+    const { handle } = mount();
+    const onDestroy = vi.fn();
+    handle.showPanel('<div>x</div>', undefined, onDestroy);
+    handle.clearPanel();
+    expect(onDestroy).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -206,5 +232,87 @@ describe('mountUnifiedChat — showPanel', () => {
     handle.showPanel('<div data-pw-action="a">A</div>');
     handle.showPanel('<div data-pw-action="b">B</div>');
     expect(parent.querySelectorAll('.uc-panel-msg').length).toBe(1);
+  });
+});
+
+describe('mountUnifiedChat — write help + advise sync (AC3/AC6)', () => {
+  it('shows the write-help on an empty write thread and hides it after a message', () => {
+    const { parent, handle } = mount();
+    const help = parent.querySelector<HTMLElement>('.uc-write-help')!;
+    expect(help).not.toBeNull();
+    expect(help.hidden).toBe(false); // write is the default tab + empty thread
+    handle.addMessage('user', 'hello');
+    expect(help.hidden).toBe(true);
+  });
+
+  it('hides the write-help when not on the write tab', () => {
+    const { parent } = mount();
+    const help = parent.querySelector<HTMLElement>('.uc-write-help')!;
+    parent.querySelector<HTMLButtonElement>('.uc-mode[data-mode="advise"]')!.click();
+    expect(help.hidden).toBe(true);
+  });
+
+  it('shows the advise sync bar only on the advise tab', () => {
+    const { parent } = mount();
+    const bar = parent.querySelector<HTMLElement>('.uc-advise-bar')!;
+    expect(bar.hidden).toBe(true); // default write
+    parent.querySelector<HTMLButtonElement>('.uc-mode[data-mode="advise"]')!.click();
+    expect(bar.hidden).toBe(false);
+    parent.querySelector<HTMLButtonElement>('.uc-mode[data-mode="write"]')!.click();
+    expect(bar.hidden).toBe(true);
+  });
+
+  it('the resync button invokes onAdviceResync', () => {
+    const onAdviceResync = vi.fn();
+    const { parent } = mount({ onAdviceResync });
+    parent.querySelector<HTMLButtonElement>('.uc-mode[data-mode="advise"]')!.click();
+    parent.querySelector<HTMLButtonElement>('.uc-advise-resync')!.click();
+    expect(onAdviceResync).toHaveBeenCalledTimes(1);
+  });
+
+  it('setAdviceSync updates the sync status badge', () => {
+    const { parent, handle } = mount();
+    handle.setAdviceSync('Document synced · 14:32');
+    expect(parent.querySelector('.uc-advise-status')!.textContent).toBe('Document synced · 14:32');
+  });
+});
+
+describe('mountUnifiedChat — image attachments (G007 AC14)', () => {
+  const att = { mime: 'image/png', base64: 'AAAA', bytes: 10, name: 'shot.png' };
+
+  it('renders a chip per attachment and removes it on ×', () => {
+    const { parent, handle } = mount();
+    handle.addAttachment(att);
+    const chips = parent.querySelector<HTMLElement>('.uc-chips')!;
+    expect(chips.hidden).toBe(false);
+    expect(chips.querySelectorAll('.uc-chip').length).toBe(1);
+    chips.querySelector<HTMLButtonElement>('.uc-chip-x')!.click();
+    expect(chips.querySelectorAll('.uc-chip').length).toBe(0);
+    expect(chips.hidden).toBe(true);
+  });
+
+  it('send passes the attachments and clears them afterward', () => {
+    const { parent, handlers, handle } = mount();
+    handle.addAttachment(att);
+    const input = parent.querySelector<HTMLTextAreaElement>('.uc-input')!;
+    input.value = 'OCR this';
+    parent.querySelector<HTMLButtonElement>('.uc-send')!.click();
+    expect(handlers.onSend).toHaveBeenCalledWith('OCR this', 'write', [att]);
+    expect(parent.querySelector<HTMLElement>('.uc-chips')!.querySelectorAll('.uc-chip').length).toBe(0);
+  });
+
+  it('allows an image-only turn (empty text but attachment present)', () => {
+    const { parent, handlers, handle } = mount();
+    handle.addAttachment(att);
+    parent.querySelector<HTMLButtonElement>('.uc-send')!.click();
+    expect(handlers.onSend).toHaveBeenCalledWith('', 'write', [att]);
+  });
+
+  it('the attach button opens the hidden file input', () => {
+    const { parent } = mount();
+    const file = parent.querySelector<HTMLInputElement>('.uc-file')!;
+    const clickSpy = vi.spyOn(file, 'click');
+    parent.querySelector<HTMLButtonElement>('.uc-attach')!.click();
+    expect(clickSpy).toHaveBeenCalledTimes(1);
   });
 });

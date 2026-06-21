@@ -113,7 +113,10 @@ const api = {
     history: { role: 'user' | 'assistant'; text: string }[],
     userText: string,
     model?: string | { provider: AiProviderId; id: string },
-  ): Promise<void> => ipcRenderer.invoke('ai:chat', { id, instructions, history, userText, model }),
+    surfaceMode?: 'write' | 'advise' | 'html' | 'block',
+    images?: { mime: string; base64: string; bytes: number; name?: string }[],
+  ): Promise<void> =>
+    ipcRenderer.invoke('ai:chat', { id, instructions, history, userText, model, surfaceMode, images }),
   aiCancel: (id: string): Promise<void> => ipcRenderer.invoke('ai:cancel', id),
   onAiChatEvent: (
     id: string,
@@ -185,6 +188,11 @@ const api = {
     input: string,
   ): Promise<{ ok: boolean; designMd?: string; rawUrl?: string; error?: string }> =>
     ipcRenderer.invoke('design:fetch', input),
+  listDesigns: (): Promise<{
+    ok: boolean;
+    designs?: { slug: string; name: string; pageUrl: string }[];
+    error?: string;
+  }> => ipcRenderer.invoke('design:list'),
   saveHtml: (args: { html: string; defaultName?: string }): Promise<{ saved: boolean; filePath?: string }> =>
     ipcRenderer.invoke('html:save', args),
   openSavedHtml: (filePath: string): Promise<{ opened: boolean; error?: string }> =>

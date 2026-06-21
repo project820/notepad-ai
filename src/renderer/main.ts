@@ -12,7 +12,7 @@ import { wirePreviewTables } from './preview-table-edit';
 import { applyToEditor, applyToPreview, type FormatAction } from './formatting';
 import { htmlToMarkdown } from './html-to-md';
 import { openLoginModal } from './login-modal';
-import { mountUnifiedChat, type ChatMode } from './unified-chat';
+import { mountUnifiedChat, type ChatMode, type ChatAttachment } from './unified-chat';
 import { clampChatWidth } from './chat-layout';
 import { openSettingsModal } from './settings-modal';
 import { restoreUnifiedThread, threadToTurns, type UnifiedChatItem } from './unified-chat-history';
@@ -39,6 +39,7 @@ import { installTooltips } from './tooltips';
 import { wireWordmark } from './header-wordmark';
 import { installSelectionFormatMenu } from './selection-format-menu';
 import { mountHtmlExportWizard, type HtmlExportWizardHandle } from './html-export-wizard';
+import { HTML_EXPORT_INSTRUCTIONS } from './html-export-prompt';
 import { EditorSelection } from '@codemirror/state';
 
 type AuthSnapshot = {
@@ -103,7 +104,7 @@ type Api = {
   authCancelLogin: () => Promise<void>;
   authLogout: () => Promise<void>;
   onAuthLoginUpdate: (cb: (u: LoginUpdate) => void) => () => void;
-  aiChat: (id: string, instructions: string, history: { role: 'user' | 'assistant'; text: string }[], userText: string, model?: string | { provider: AiProviderId; id: string }) => Promise<void>;
+  aiChat: (id: string, instructions: string, history: { role: 'user' | 'assistant'; text: string }[], userText: string, model?: string | { provider: AiProviderId; id: string }, surfaceMode?: 'write' | 'advise' | 'html' | 'block', images?: { mime: string; base64: string; bytes: number; name?: string }[]) => Promise<void>;
   aiCancel: (id: string) => Promise<void>;
   onAiChatEvent: (id: string, cb: (e: { kind: 'delta' | 'done' | 'error'; text?: string; message?: string; errorKind?: string }) => void) => () => void;
   aiModels: (force?: boolean) => Promise<ModelRef[]>;
@@ -124,6 +125,7 @@ type Api = {
   appVersion: () => Promise<string>;
   relaunchApp: () => Promise<void>;
   fetchDesignMd: (input: string) => Promise<{ ok: boolean; designMd?: string; rawUrl?: string; error?: string }>;
+  listDesigns: () => Promise<{ ok: boolean; designs?: { slug: string; name: string; pageUrl: string }[]; error?: string }>;
   saveHtml: (args: { html: string; defaultName?: string }) => Promise<{ saved: boolean; filePath?: string }>;
   openSavedHtml: (filePath: string) => Promise<{ opened: boolean; error?: string }>;
   mdHandlerStatus: () => Promise<{ supported: boolean; registered?: boolean }>;
@@ -1144,8 +1146,6 @@ function paintAuthPill(auth: AuthSnapshot) {
 const unifiedChatHost = document.getElementById('unified-chat') as HTMLDivElement;
 const contentRow = document.querySelector('.content-row') as HTMLElement;
 const ucResizer = document.querySelector('.uc-resizer') as HTMLDivElement;
-const aiFab = document.getElementById('ai-fab') as HTMLButtonElement;
-aiFab.addEventListener('click', () => toggleUnifiedChat());
 function applyAiOutput(action: 'replace' | 'insert', md: string) {
   if (action === 'replace') {
     suppressEditorChange = true;
@@ -1180,7 +1180,6 @@ function setUnifiedChatOpen(open: boolean) {
   contentRow.classList.toggle('uc-open', open);
   unifiedChatHost.hidden = !open;
   ucResizer.hidden = !open;
-  aiFab.classList.toggle('hidden', open);
   if (open) setTimeout(() => unifiedChatHost.querySelector<HTMLTextAreaElement>('.uc-input')?.focus(), 60);
 }
 
@@ -1234,7 +1233,7 @@ function openSettings() {
   });
 }
 
-async function sendUnified(text: string, mode: ChatMode) {
+async function sendUnified(text: string, mode: ChatMode, attachments?: ChatAttachment[]) {
   const hasAuth = await window.api.aiHasAnyAuth().catch(() => true);
   if (!hasAuth) {
     unifiedChat.addMessage('user', text);
@@ -1249,8 +1248,10 @@ async function sendUnified(text: string, mode: ChatMode) {
   }
   // Snapshot prior history BEFORE appending the new user turn.
   const priorTurns = threadToTurns(unifiedChatHistory);
-  unifiedChat.addMessage('user', text);
-  unifiedChatHistory.push({ type: 'message', role: 'user', text });
+  const userDisplay = text || `📎 ${attachments?.length ?? 0} image(s)`;
+  unifiedChat.addMessage('user', userDisplay);
+  // Image bytes are never persisted in session history (text only).
+  unifiedChatHistory.push({ type: 'message', role: 'user', text: userDisplay });
 
   const stream = unifiedChat.beginAssistant();
   const id = ucId();
@@ -1273,7 +1274,7 @@ async function sendUnified(text: string, mode: ChatMode) {
     systemlawContent: ctx.systemlawContent,
     ownerContent: ctx.ownerContent,
     styleDirectiveStr: styleStr,
-    documentText: editor.getDoc().slice(0, 12000),
+    documentText: (mode === 'advise' && adviceSnapshot ? adviceSnapshot : editor.getDoc()).slice(0, 12000),
   });
 
   const cleanup = window.api.onAiChatEvent(id, (e) => {
@@ -1295,7 +1296,7 @@ async function sendUnified(text: string, mode: ChatMode) {
   ucInflight = { id, cleanup };
 
   try {
-    await window.api.aiChat(id, instructions, priorTurns, text, currentModelArg());
+    await window.api.aiChat(id, instructions, priorTurns, text, currentModelArg(), mode === 'write' ? 'write' : 'advise', attachments);
   } catch (err: any) {
     stream.fail(err?.message ?? String(err));
     cleanup();
@@ -1303,10 +1304,18 @@ async function sendUnified(text: string, mode: ChatMode) {
   }
 }
 
+let adviceSnapshot = '';
+/** Capture the live document for Advise context and refresh the sync badge. */
+function syncAdviceSnapshot() {
+  adviceSnapshot = editor.getDoc();
+  const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  unifiedChat.setAdviceSync(`${t('uc.advise.synced')} · ${time}`);
+}
+
 const unifiedChat = mountUnifiedChat(unifiedChatHost, {
-  onSend: (text, mode) => {
-    if (mode === 'project') return; // 'project' is driven by onProjectSetup
-    void sendUnified(text, mode);
+  onSend: (text, mode, attachments) => {
+    if (mode === 'project' || mode === 'html') return; // driven by their own tabs
+    void sendUnified(text, mode, attachments);
   },
   onInsert: (md) => applyAiOutput('insert', '\n' + md.trim() + '\n'),
   onReplace: (md) => {
@@ -1339,13 +1348,15 @@ const unifiedChat = mountUnifiedChat(unifiedChatHost, {
   onCopy: (md) => void navigator.clipboard.writeText(md),
   onProjectSetup: () => void startProjectWizard(),
   onHtmlExport: () => void startHtmlExportWizard(),
+  onModeChange: (mode) => {
+    if (mode === 'advise') syncAdviceSnapshot();
+  },
+  onAdviceResync: () => syncAdviceSnapshot(),
   style: { get: () => currentStyle(), onChange: (s) => applyStyle(s) },
 });
 
 let htmlExportWizard: HtmlExportWizardHandle | null = null;
 
-const HTML_EXPORT_INSTRUCTIONS =
-  'You are an expert front-end engineer. You output a single, complete, self-contained HTML5 document with inline CSS and no remote or raster assets. Output only the HTML document — no Markdown and no code fences.';
 
 /** Run one HTML generation over the streaming aiChat IPC, resolving with the full
  *  reply. `model` overrides the main model selection (HTML-only model picker). */
@@ -1418,7 +1429,10 @@ async function startHtmlExportWizard() {
     return;
   }
   setUnifiedChatOpen(true);
-  unifiedChat.showPanel('<div class="he-host"></div>');
+  unifiedChat.showPanel('<div class="he-host"></div>', undefined, () => {
+    htmlExportWizard?.destroy();
+    htmlExportWizard = null;
+  });
   const host = unifiedChatHost.querySelector<HTMLElement>('.he-host');
   if (!host) return;
   htmlExportWizard?.destroy();
@@ -1447,6 +1461,7 @@ async function startHtmlExportWizard() {
     getCurrentPath: () => currentPath,
     getPendingTitle: () => pendingTitle,
     fetchDesignMd: (input) => window.api.fetchDesignMd(input),
+    listDesigns: () => window.api.listDesigns(),
     saveHtml: (args) => window.api.saveHtml(args),
     openSavedHtml: (filePath) => window.api.openSavedHtml(filePath),
     aiGenerate: (prompt, model) =>
@@ -1483,17 +1498,21 @@ window.addEventListener('mouseup', () => {
 async function startProjectWizard() {
   const folder = currentPath ? folderFromFilePath(currentPath) : '';
   if (!folder) {
-    statusEl.textContent = 'Save or open a project file before setup.';
+    // AC5: project tab always reacts — show an in-panel notice instead of a
+    // silent statusbar-only message when there is no saved project file.
+    setUnifiedChatOpen(true);
+    unifiedChat.showPanel(`<div class="uc-notice">${t('uc.project.noFile')}</div>`);
+    statusEl.textContent = t('uc.project.noFile');
     return;
   }
   try {
     await window.api.projectWizardStart(folder);
     setUnifiedChatOpen(true);
     showProjectWizardConsent(folder);
-    statusEl.textContent = 'Project Wizard started.';
+    statusEl.textContent = t('pw.status.started');
   } catch (error) {
     console.error('Project Wizard failed', error);
-    statusEl.textContent = 'Project Wizard failed.';
+    statusEl.textContent = t('pw.status.failed');
   }
 }
 
@@ -1510,11 +1529,11 @@ function showProjectWizardConsent(folder: string) {
       return;
     }
     if (action === 'later') {
-      statusEl.textContent = 'Project Wizard saved for later.';
+      statusEl.textContent = t('pw.status.savedLater');
       return;
     }
     if (action === 'never') {
-      statusEl.textContent = 'Project Wizard disabled for this folder.';
+      statusEl.textContent = t('pw.status.disabled');
     }
   });
 }
@@ -1527,14 +1546,14 @@ function showProjectWizardQuestion(
   const question = wizardQuestions[index];
   unifiedChat.showPanel(renderManualExplanationPrompt(question), (action, panel) => {
     if (action === 'cancel-draft') {
-      statusEl.textContent = 'Project Wizard draft saved for later.';
+      statusEl.textContent = t('pw.status.draftSaved');
       return;
     }
     if (action !== 'manual-next') return;
 
     const answer = (panel.querySelector('[data-pw-field="manual-answer"]') as HTMLTextAreaElement | null)?.value.trim() ?? '';
     if (!answer) {
-      statusEl.textContent = 'Answer this question before continuing.';
+      statusEl.textContent = t('pw.status.answerRequired');
       return;
     }
     const nextAnswers = { ...answers, [question]: answer };
@@ -1551,7 +1570,7 @@ function showProjectWizardQuestion(
 function showProjectWizardDraft(folder: string, body: string) {
   unifiedChat.showPanel(renderEditableDraft(body), (action, panel) => {
     if (action === 'cancel-draft') {
-      statusEl.textContent = 'Project Wizard draft saved for later.';
+      statusEl.textContent = t('pw.status.draftSaved');
       return;
     }
     if (action !== 'approve-draft') return;
@@ -1566,11 +1585,11 @@ function showProjectWizardDraft(folder: string, body: string) {
         lastScanned: null,
       })
       .then((result) => {
-        statusEl.textContent = `Project Wizard saved · ${result.status.replace('_', ' ')}`;
+        statusEl.textContent = t('pw.status.saved').replace('{status}', result.status.replace('_', ' '));
       })
       .catch((error) => {
         console.error('Project Wizard save failed', error);
-        statusEl.textContent = 'Project Wizard save failed.';
+        statusEl.textContent = t('pw.status.saveFailed');
       });
   });
 }

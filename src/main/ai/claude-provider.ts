@@ -5,7 +5,8 @@
 
 import type { ApiKeyStore } from './api-key-store';
 import { humanizeEngineIdForProvider } from './model-catalog';
-import { toAnthropicMessages } from './messages';
+import { appendWriteReanchor, toAnthropicMessages } from './messages';
+import { supportsVision } from './vision-capabilities';
 import { claudeErrorMessage, extractClaudeTextDelta } from './sse';
 import { streamSseChat, missingKeyError } from './stream-http';
 import type { AiChatEvent, AiChatRequest, AiProvider, ModelRef, ProviderAuthStatus } from './types';
@@ -55,7 +56,11 @@ export class ClaudeProvider implements AiProvider {
       onEvent({ kind: 'error', message: err.message, errorKind: err.errorKind });
       return;
     }
-    const messages = toAnthropicMessages(req.history, req.userText);
+    const messages = toAnthropicMessages(
+      req.history,
+      req.userText,
+      supportsVision('claude', req.model.id) ? req.images : undefined,
+    );
     await streamSseChat(
       {
         url: ANTHROPIC_URL,
@@ -68,7 +73,7 @@ export class ClaudeProvider implements AiProvider {
         body: {
           model: req.model.id,
           max_tokens: req.maxOutputTokens ?? MAX_TOKENS,
-          system: req.instructions,
+          system: appendWriteReanchor(req.instructions, req.surfaceMode),
           messages,
           stream: true,
         },

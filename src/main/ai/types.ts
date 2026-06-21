@@ -55,6 +55,61 @@ export type ProviderAuthStatus = {
 
 export type ChatTurn = { role: 'user' | 'assistant'; text: string };
 
+/** Which chat surface initiated the turn — drives Write-only output re-anchoring. */
+export type SurfaceMode = 'write' | 'advise' | 'html' | 'block';
+
+/** A user-attached image for a multimodal turn (OCR or direct vision). */
+export type AiImageAttachment = {
+  mime: 'image/png' | 'image/jpeg' | 'image/webp';
+  /** Base64-encoded image bytes (no data: prefix). */
+  base64: string;
+  /** Decoded byte length (used for the size cap). */
+  bytes: number;
+  /** Optional original filename, for display only. */
+  name?: string;
+};
+
+export const ALLOWED_IMAGE_MIME = ['image/png', 'image/jpeg', 'image/webp'] as const;
+/** Max images per turn. */
+export const MAX_IMAGE_ATTACHMENTS = 4;
+/** Max decoded bytes per image (8 MiB). */
+export const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+
+/** Validate renderer-supplied image attachments at the IPC boundary. Pure. */
+export function validateImageAttachments(
+  input: unknown,
+): { ok: true; images: AiImageAttachment[] } | { ok: false; error: string } {
+  if (input === undefined || input === null) return { ok: true, images: [] };
+  if (!Array.isArray(input)) return { ok: false, error: 'images must be an array' };
+  if (input.length > MAX_IMAGE_ATTACHMENTS) {
+    return { ok: false, error: `too many images (max ${MAX_IMAGE_ATTACHMENTS})` };
+  }
+  const images: AiImageAttachment[] = [];
+  for (const item of input) {
+    if (!item || typeof item !== 'object') return { ok: false, error: 'invalid image entry' };
+    const rec = item as { mime?: unknown; base64?: unknown; bytes?: unknown; name?: unknown };
+    if (!(ALLOWED_IMAGE_MIME as readonly unknown[]).includes(rec.mime)) {
+      return { ok: false, error: 'unsupported image type (png/jpeg/webp only)' };
+    }
+    if (typeof rec.base64 !== 'string' || rec.base64.length === 0) {
+      return { ok: false, error: 'empty image data' };
+    }
+    if (typeof rec.bytes !== 'number' || !Number.isFinite(rec.bytes) || rec.bytes <= 0) {
+      return { ok: false, error: 'invalid image size' };
+    }
+    if (rec.bytes > MAX_IMAGE_BYTES) {
+      return { ok: false, error: `image too large (max ${Math.floor(MAX_IMAGE_BYTES / (1024 * 1024))} MiB)` };
+    }
+    images.push({
+      mime: rec.mime as AiImageAttachment['mime'],
+      base64: rec.base64,
+      bytes: rec.bytes,
+      name: typeof rec.name === 'string' ? rec.name.slice(0, 200) : undefined,
+    });
+  }
+  return { ok: true, images };
+}
+
 export type AiChatRequest = {
   instructions: string;
   history: ChatTurn[];
@@ -64,6 +119,10 @@ export type AiChatRequest = {
   signal?: AbortSignal;
   /** Escalated output-token cap (HTML export). Omitted → provider default. */
   maxOutputTokens?: number;
+  /** Originating chat surface; 'write' re-anchors the model to raw document output. */
+  surfaceMode?: SurfaceMode;
+  /** Attached images for a multimodal turn (vision-direct or OCR fallback). */
+  images?: AiImageAttachment[];
 };
 
 export type AiChatEvent =

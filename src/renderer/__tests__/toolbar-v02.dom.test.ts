@@ -221,3 +221,26 @@ describe('toolbar — model dropdown (G003 local providers)', () => {
     expect(onModelChange).toHaveBeenCalledWith('ollama:llama3:latest');
   });
 });
+
+describe('toolbar — AI consultant header button (AC1)', () => {
+  it('renders #hdr-sidechat as a red "Ai" pill with the consultant tooltip', () => {
+    const { controls } = mountToolbar();
+    const btn = controls.querySelector<HTMLButtonElement>('#hdr-sidechat')!;
+    expect(btn).not.toBeNull();
+    expect(btn.classList.contains('hdr-ai-consultant')).toBe(true);
+    expect(btn.textContent?.trim()).toBe('Ai');
+    expect(btn.querySelector('.hdr-ai-label')).not.toBeNull();
+    expect(btn.getAttribute('data-tooltip')).toBe(t('tip.sidechat'));
+    expect(btn.getAttribute('aria-label')).toBe(t('tip.sidechat'));
+    // no leftover floating action button in the header controls
+    expect(controls.querySelector('#ai-fab')).toBeNull();
+    expect(controls.querySelector('.ai-fab')).toBeNull();
+  });
+
+  it('clicking the AI consultant button toggles the unified chat', () => {
+    const onToggleSideChat = vi.fn();
+    const { controls } = mountToolbar({ onToggleSideChat });
+    controls.querySelector<HTMLButtonElement>('#hdr-sidechat')!.click();
+    expect(onToggleSideChat).toHaveBeenCalledTimes(1);
+  });
+});

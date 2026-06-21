@@ -19,6 +19,33 @@ describe('i18n — 5 locales (#3)', () => {
     }
   });
 
+  it('renames the style difficulty label to an understanding-level wording (G006 AC13)', () => {
+    const expected: Record<string, string> = {
+      en: 'Understanding level',
+      ko: '이해 수준',
+      'zh-Hans': '理解水平',
+      'zh-Hant': '理解程度',
+      ja: '理解レベル',
+    };
+    for (const [loc, label] of Object.entries(expected)) {
+      setLocale(loc as never);
+      expect(t('style.difficulty'), `style.difficulty @ ${loc}`).toBe(label);
+      // naturalness label is intentionally unchanged
+      expect(t('style.naturalness'), `style.naturalness @ ${loc}`).toBeTruthy();
+    }
+  });
+
+  it('exposes the G004 write-help / advise-sync / project-no-file keys in all five locales', () => {
+    for (const loc of ['en', 'ko', 'zh-Hans', 'zh-Hant', 'ja'] as const) {
+      setLocale(loc);
+      for (const key of ['uc.writeHelp', 'uc.advise.resync', 'uc.advise.synced', 'uc.project.noFile']) {
+        const v = t(key as never);
+        expect(v, `${key} @ ${loc}`).toBeTruthy();
+        expect(v, `${key} @ ${loc} not the raw key`).not.toBe(key);
+      }
+    }
+  });
+
   it('localizes core surfaces (settings title, table delete confirm, footnote back) per locale', () => {
     setLocale('zh-Hans');
     expect(t('settings.title')).toBe('设置');

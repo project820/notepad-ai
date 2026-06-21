@@ -1,6 +1,6 @@
 {
   "name": "notepad-ai",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "Friendly Mac markdown editor for non-technical writers, Korean-centric.",
   "main": "dist/main/main.js",
   "scripts": {
@@ -89,6 +89,11 @@
     "files": [
       "dist/**/*",
       "package.json"
+    ],
+    "extraResources": [
+      { "from": "node_modules/tesseract.js/dist/worker.min.js", "to": "tesseract/worker.min.js" },
+      { "from": "node_modules/tesseract.js-core", "to": "tesseract/core" },
+      { "from": "resources/tessdata", "to": "tesseract/lang-data" }
     ]
   },
   "devDependencies": {
@@ -120,6 +125,7 @@
     "markdown-it-mark": "^4.0.0",
     "markdown-it-sup": "^2.0.0",
     "markdown-it-task-lists": "^2.1.1",
+    "tesseract.js": "^5.1.1",
     "turndown": "^7.2.4",
     "turndown-plugin-gfm": "^1.0.2"
   }

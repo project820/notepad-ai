@@ -1,9 +1,11 @@
+import { t } from './i18n';
+
 export type ManualExplanationQuestion = 'purpose' | 'folder_scope' | 'constraints';
 
-const manualQuestionCopy: Record<ManualExplanationQuestion, string> = {
-  purpose: 'What is this project or folder for?',
-  folder_scope: 'Which files and folders belong in this project context?',
-  constraints: 'What constraints, rules, or sensitive boundaries should the AI know?',
+const manualQuestionKey: Record<ManualExplanationQuestion, string> = {
+  purpose: 'pw.manual.purpose',
+  folder_scope: 'pw.manual.folderScope',
+  constraints: 'pw.manual.constraints',
 };
 
 function escapeHTML(value: string): string {
@@ -17,37 +19,40 @@ function escapeHTML(value: string): string {
 
 export function renderProjectWizardConsent(projectFolder: string): string {
   const folder = escapeHTML(projectFolder);
+  const copy = t('pw.consent.copy').replace('{folder}', `<strong>${folder}</strong>`);
 
   return `<div class="pw-card">
-  <h3 class="pw-title">Set up Overview.md?</h3>
-  <p class="pw-copy">Create a project overview draft for <strong>${folder}</strong>. Nothing is written until you approve the draft.</p>
+  <h3 class="pw-title">${escapeHTML(t('pw.consent.title'))}</h3>
+  <p class="pw-copy">${copy}</p>
   <div class="pw-actions">
-    <button class="pw-btn pw-primary" data-pw-action="start" type="button">Start setup</button>
-    <button class="pw-btn" data-pw-action="later" type="button">Later</button>
-    <button class="pw-btn" data-pw-action="never" type="button">Do not ask for this folder</button>
+    <button class="pw-btn pw-primary" data-pw-action="start" type="button">${escapeHTML(t('pw.btn.start'))}</button>
+    <button class="pw-btn" data-pw-action="later" type="button">${escapeHTML(t('pw.btn.later'))}</button>
+    <button class="pw-btn" data-pw-action="never" type="button">${escapeHTML(t('pw.btn.never'))}</button>
   </div>
 </div>`;
 }
 
 export function renderManualExplanationPrompt(question: ManualExplanationQuestion): string {
+  const label = escapeHTML(t(manualQuestionKey[question]));
+
   return `<div class="pw-card">
-  <h3 class="pw-title">${escapeHTML(manualQuestionCopy[question])}</h3>
-  <p class="pw-copy">Answer briefly so the Project Wizard can prepare the Overview.md draft.</p>
-  <textarea class="pw-draft pw-answer" rows="6" data-pw-field="manual-answer" aria-label="${escapeHTML(manualQuestionCopy[question])}"></textarea>
+  <h3 class="pw-title">${label}</h3>
+  <p class="pw-copy">${escapeHTML(t('pw.manual.copy'))}</p>
+  <textarea class="pw-draft pw-answer" rows="6" data-pw-field="manual-answer" aria-label="${label}"></textarea>
   <div class="pw-actions">
-    <button class="pw-btn pw-primary" data-pw-action="manual-next" type="button">Next</button>
-    <button class="pw-btn" data-pw-action="cancel-draft" type="button">Save draft for later</button>
+    <button class="pw-btn pw-primary" data-pw-action="manual-next" type="button">${escapeHTML(t('pw.btn.next'))}</button>
+    <button class="pw-btn" data-pw-action="cancel-draft" type="button">${escapeHTML(t('pw.btn.saveLater'))}</button>
   </div>
 </div>`;
 }
 
 export function renderEditableDraft(body: string): string {
   return `<div class="pw-card">
-  <h3 class="pw-title">Review Overview.md draft</h3>
+  <h3 class="pw-title">${escapeHTML(t('pw.draft.title'))}</h3>
   <textarea class="pw-draft" rows="14" spellcheck="true">${escapeHTML(body)}</textarea>
   <div class="pw-actions">
-    <button class="pw-btn pw-primary" data-pw-action="approve-draft" type="button">Approve and save</button>
-    <button class="pw-btn" data-pw-action="cancel-draft" type="button">Save draft for later</button>
+    <button class="pw-btn pw-primary" data-pw-action="approve-draft" type="button">${escapeHTML(t('pw.btn.approve'))}</button>
+    <button class="pw-btn" data-pw-action="cancel-draft" type="button">${escapeHTML(t('pw.btn.saveLater'))}</button>
   </div>
 </div>`;
 }

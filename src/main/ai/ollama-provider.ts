@@ -144,7 +144,7 @@ export class OllamaProvider implements AiProvider {
 
   async streamChat(req: AiChatRequest, onEvent: (e: AiChatEvent) => void): Promise<void> {
     const baseUrl = await this.resolveBaseUrl();
-    const messages = toOpenAiMessages(req.instructions, req.history, req.userText);
+    const messages = toOpenAiMessages(req.instructions, req.history, req.userText, req.surfaceMode);
     await streamNdjsonChat(
       {
         url: `${baseUrl}/api/chat`,

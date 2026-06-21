@@ -1,6 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import {
   isAllowedDesignFetchUrl,
+  isAllowedDesignListFetchUrl,
+  isAllowedDesignIconUrl,
+  designListContentsUrl,
+  parseDesignListFromContents,
+  getdesignPageUrl,
+  titleizeDesignSlug,
+  pngBytesToDataUri,
   isOpenableSavedPath,
   normalizeDesignMdUrl,
 } from '../main/safe-external';
@@ -123,5 +130,70 @@ describe('isOpenableSavedPath (html:open-saved gate)', () => {
     expect(isOpenableSavedPath('/Users/me/re\nport.html')).toBe(false);
     expect(isOpenableSavedPath(null as unknown as string)).toBe(false);
     expect(isOpenableSavedPath(123 as unknown as string)).toBe(false);
+  });
+});
+
+describe('design index list (G005 AC11)', () => {
+  it('builds the canonical Contents API URL and accepts only it', () => {
+    const url = designListContentsUrl();
+    expect(url).toBe(
+      'https://api.github.com/repos/VoltAgent/awesome-design-md/contents/design-md?ref=main',
+    );
+    expect(isAllowedDesignListFetchUrl(url)).toBe(true);
+  });
+
+  it('rejects any other list URL (host, repo, ref, path tampering)', () => {
+    expect(isAllowedDesignListFetchUrl('https://api.github.com/repos/evil/repo/contents/design-md?ref=main')).toBe(false);
+    expect(isAllowedDesignListFetchUrl('https://api.github.com/repos/VoltAgent/awesome-design-md/contents/design-md?ref=dev')).toBe(false);
+    expect(isAllowedDesignListFetchUrl('https://api.github.com/repos/VoltAgent/awesome-design-md/contents/other?ref=main')).toBe(false);
+    expect(isAllowedDesignListFetchUrl('http://api.github.com/repos/VoltAgent/awesome-design-md/contents/design-md?ref=main')).toBe(false);
+    expect(isAllowedDesignListFetchUrl('https://api.github.com/repos/VoltAgent/awesome-design-md/contents/design-md')).toBe(false);
+  });
+
+  it('parses Contents API dirs into sorted, de-duped design entries', () => {
+    const json = [
+      { name: 'together-ai', type: 'dir' },
+      { name: 'claude', type: 'dir' },
+      { name: 'README.md', type: 'file' },
+      { name: '../evil', type: 'dir' },
+      { name: 'claude', type: 'dir' }, // dup
+      { name: 'x'.repeat(200), type: 'dir' }, // too long
+      'garbage',
+    ];
+    const out = parseDesignListFromContents(json);
+    expect(out.map((d) => d.slug)).toEqual(['claude', 'together-ai']);
+    expect(out[0]).toEqual({ slug: 'claude', name: 'Claude', pageUrl: 'https://getdesign.md/claude' });
+    expect(out[1].name).toBe('Together Ai');
+  });
+
+  it('returns [] for non-array / malformed input', () => {
+    expect(parseDesignListFromContents(null)).toEqual([]);
+    expect(parseDesignListFromContents({ message: 'rate limited' })).toEqual([]);
+  });
+
+  it('titleizes slugs and builds getdesign page URLs', () => {
+    expect(titleizeDesignSlug('eleven-labs')).toBe('Eleven Labs');
+    expect(getdesignPageUrl('replicate')).toBe('https://getdesign.md/replicate');
+    expect(getdesignPageUrl('../evil')).toBeNull();
+  });
+});
+
+describe('design icon allowlist + PNG validation (G005 AC11/E2)', () => {
+  it('allows only GitHub avatar PNGs with a bounded size query', () => {
+    expect(isAllowedDesignIconUrl('https://avatars.githubusercontent.com/u/123?s=64')).toBe(true);
+    expect(isAllowedDesignIconUrl('https://avatars.githubusercontent.com/u/123')).toBe(true);
+    expect(isAllowedDesignIconUrl('https://avatars.githubusercontent.com/u/123?s=9999')).toBe(false);
+    expect(isAllowedDesignIconUrl('https://evil.example/u/123.png?s=64')).toBe(false);
+    expect(isAllowedDesignIconUrl('http://avatars.githubusercontent.com/u/123')).toBe(false);
+    expect(isAllowedDesignIconUrl('https://avatars.githubusercontent.com/u/1?token=abc')).toBe(false);
+  });
+
+  it('converts valid PNG bytes to a data URI and rejects non-PNG / oversized', () => {
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01]);
+    const uri = pngBytesToDataUri(png);
+    expect(uri).toMatch(/^data:image\/png;base64,/);
+    expect(pngBytesToDataUri(new Uint8Array([0x47, 0x49, 0x46, 0x38]))).toBeNull(); // GIF magic
+    expect(pngBytesToDataUri(new Uint8Array(0))).toBeNull();
+    expect(pngBytesToDataUri(new Uint8Array(64 * 1024 + 1))).toBeNull(); // oversized
   });
 });

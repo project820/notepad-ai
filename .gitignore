@@ -23,3 +23,6 @@ V1.0.md
 docs/v02-qa*
 docs/v02-qa/
 artifacts/
+
+# Bundled Tesseract OCR language data — large, vendored at package time (see resources/tessdata/README.md)
+resources/tessdata/*.traineddata.gz

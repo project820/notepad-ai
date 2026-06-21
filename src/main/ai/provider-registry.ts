@@ -35,6 +35,8 @@ import {
   type ModelRef,
   type ProviderAuthStatus,
 } from './types';
+import { supportsVision } from './vision-capabilities';
+import { runOcr, type OcrRunner } from './ocr';
 
 export type ProviderMap = Partial<Record<AiProviderId, AiProvider>>;
 
@@ -44,6 +46,8 @@ export class ProviderRegistry {
     private providers: ProviderMap,
     private localCache: LocalModelCache = new LocalModelCache(),
     private localConfig?: LocalConfigStore,
+    /** OCR runner for the non-vision image fallback (injectable for tests). */
+    private ocr: OcrRunner = runOcr,
   ) {}
 
   /** Local (Ollama / LM Studio) providers currently registered. */
@@ -179,7 +183,28 @@ export class ProviderRegistry {
         return;
       }
     }
-    await provider.streamChat(req, onEvent);
+    // Multimodal fallback (D2): a vision-capable model receives images directly;
+    // anything else (local models, unverified custom, ChatGPT) gets the images
+    // OCR'd to text here so the request still works. OCR failure is surfaced, not
+    // silently dropped.
+    let outgoing = req;
+    if (req.images && req.images.length > 0 && !supportsVision(req.model.provider, req.model.id)) {
+      try {
+        const ocrText = await this.ocr(req.images, req.signal);
+        const note = ocrText.trim()
+          ? `\n\n[Image OCR context]\n${ocrText.trim()}`
+          : '\n\n[Image OCR context]\n(no text recognized in the attached image)';
+        outgoing = { ...req, userText: `${req.userText}${note}`, images: undefined };
+      } catch (err) {
+        onEvent({
+          kind: 'error',
+          message: `Could not read the attached image (OCR failed): ${err instanceof Error ? err.message : String(err)}`,
+          errorKind: 'provider',
+        });
+        return;
+      }
+    }
+    await provider.streamChat(outgoing, onEvent);
   }
 }
 

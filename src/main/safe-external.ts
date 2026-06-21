@@ -166,3 +166,121 @@ export function isOpenableSavedPath(input: unknown): boolean {
   const lower = value.toLowerCase();
   return lower.endsWith('.html') || lower.endsWith('.htm');
 }
+
+/**
+ * Canonical GitHub Contents API URL listing the design-md directory. The only
+ * URL `design:list` is allowed to fetch (the index of available designs).
+ */
+const DESIGN_LIST_HOST = 'api.github.com';
+export function designListContentsUrl(): string {
+  return `https://${DESIGN_LIST_HOST}/repos/${DESIGN_MD_OWNER}/${DESIGN_MD_REPO}/contents/${DESIGN_MD_DIR}?ref=${DESIGN_MD_BRANCH}`;
+}
+
+/** Final gate before `design:list` fetches — only the exact Contents API URL. */
+export function isAllowedDesignListFetchUrl(raw: unknown): boolean {
+  if (typeof raw !== 'string') return false;
+  let url: URL;
+  try {
+    url = new URL(raw.trim());
+  } catch {
+    return false;
+  }
+  if (url.protocol !== 'https:') return false;
+  if (url.hostname.toLowerCase() !== DESIGN_LIST_HOST) return false;
+  if (url.hash) return false;
+  if (url.search !== `?ref=${DESIGN_MD_BRANCH}`) return false;
+  const segments = url.pathname.split('/').filter(Boolean);
+  // repos / owner / repo / contents / design-md
+  if (segments.length !== 5) return false;
+  const [repos, owner, repo, contents, dir] = segments;
+  return (
+    repos === 'repos' &&
+    owner === DESIGN_MD_OWNER &&
+    repo === DESIGN_MD_REPO &&
+    contents === 'contents' &&
+    dir === DESIGN_MD_DIR
+  );
+}
+
+/** The public getdesign.md gallery page for a design slug (for the "open guide" link). */
+export function getdesignPageUrl(slug: string): string | null {
+  return isValidDesignSlug(slug) ? `https://getdesign.md/${slug}` : null;
+}
+
+/** Human-friendly name from a slug: "together-ai" → "Together Ai". */
+export function titleizeDesignSlug(slug: string): string {
+  return slug
+    .split(/[-_]/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
+export type DesignListEntry = { slug: string; name: string; pageUrl: string };
+
+/**
+ * Parse a GitHub Contents API response (array of dir entries) into the list of
+ * valid design slugs. Pure + unit-tested: ignores non-directories, invalid
+ * slugs, and malformed input; de-dupes; sorts by name.
+ */
+export function parseDesignListFromContents(json: unknown): DesignListEntry[] {
+  if (!Array.isArray(json)) return [];
+  const seen = new Set<string>();
+  const out: DesignListEntry[] = [];
+  for (const item of json) {
+    if (!item || typeof item !== 'object') continue;
+    const rec = item as { name?: unknown; type?: unknown };
+    if (rec.type !== 'dir') continue;
+    const slug = typeof rec.name === 'string' ? rec.name : '';
+    if (!isValidDesignSlug(slug) || seen.has(slug)) continue;
+    const pageUrl = getdesignPageUrl(slug);
+    if (!pageUrl) continue;
+    seen.add(slug);
+    out.push({ slug, name: titleizeDesignSlug(slug), pageUrl });
+  }
+  out.sort((a, b) => a.name.localeCompare(b.name));
+  return out;
+}
+
+/** Max bytes for a fetched design icon (avatar). Larger responses are rejected. */
+export const DESIGN_ICON_MAX_BYTES = 64 * 1024;
+
+/**
+ * Allowlist for a design icon URL — only GitHub avatar PNGs on
+ * `avatars.githubusercontent.com` with a bounded `s`/`size` query. Everything
+ * else (other hosts, non-PNG, oversized size) is rejected; the UI falls back to
+ * initials. This is the URL gate; {@link validateDesignIconBytes} gates the body.
+ */
+export function isAllowedDesignIconUrl(raw: unknown): boolean {
+  if (typeof raw !== 'string') return false;
+  let url: URL;
+  try {
+    url = new URL(raw.trim());
+  } catch {
+    return false;
+  }
+  if (url.protocol !== 'https:') return false;
+  if (url.hostname.toLowerCase() !== 'avatars.githubusercontent.com') return false;
+  if (url.hash) return false;
+  // Allow only a numeric size query within [16, 128], or no query at all.
+  for (const [k, v] of url.searchParams) {
+    if (k !== 's' && k !== 'size') return false;
+    const n = Number(v);
+    if (!Number.isInteger(n) || n < 16 || n > 128) return false;
+  }
+  return true;
+}
+
+/**
+ * Validate fetched icon bytes before converting to a data URI: PNG magic bytes
+ * and a hard size cap. Returns the data URI on success, or null to fall back.
+ */
+export function pngBytesToDataUri(bytes: Uint8Array): string | null {
+  if (!bytes || bytes.length === 0 || bytes.length > DESIGN_ICON_MAX_BYTES) return null;
+  // PNG signature: 89 50 4E 47 0D 0A 1A 0A
+  const sig = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  if (bytes.length < 8) return null;
+  for (let i = 0; i < 8; i++) if (bytes[i] !== sig[i]) return null;
+  const b64 = Buffer.from(bytes).toString('base64');
+  return `data:image/png;base64,${b64}`;
+}

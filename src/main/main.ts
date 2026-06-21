@@ -7,7 +7,8 @@ import { startLogin, cancelLogin, getStatus, logout, type LoginUpdate } from './
 import type { ChatTurn } from './codex-client';
 import { getRegistry } from './ai/provider-registry';
 import { htmlExportMaxTokens, isHtmlExportInstructions } from './ai/output-budget';
-import { isAiProviderId, type AiProviderId } from './ai/types';
+import { isAiProviderId, validateImageAttachments, type AiProviderId } from './ai/types';
+import { resolveOcrAssetPaths, configureOcr } from './ai/ocr';
 import { readSessionV2, writeSessionV2 } from './session-store';
 import {
   upsertWindowSnapshot,
@@ -34,6 +35,9 @@ import { nowInSeoulIso } from './project-wizard/time';
 import {
   isAllowedExternalUrl,
   isAllowedDesignFetchUrl,
+  isAllowedDesignListFetchUrl,
+  designListContentsUrl,
+  parseDesignListFromContents,
   isOpenableSavedPath,
   normalizeDesignMdUrl,
 } from './safe-external';
@@ -713,6 +717,8 @@ ipcMain.handle(
       history: ChatTurn[];
       userText: string;
       model?: string | { provider: AiProviderId; id: string };
+      surfaceMode?: string;
+      images?: unknown;
     },
   ) => {
     const controller = new AbortController();
@@ -725,6 +731,12 @@ ipcMain.handle(
         : payload.model && isAiProviderId(payload.model.provider)
           ? payload.model
           : { provider: 'chatgpt' as AiProviderId, id: 'gpt-5.4-mini' };
+    const imgCheck = validateImageAttachments(payload.images);
+    if (!imgCheck.ok) {
+      sender.send(`ai:chat:${payload.id}`, { kind: 'error', message: imgCheck.error, errorKind: 'provider' });
+      activeChats.delete(key);
+      return;
+    }
     try {
       await getRegistry().streamProviderChat(
         {
@@ -732,6 +744,14 @@ ipcMain.handle(
           history: payload.history,
           userText: payload.userText,
           model,
+          surfaceMode:
+            payload.surfaceMode === 'write' ||
+            payload.surfaceMode === 'advise' ||
+            payload.surfaceMode === 'html' ||
+            payload.surfaceMode === 'block'
+              ? payload.surfaceMode
+              : undefined,
+          images: imgCheck.images.length ? imgCheck.images : undefined,
           signal: controller.signal,
           maxOutputTokens: isHtmlExportInstructions(payload.instructions)
             ? htmlExportMaxTokens(model.provider, model.id)
@@ -1004,6 +1024,25 @@ ipcMain.handle('design:fetch', async (_e, input: unknown) => {
   }
 });
 
+/** In-memory cache of the design index (slugs) for the session. */
+let designListCache: { slug: string; name: string; pageUrl: string }[] | null = null;
+
+ipcMain.handle('design:list', async () => {
+  if (designListCache) return { ok: true as const, designs: designListCache };
+  const url = designListContentsUrl();
+  if (!isAllowedDesignListFetchUrl(url)) {
+    return { ok: false as const, error: 'Design index source is not allowed.' };
+  }
+  try {
+    const text = await fetchTextLimited(url, { timeoutMs: 8000, maxBytes: 512 * 1024 });
+    const designs = parseDesignListFromContents(JSON.parse(text));
+    if (designs.length > 0) designListCache = designs;
+    return { ok: true as const, designs };
+  } catch (err) {
+    return { ok: false as const, error: err instanceof Error ? err.message : 'Could not load the design list.' };
+  }
+});
+
 /** Force a safe `.html` basename for the save dialog default. */
 function htmlSaveFileName(name: unknown): string {
   const fallback = 'notepad-ai-export.html';
@@ -1060,6 +1099,20 @@ app.whenReady().then(async () => {
   const iconPath = resolveAppIconPath();
   if (process.platform === 'darwin' && iconPath) {
     app.dock.setIcon(iconPath);
+  }
+
+  // Resolve bundled OCR asset paths once (no CDN fallback); ignore failures so a
+  // missing OCR bundle never blocks startup — OCR surfaces its own error on use.
+  try {
+    configureOcr(
+      resolveOcrAssetPaths({
+        appPath: app.getAppPath(),
+        resourcesPath: process.resourcesPath,
+        packaged: app.isPackaged,
+      }),
+    );
+  } catch {
+    /* OCR stays unconfigured; runOcr will surface an actionable error if invoked */
   }
 
   buildMenu();

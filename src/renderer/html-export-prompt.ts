@@ -8,7 +8,14 @@
  * in the prompt so the AI has no leeway to insert remote network/raster content.
  */
 
-import type { LayoutKind, Orientation } from './html-export-state';
+import {
+  type Density,
+  type HtmlPurpose,
+  type LayoutKind,
+  type Orientation,
+  type ReadableWidth,
+  resolvePurposeConfig,
+} from './html-export-state';
 
 /** Default cap on source-markdown chars when the caller supplies no model-specific
  *  budget. Generous — sized for large context windows so normal documents are
@@ -17,6 +24,40 @@ const DEFAULT_MAX_SOURCE_CHARS = 200_000;
 /** DESIGN.md is clamped so the prompt stays bounded. */
 const DESIGN_CHARS = 8000;
 const TRUNCATION_MARKER = '\n\n<!-- NOTE: the source above was truncated here for length. -->';
+
+/**
+ * System instruction for HTML generation (shared by the renderer wizard, main's
+ * IPC, and tests so there is one source of truth). Strengthened to push the
+ * model toward polished, readable output (the common failure mode was excessive
+ * whitespace / weak DESIGN.md adherence).
+ */
+export const HTML_EXPORT_INSTRUCTIONS =
+  'You are an elite front-end engineer and visual designer. You output a single, complete, self-contained HTML5 document with inline CSS and no remote or raster assets. You strictly honor the supplied DESIGN SYSTEM and QUALITY BAR. Output only the HTML document — no Markdown and no code fences.';
+
+/**
+ * Bundled base stylesheet injected into every generated document as a safety
+ * net BENEATH the model/design CSS (lowest-specificity element selectors only,
+ * so a DESIGN.md aesthetic always overrides it). Guarantees a readable baseline
+ * — sane typography, vertical rhythm, a bounded reading measure, and
+ * non-overflowing media/tables — even when the model is lazy. No remote fonts.
+ */
+export const HTML_EXPORT_BASE_CSS = [
+  '/* notepad-ai base — readable defaults; design CSS overrides these */',
+  '*,*::before,*::after{box-sizing:border-box}',
+  'html{-webkit-text-size-adjust:100%}',
+  'body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,"Apple SD Gothic Neo","Noto Sans KR",sans-serif;font-size:17px;line-height:1.65;color:#1c1a17;background:#fff;-webkit-font-smoothing:antialiased}',
+  'main,article,.content,.container{max-width:72ch;margin-inline:auto;padding:clamp(20px,4vw,40px)}',
+  'h1,h2,h3,h4{line-height:1.2;font-weight:700;margin:1.6em 0 0.6em}',
+  'h1{font-size:2em}h2{font-size:1.5em}h3{font-size:1.25em}',
+  'p,ul,ol,blockquote,table,pre{margin:0 0 1em}',
+  'li{margin:0.25em 0}',
+  'a{color:#0b66c3}',
+  'img,svg,video{max-width:100%;height:auto}',
+  'table{border-collapse:collapse;width:100%}th,td{border:1px solid #e2ddd5;padding:8px 10px;text-align:left}',
+  'pre{overflow:auto;padding:14px 16px;background:#f6f3ee;border-radius:8px}',
+  'code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:0.92em}',
+  'blockquote{padding-left:1em;border-left:3px solid #e2ddd5;color:#5b554d}',
+].join('');
 
 export type BuiltHtmlExportPrompt = {
   promptDoc: string;
@@ -50,6 +91,13 @@ export function buildHtmlExportPrompt(args: {
   layout: LayoutKind;
   designMd?: string;
   tone?: string;
+  /** Generation purpose preset (drives read-good density/width/typography defaults). */
+  purpose?: HtmlPurpose;
+  customPurpose?: string;
+  /** Detail-mode overrides (omitted → the purpose default). */
+  density?: Density;
+  readableWidth?: ReadableWidth;
+  interactive?: boolean;
   /** Max source-markdown chars before truncation, sized to the selected model's
    *  context window by the caller. Falls back to {@link DEFAULT_MAX_SOURCE_CHARS}. */
   maxSourceChars?: number;
@@ -70,6 +118,28 @@ export function buildHtmlExportPrompt(args: {
 
   const tone = args.tone?.trim();
   const designMd = args.designMd?.trim();
+  const cfg = resolvePurposeConfig({
+    purpose: args.purpose,
+    customPurpose: args.customPurpose,
+    density: args.density,
+    readableWidth: args.readableWidth,
+    interactive: args.interactive,
+  });
+  const densityLine: Record<Density, string> = {
+    compact: 'DENSITY: compact — tighter spacing, more content per screen (still legible, never cramped).',
+    normal: 'DENSITY: balanced — comfortable, purposeful spacing.',
+    roomy: 'DENSITY: roomy — generous spacing and breathing room, but never empty/awkward gaps.',
+  };
+  const widthLine: Record<ReadableWidth, string> = {
+    narrow: 'READING WIDTH: narrow single column (~60ch) optimized for prose reading.',
+    normal: 'READING WIDTH: standard measure (~70ch) for body text; wider only for tables/figures.',
+    wide: 'READING WIDTH: wide/full-bleed sections allowed for hero/visuals; keep paragraph text to a comfortable measure.',
+  };
+  const typoLine: Record<'compact' | 'normal' | 'large', string> = {
+    compact: 'TYPOGRAPHY: efficient type scale; clear but space-conscious headings.',
+    normal: 'TYPOGRAPHY: standard balanced type scale with strong hierarchy.',
+    large: 'TYPOGRAPHY: large, confident display type for headings; high-impact hierarchy.',
+  };
 
   const lines: string[] = [
     'Convert the Markdown document below into a single, self-contained HTML page.',
@@ -88,6 +158,17 @@ export function buildHtmlExportPrompt(args: {
     layoutLine(args.layout),
     'Honor the chosen orientation and layout together (e.g. horizontal + slides = a landscape slide deck; vertical + scroll = a tall scrolling page).',
   ];
+
+  lines.push(
+    '',
+    `PURPOSE: ${cfg.brief}`,
+    densityLine[cfg.density],
+    widthLine[cfg.readableWidth],
+    typoLine[cfg.typography],
+    cfg.interactive
+      ? 'INTERACTIVITY: tasteful inline JS/CSS interactivity is allowed (e.g. tabs, accordions, subtle motion) — still no remote libraries.'
+      : 'INTERACTIVITY: keep it static — no JavaScript beyond what a required slide deck needs; no animations that hurt readability.',
+  );
 
   if (args.layout === 'slides') {
     lines.push(
@@ -115,9 +196,66 @@ export function buildHtmlExportPrompt(args: {
     );
   }
 
+  lines.push(
+    '',
+    'QUALITY BAR — non-negotiable; the output must look professionally designed, not like a default browser page:',
+    "- A readable base stylesheet is already injected for you; build ON it and override it with the chosen design's aesthetic. Do not regress to unstyled defaults.",
+    '- SPACING: use a consistent spacing scale and vertical rhythm. Whitespace must be purposeful — avoid huge empty gaps AND avoid cramped text. No giant blank regions, no content hugging the edges.',
+    '- READING WIDTH: constrain body text to a comfortable measure (~60–80 characters / ~70ch); never let long paragraphs span the full width of a wide screen.',
+    '- TYPOGRAPHY: establish a clear type scale (distinct h1/h2/h3/body), generous but not excessive line-height, and strong hierarchy. Use system fonts only.',
+    '- LAYOUT: use modern CSS (flexbox/grid) for structure; align content to a grid; group related content into clear sections/cards as the design implies.',
+    '- SEMANTICS: use semantic landmarks (header/main/section/article/nav/footer) and a sensible heading order.',
+    '- POLISH: cohesive palette, considered color contrast (WCAG AA), consistent borders/radii/shadows per the design, and responsive behavior down to narrow widths.',
+    '- Fidelity beats brevity: render ALL source content; never drop sections to make it "look cleaner".',
+  );
+
   lines.push('', 'MARKDOWN SOURCE:', '"""', body, '"""');
 
   return { promptDoc: lines.join('\n'), truncated, warning };
+}
+
+/**
+ * Inject the bundled base stylesheet as the FIRST `<style>` in `<head>` so it
+ * sits beneath the model/design CSS in the cascade (design always wins). Falls
+ * back to inserting after `<html>` or prepending if there is no `<head>`.
+ * Idempotent: a document that already carries the base marker is returned as-is.
+ */
+export function injectHtmlExportBaseCss(html: string): string {
+  if (typeof html !== 'string' || !html.trim()) return html;
+  if (html.includes('notepad-ai base —')) return html;
+  const block = `<style data-notepad-ai-base="1">${HTML_EXPORT_BASE_CSS}</style>`;
+  const headOpen = html.match(/<head[^>]*>/i);
+  if (headOpen) {
+    const at = headOpen.index! + headOpen[0].length;
+    return html.slice(0, at) + '\n' + block + html.slice(at);
+  }
+  const htmlOpen = html.match(/<html[^>]*>/i);
+  if (htmlOpen) {
+    const at = htmlOpen.index! + htmlOpen[0].length;
+    return html.slice(0, at) + `\n<head>${block}</head>` + html.slice(at);
+  }
+  return block + html;
+}
+
+export type SelfContainedVerdict = { ok: boolean; violations: string[] };
+
+/**
+ * Detect remote/raster assets that break the self-contained contract: http(s)
+ * or protocol-relative `src`/`href`, `<script src>`, remote `@import`, web-font
+ * `url(http…)`, and `<img>` with a remote/raster source. Pure + unit-tested.
+ */
+export function validateSelfContainedHtml(html: string): SelfContainedVerdict {
+  const violations: string[] = [];
+  const src = typeof html === 'string' ? html : '';
+  const add = (msg: string, re: RegExp) => {
+    if (re.test(src)) violations.push(msg);
+  };
+  add('remote <script src>', /<script\b[^>]*\bsrc\s*=\s*["']?(?:https?:)?\/\//i);
+  add('remote stylesheet <link>', /<link\b[^>]*\bhref\s*=\s*["']?(?:https?:)?\/\//i);
+  add('remote/raster <img src>', /<img\b[^>]*\bsrc\s*=\s*["']?(?:https?:)?\/\//i);
+  add('remote CSS @import', /@import\s+(?:url\()?["']?(?:https?:)?\/\//i);
+  add('remote url() asset (web font / image)', /url\(\s*["']?(?:https?:)?\/\//i);
+  return { ok: violations.length === 0, violations };
 }
 
 function stripTags(value: string): string {

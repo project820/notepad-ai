@@ -9,6 +9,7 @@
 import type { ApiKeyStore } from './api-key-store';
 import { humanizeEngineIdForProvider } from './model-catalog';
 import { toOpenAiMessages } from './messages';
+import { supportsVision } from './vision-capabilities';
 import { extractOpenAiTextDelta, isOpenAiDone } from './sse';
 import { streamSseChat, missingKeyError } from './stream-http';
 import type { AiChatEvent, AiChatRequest, AiProvider, ModelRef, ProviderAuthStatus } from './types';
@@ -57,7 +58,13 @@ export class OpenRouterProvider implements AiProvider {
       onEvent({ kind: 'error', message: err.message, errorKind: err.errorKind });
       return;
     }
-    const messages = toOpenAiMessages(req.instructions, req.history, req.userText);
+    const messages = toOpenAiMessages(
+      req.instructions,
+      req.history,
+      req.userText,
+      req.surfaceMode,
+      supportsVision('openrouter', req.model.id) ? req.images : undefined,
+    );
     await streamSseChat(
       {
         url: OPENROUTER_URL,

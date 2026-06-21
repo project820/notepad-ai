@@ -170,7 +170,7 @@ export function createToolbar(parent: HTMLElement, h: ToolbarHandlers) {
   const controls = document.getElementById('navbar-controls') as HTMLDivElement;
   function renderControls() {
     controls.innerHTML = `
-      <button class="hdr-icbtn" id="hdr-sidechat" data-tooltip="${t('tip.sidechat')}" aria-label="${t('tip.sidechat')}">${ICONS.consultant}</button>
+      <button class="hdr-icbtn hdr-ai-consultant" id="hdr-sidechat" data-tooltip="${t('tip.sidechat')}" aria-label="${t('tip.sidechat')}"><span class="hdr-ai-label">Ai</span></button>
       <button class="hdr-icbtn" id="hdr-model" data-tooltip="${t('tip.model')}" aria-label="${t('tip.model')}">${ICONS.sparkle}</button>
       <button class="hdr-icbtn" id="hdr-lang" data-tooltip="${t('tip.language')}" aria-label="${t('tip.language')}">${ICONS.lang}</button>
       <button class="hdr-icbtn" id="hdr-font" data-tooltip="${t('tip.font')}" aria-label="${t('tip.font')}">${ICONS.fontSize}</button>

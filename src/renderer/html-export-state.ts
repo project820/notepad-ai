@@ -11,6 +11,21 @@
 export type Orientation = 'vertical' | 'horizontal';
 export type LayoutKind = 'scroll' | 'slides';
 
+/** Entry mode: auto = minimal picks + read-good defaults; detail = extra knobs. */
+export type HtmlExportMode = 'auto' | 'detail';
+/** Generation purpose — drives read-good defaults (density/width/typography). */
+export type HtmlPurpose =
+  | 'presentation'
+  | 'report'
+  | 'landing'
+  | 'blog'
+  | 'portfolio'
+  | 'proposal'
+  | 'custom';
+/** Detail-mode density + reading-width knobs (auto applies the purpose default). */
+export type Density = 'compact' | 'normal' | 'roomy';
+export type ReadableWidth = 'narrow' | 'normal' | 'wide';
+
 /** Resolved design context once the design step is done. */
 export type DesignSource =
   | { kind: 'skipped' }
@@ -43,6 +58,15 @@ export type HtmlExportState = {
   /** Set when the most recent design fetch failed (drives the tone-only fallback UI). */
   fetchError?: string;
   tone?: string;
+  /** Auto vs detail entry; auto fills read-good defaults for the rest. */
+  mode?: HtmlExportMode;
+  /** Generation purpose preset (or 'custom' with customPurpose text). */
+  purpose?: HtmlPurpose;
+  customPurpose?: string;
+  /** Detail-mode overrides (omitted → purpose default). */
+  density?: Density;
+  readableWidth?: ReadableWidth;
+  interactive?: boolean;
   /** Tone awaiting an explicit token-warning confirmation before generation. */
   pendingTone?: string;
   generated?: GeneratedHtml;
@@ -53,13 +77,23 @@ export type HtmlExportState = {
 
 export type HtmlExportEvent =
   | { type: 'START' }
+  | { type: 'SET_MODE'; mode: HtmlExportMode }
   | { type: 'SELECT_ORIENTATION'; orientation: Orientation }
   | { type: 'SELECT_LAYOUT'; layout: LayoutKind }
   | { type: 'SUBMIT_DESIGN'; input: string }
   | { type: 'FETCH_OK'; rawUrl: string; designMd: string }
   | { type: 'FETCH_FAIL'; error: string }
   | { type: 'SKIP_DESIGN' }
-  | { type: 'SUBMIT_TONE'; tone: string; tokenWarning?: boolean }
+  | {
+      type: 'SUBMIT_TONE';
+      tone: string;
+      tokenWarning?: boolean;
+      purpose?: HtmlPurpose;
+      customPurpose?: string;
+      density?: Density;
+      readableWidth?: ReadableWidth;
+      interactive?: boolean;
+    }
   | { type: 'CONFIRM_TOKEN_WARNING' }
   | { type: 'AI_DONE'; html: string; title: string; bytes: number }
   | { type: 'AI_ERROR'; error: string }
@@ -102,7 +136,10 @@ function back(state: HtmlExportState): HtmlExportState {
 export function htmlExportReducer(state: HtmlExportState, event: HtmlExportEvent): HtmlExportState {
   switch (event.type) {
     case 'START':
-      return { step: 'choose-orientation' };
+      return { step: 'choose-orientation', mode: state.mode };
+
+    case 'SET_MODE':
+      return { ...state, mode: event.mode };
 
     case 'SELECT_ORIENTATION':
       if (state.step !== 'choose-orientation') return state;
@@ -135,13 +172,21 @@ export function htmlExportReducer(state: HtmlExportState, event: HtmlExportEvent
       if (state.step !== 'choose-design') return state;
       return { ...state, step: 'style-tone', design: undefined, fetchError: undefined };
 
-    case 'SUBMIT_TONE':
+    case 'SUBMIT_TONE': {
       // Valid from style-tone (first run) or generated (regenerate).
       if (state.step !== 'style-tone' && state.step !== 'generated') return state;
+      const cfg = {
+        purpose: event.purpose ?? state.purpose,
+        customPurpose: event.customPurpose ?? state.customPurpose,
+        density: event.density ?? state.density,
+        readableWidth: event.readableWidth ?? state.readableWidth,
+        interactive: event.interactive ?? state.interactive,
+      };
       if (event.tokenWarning) {
-        return { ...state, step: 'token-warning', tone: event.tone, pendingTone: event.tone };
+        return { ...state, ...cfg, step: 'token-warning', tone: event.tone, pendingTone: event.tone };
       }
-      return { ...state, step: 'generating', tone: event.tone, pendingTone: undefined };
+      return { ...state, ...cfg, step: 'generating', tone: event.tone, pendingTone: undefined };
+    }
 
     case 'CONFIRM_TOKEN_WARNING':
       if (state.step !== 'token-warning') return state;
@@ -199,4 +244,60 @@ export function htmlExportReducer(state: HtmlExportState, event: HtmlExportEvent
     default:
       return state;
   }
+}
+
+/** Per-purpose read-good defaults. Auto mode applies these; detail mode lets the
+ *  user override density/readableWidth/interactive on top. */
+export type PurposePreset = {
+  density: Density;
+  readableWidth: ReadableWidth;
+  typography: 'compact' | 'normal' | 'large';
+  interactive: boolean;
+  /** One-line intent injected into the generation prompt. */
+  brief: string;
+};
+
+export const HTML_PURPOSE_PRESETS: Record<Exclude<HtmlPurpose, 'custom'>, PurposePreset> = {
+  presentation: { density: 'roomy', readableWidth: 'wide', typography: 'large', interactive: true,
+    brief: 'A presentation deck: bold, scannable slides with large type, strong visual hierarchy, minimal text per view.' },
+  report: { density: 'compact', readableWidth: 'normal', typography: 'normal', interactive: false,
+    brief: 'A formal report/document: dense but legible, clear sections and headings, tables and figures, print-friendly.' },
+  landing: { density: 'roomy', readableWidth: 'wide', typography: 'large', interactive: true,
+    brief: 'A marketing landing page: a strong hero, generous sectioned rhythm, clear calls-to-action, persuasive layout.' },
+  blog: { density: 'normal', readableWidth: 'narrow', typography: 'normal', interactive: false,
+    brief: 'A blog/article: a single comfortable reading column, excellent typography, restrained accents.' },
+  portfolio: { density: 'normal', readableWidth: 'wide', typography: 'large', interactive: true,
+    brief: 'A portfolio/résumé: confident visual identity, project/section cards, balanced whitespace.' },
+  proposal: { density: 'normal', readableWidth: 'normal', typography: 'normal', interactive: false,
+    brief: 'A proposal: structured and persuasive, clear sections (summary, scope, timeline, pricing), professional polish.' },
+};
+
+/** Resolve the effective config for a purpose (+ user overrides). Custom uses
+ *  balanced defaults and the user's free-text purpose as the brief. */
+export function resolvePurposeConfig(args: {
+  purpose?: HtmlPurpose;
+  customPurpose?: string;
+  density?: Density;
+  readableWidth?: ReadableWidth;
+  interactive?: boolean;
+}): { purpose: HtmlPurpose; density: Density; readableWidth: ReadableWidth; typography: 'compact' | 'normal' | 'large'; interactive: boolean; brief: string } {
+  const purpose: HtmlPurpose = args.purpose ?? 'report';
+  const base: PurposePreset =
+    purpose === 'custom'
+      ? {
+          density: 'normal',
+          readableWidth: 'normal',
+          typography: 'normal',
+          interactive: false,
+          brief: (args.customPurpose?.trim() || 'A clean, purpose-fit web document.'),
+        }
+      : HTML_PURPOSE_PRESETS[purpose];
+  return {
+    purpose,
+    density: args.density ?? base.density,
+    readableWidth: args.readableWidth ?? base.readableWidth,
+    typography: base.typography,
+    interactive: args.interactive ?? base.interactive,
+    brief: base.brief,
+  };
 }

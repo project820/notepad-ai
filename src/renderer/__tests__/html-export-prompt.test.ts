@@ -4,6 +4,10 @@ import {
   defaultHtmlFileName,
   extractDocumentTitle,
   extractHtmlDocument,
+  HTML_EXPORT_BASE_CSS,
+  HTML_EXPORT_INSTRUCTIONS,
+  injectHtmlExportBaseCss,
+  validateSelfContainedHtml,
 } from '../html-export-prompt';
 
 describe('buildHtmlExportPrompt', () => {
@@ -147,5 +151,110 @@ describe('defaultHtmlFileName', () => {
     const name = defaultHtmlFileName({ currentPath: null, aiHtml: html });
     expect(name.endsWith('.html')).toBe(true);
     expect(name).not.toMatch(/[/:*?]/);
+  });
+});
+
+describe('G005 — HTML_EXPORT_INSTRUCTIONS', () => {
+  it('keeps the self-contained signature so output-budget detection still matches', () => {
+    expect(HTML_EXPORT_INSTRUCTIONS).toContain('self-contained HTML5 document');
+  });
+});
+
+describe('G005 — QUALITY BAR in the generation prompt (AC12)', () => {
+  it('injects the quality-bar guidance against excessive whitespace + for reading width', () => {
+    const { promptDoc } = buildHtmlExportPrompt({ markdown: '# Hi', orientation: 'vertical', layout: 'scroll' });
+    expect(promptDoc).toContain('QUALITY BAR');
+    expect(promptDoc).toContain('READING WIDTH');
+    expect(promptDoc.toLowerCase()).toContain('whitespace must be purposeful');
+    expect(promptDoc).toContain('base stylesheet is already injected');
+  });
+});
+
+describe('G005 — injectHtmlExportBaseCss (AC12 base CSS safety net)', () => {
+  it('inserts the base style as the first thing in <head>', () => {
+    const out = injectHtmlExportBaseCss('<!doctype html><html><head><title>x</title></head><body>hi</body></html>');
+    expect(out).toContain('data-notepad-ai-base="1"');
+    expect(out.indexOf('data-notepad-ai-base')).toBeLessThan(out.indexOf('<title>'));
+    expect(out).toContain(HTML_EXPORT_BASE_CSS);
+  });
+
+  it('is idempotent (does not double-inject)', () => {
+    const once = injectHtmlExportBaseCss('<html><head></head><body></body></html>');
+    const twice = injectHtmlExportBaseCss(once);
+    expect(twice).toBe(once);
+    expect(twice.match(/data-notepad-ai-base/g)!.length).toBe(1);
+  });
+
+  it('creates a head when none exists', () => {
+    const out = injectHtmlExportBaseCss('<html><body>x</body></html>');
+    expect(out).toContain('<head>');
+    expect(out).toContain('data-notepad-ai-base');
+  });
+});
+
+describe('G005 — validateSelfContainedHtml (AC12 no remote assets)', () => {
+  it('passes an inline-only document', () => {
+    const v = validateSelfContainedHtml('<!doctype html><html><head><style>body{color:red}</style></head><body><svg></svg></body></html>');
+    expect(v.ok).toBe(true);
+    expect(v.violations).toEqual([]);
+  });
+
+  it('flags a remote script', () => {
+    const v = validateSelfContainedHtml('<html><head><script src="https://cdn.example/x.js"></script></head></html>');
+    expect(v.ok).toBe(false);
+    expect(v.violations.join(' ')).toContain('script');
+  });
+
+  it('flags a remote stylesheet, remote img, @import, and web-font url()', () => {
+    expect(validateSelfContainedHtml('<link rel="stylesheet" href="https://x/app.css">').ok).toBe(false);
+    expect(validateSelfContainedHtml('<img src="//cdn/x.png">').ok).toBe(false);
+    expect(validateSelfContainedHtml('<style>@import url(https://fonts.example/f.css)</style>').ok).toBe(false);
+    expect(validateSelfContainedHtml('<style>@font-face{src:url("https://fonts.gstatic.com/a.woff2")}</style>').ok).toBe(false);
+  });
+
+  it('does not flag a protocol-relative-free inline data URI', () => {
+    const v = validateSelfContainedHtml('<img src="data:image/png;base64,AAAA">');
+    expect(v.ok).toBe(true);
+  });
+});
+
+describe('G005 — PURPOSE section in the prompt (AC8/AC9/AC10)', () => {
+  it('injects the purpose brief + density/width/typography + interactive directives', () => {
+    const { promptDoc } = buildHtmlExportPrompt({
+      markdown: '# Hi',
+      orientation: 'horizontal',
+      layout: 'slides',
+      purpose: 'presentation',
+    });
+    expect(promptDoc).toContain('PURPOSE:');
+    expect(promptDoc).toContain('presentation deck');
+    expect(promptDoc).toContain('DENSITY:');
+    expect(promptDoc).toContain('READING WIDTH:');
+    expect(promptDoc).toContain('TYPOGRAPHY:');
+    expect(promptDoc).toContain('INTERACTIVITY: tasteful'); // presentation default = interactive
+  });
+
+  it('detail overrides flow into the prompt (interactive off + compact density)', () => {
+    const { promptDoc } = buildHtmlExportPrompt({
+      markdown: '# Hi',
+      orientation: 'vertical',
+      layout: 'scroll',
+      purpose: 'landing',
+      density: 'compact',
+      interactive: false,
+    });
+    expect(promptDoc).toContain('DENSITY: compact');
+    expect(promptDoc).toContain('INTERACTIVITY: keep it static');
+  });
+
+  it('custom purpose threads the user free-text into the PURPOSE brief', () => {
+    const { promptDoc } = buildHtmlExportPrompt({
+      markdown: '# Hi',
+      orientation: 'vertical',
+      layout: 'scroll',
+      purpose: 'custom',
+      customPurpose: 'an interactive timeline of the project',
+    });
+    expect(promptDoc).toContain('an interactive timeline of the project');
   });
 });

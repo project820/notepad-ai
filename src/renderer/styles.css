@@ -2039,6 +2039,8 @@ body.sc-open .bottom-chat-host { right: calc(min(420px, 50vw) + 24px); }
 
 .uc-modes {
   display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
   gap: 4px;
   padding: 8px 10px;
   border-bottom: 1px solid var(--color-hairline);
@@ -2046,6 +2048,8 @@ body.sc-open .bottom-chat-host { right: calc(min(420px, 50vw) + 24px); }
 .uc-mode {
   font: inherit;
   font-size: 12px;
+  flex: 0 0 auto;
+  white-space: nowrap;
   padding: 4px 10px;
   border: 1px solid transparent;
   border-radius: 999px;
@@ -2057,6 +2061,47 @@ body.sc-open .bottom-chat-host { right: calc(min(420px, 50vw) + 24px); }
 .uc-mode[aria-selected='true'] {
   background: var(--color-primary);
   color: var(--color-on-primary);
+}
+
+.uc-write-help {
+  margin: 8px 12px 0;
+  padding: 10px 12px;
+  border: 1px dashed var(--color-hairline);
+  border-radius: 8px;
+  color: var(--color-mute);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.uc-write-help[hidden] { display: none; }
+.uc-advise-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 12px 0;
+  padding: 6px 10px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 8px;
+  font-size: 11px;
+  color: var(--color-mute);
+}
+.uc-advise-bar[hidden] { display: none; }
+.uc-advise-status { flex: 1; }
+.uc-advise-resync {
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 8px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-ink);
+  cursor: pointer;
+}
+.uc-advise-resync:hover { background: var(--color-surface-bone); }
+.uc-notice {
+  padding: 4px 2px;
+  color: var(--color-body);
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .uc-thread {
@@ -2160,19 +2205,7 @@ body.sc-open .bottom-chat-host { right: calc(min(420px, 50vw) + 24px); }
  * HTML EXPORT WIZARD (he-*) — ⑤ headline (cream/orange/pill)
  * DESIGN.md tokens; renders inside a uc-assistant panel bubble.
  * ============================================================= */
-.uc-html-export {
-  font: inherit;
-  font-size: 12px;
-  padding: 4px 12px;
-  margin-left: auto;
-  border: 1px solid var(--color-primary);
-  border-radius: var(--r-full);
-  background: transparent;
-  color: var(--color-primary);
-  cursor: pointer;
-  white-space: nowrap;
-}
-.uc-html-export:hover { background: var(--color-primary); color: var(--color-on-primary); }
+
 
 .he-wizard {
   display: flex;
@@ -2240,6 +2273,36 @@ body.sc-open .bottom-chat-host { right: calc(min(420px, 50vw) + 24px); }
 .he-select { cursor: pointer; appearance: none; -webkit-appearance: none; }
 .he-model-note { margin-top: 6px; font-size: 12px; color: var(--color-mute); line-height: 1.4; }
 .he-model-note[hidden] { display: none; }
+.he-modes { display: flex; gap: 6px; margin-bottom: 10px; }
+.he-mode {
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 14px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-mute);
+  cursor: pointer;
+}
+.he-mode-on { background: var(--color-primary); color: var(--color-on-primary); border-color: var(--color-primary); }
+.he-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 8px 0; font-size: 13px; color: var(--color-ink); }
+.he-row .he-select { width: auto; min-width: 130px; }
+.he-check { justify-content: flex-start; cursor: pointer; }
+.he-custom-purpose[hidden] { display: none; }
+.uc-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 10px 0; }
+.uc-chips[hidden] { display: none; }
+.uc-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 2px 6px 2px 8px; border: 1px solid var(--color-hairline); border-radius: 999px; background: var(--color-surface-bone); color: var(--color-ink); }
+.uc-chip-x { font: inherit; border: none; background: transparent; color: var(--color-mute); cursor: pointer; line-height: 1; padding: 0 2px; }
+.uc-chip-x:hover { color: var(--color-primary); }
+.uc-attach { font: inherit; font-size: 16px; line-height: 1; width: 30px; flex: 0 0 auto; border: 1px solid var(--color-hairline); border-radius: 8px; background: transparent; color: var(--color-mute); cursor: pointer; }
+.uc-attach:hover { color: var(--color-ink); border-color: var(--color-hairline); }
+.he-design-list { max-height: 220px; overflow-y: auto; margin-bottom: 10px; border: 1px solid var(--color-hairline); border-radius: 8px; }
+.he-design-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--color-hairline); }
+.he-design-row:last-child { border-bottom: none; }
+.he-design-icon { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 6px; background: var(--color-surface-bone); font-size: 11px; font-weight: 700; color: var(--color-ink); flex: 0 0 auto; }
+.he-design-pick { flex: 1; text-align: left; font: inherit; font-size: 13px; background: transparent; border: none; color: var(--color-ink); cursor: pointer; }
+.he-design-pick:hover { color: var(--color-primary); }
+.he-design-page { flex: 0 0 auto; font-size: 11px; }
 
 .he-foot { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .he-btn {
@@ -2468,30 +2531,26 @@ body.sc-open .bottom-chat-host { right: calc(min(420px, 50vw) + 24px); }
 .update-dismiss { background: var(--color-surface-bone); color: var(--color-body); }
 .update-dismiss:hover { border-color: var(--color-primary); }
 /* =============================================================
- * AI FLOATING BUTTON — bottom-right quick entry to unified chat
+ * AI CONSULTANT HEADER BUTTON — red "Ai" pill (distinct entry to unified chat)
  * ============================================================= */
-.ai-fab {
-  position: fixed;
-  right: 22px;
-  bottom: 46px;
-  z-index: 180;
-  width: 52px;
-  height: 52px;
-  border-radius: 999px;
-  border: none;
+.hdr-ai-consultant {
   background: var(--color-primary);
   color: var(--color-on-primary);
-  font: inherit;
-  font-size: 15px;
+  border-color: var(--color-primary);
+  border-radius: 999px;
   font-weight: 700;
   letter-spacing: 0.02em;
-  cursor: pointer;
-  box-shadow: 0 6px 18px rgba(234, 40, 4, 0.34);
-  transition: transform 0.12s, background 0.15s, opacity 0.15s;
 }
-.ai-fab:hover { background: var(--color-primary-deep); transform: translateY(-1px); }
-.ai-fab:active { transform: scale(0.95); }
-.ai-fab.hidden { opacity: 0; pointer-events: none; transform: scale(0.8); }
+.hdr-ai-consultant .hdr-ai-label {
+  font-size: 11px;
+  line-height: 1;
+}
+.hdr-ai-consultant:hover,
+.hdr-ai-consultant:active {
+  background: var(--color-primary-deep);
+  border-color: var(--color-primary-deep);
+  color: var(--color-on-primary);
+}
 
 /* =============================================================
  * TABLE CELL CONTEXT MENU (right-click) — replaces the old toolbar
@@ -2769,12 +2828,12 @@ html[data-theme='dark'] .preview tr.preview-sync-highlight > td {
   border-bottom: 1px solid var(--color-hairline);
 }
 .uc-style-panel .style-title {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--color-mute);
-  margin: 8px 0 2px;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--color-ink);
+  margin: 10px 0 8px;
 }
 .uc-style-panel .style-select {
   min-width: 150px;

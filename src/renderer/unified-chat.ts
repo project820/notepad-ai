@@ -20,19 +20,26 @@ import { restoreUnifiedThread, type UnifiedChatItem, type UnifiedThreadSnapshot 
 import { mountStyleSettingPanel, type StyleSettingHandle } from './style-setting-panel';
 import type { StyleSetting } from './humanize-engine';
 
-export type ChatMode = 'write' | 'advise' | 'project';
+export type ChatMode = 'write' | 'advise' | 'project' | 'html';
+
+/** A pending image attachment in the composer (base64, no data: prefix). */
+export type ChatAttachment = { mime: string; base64: string; bytes: number; name?: string };
 
 export type UnifiedChatHandlers = {
-  /** Send the composed message in the active mode. */
-  onSend: (text: string, mode: ChatMode) => void;
+  /** Send the composed message (with any image attachments) in the active mode. */
+  onSend: (text: string, mode: ChatMode, attachments?: ChatAttachment[]) => void;
   /** Apply an assistant message's content to the document. */
   onInsert: (text: string) => void;
   onReplace: (text: string) => void;
   onCopy: (text: string) => void;
   /** Start the relocated Project Wizard ('project' mode). */
   onProjectSetup?: () => void;
-  /** Open the HTML-export wizard (⑤). */
+  /** Open the HTML-export wizard (its own tab). */
   onHtmlExport?: () => void;
+  /** Notify the host when the active tab changes (write/advise/project/html). */
+  onModeChange?: (mode: ChatMode) => void;
+  /** Advise tab: user pressed "sync now" to re-snapshot the live document. */
+  onAdviceResync?: () => void;
   /** AI writing style (difficulty + naturalness), surfaced inline in the chat. */
   style?: { get: () => StyleSetting; onChange: (s: StyleSetting) => void };
 };
@@ -58,8 +65,18 @@ export type UnifiedChatHandle = {
   restore: (snap: UnifiedThreadSnapshot) => void;
   /** Clear the visible thread. */
   clear: () => void;
-  /** Inject a transient interactive panel (e.g. Project Wizard) into the thread. */
-  showPanel: (html: string, onAction?: (action: string, panel: HTMLElement) => void) => void;
+  /** Inject a transient interactive panel (e.g. Project Wizard / HTML wizard). */
+  showPanel: (
+    html: string,
+    onAction?: (action: string, panel: HTMLElement) => void,
+    onDestroy?: () => void,
+  ) => void;
+  /** Remove the current transient panel (if any) and run its cleanup. */
+  clearPanel: () => void;
+  /** Advise tab: update the sync-status badge (e.g. "문서 동기화됨 · 14:32"). */
+  setAdviceSync: (label: string) => void;
+  /** Add a pending image attachment to the composer (paste/file/programmatic). */
+  addAttachment: (att: ChatAttachment) => void;
   destroy: () => void;
 };
 
@@ -90,12 +107,20 @@ export function renderUnifiedChat(): string {
     <button class="uc-mode" data-mode="write" aria-selected="true" type="button">${t('uc.write')}</button>
     <button class="uc-mode" data-mode="advise" aria-selected="false" type="button">${t('uc.advise')}</button>
     <button class="uc-mode" data-mode="project" aria-selected="false" type="button">${t('uc.project')}</button>
-    <button class="uc-html-export" type="button">${t('he.button')}</button>
+    <button class="uc-mode" data-mode="html" aria-selected="false" type="button">${t('he.button')}</button>
     <button class="uc-style-toggle" type="button" hidden data-tooltip="${t('style.title')}" aria-label="${t('style.title')}" aria-expanded="false">${STYLE_GEAR_ICON}</button>
   </div>
   <div class="uc-style-panel" hidden></div>
   <div class="uc-thread" role="log"></div>
+  <div class="uc-write-help" hidden>${t('uc.writeHelp')}</div>
+  <div class="uc-advise-bar" hidden>
+    <span class="uc-advise-status"></span>
+    <button class="uc-advise-resync" type="button">${t('uc.advise.resync')}</button>
+  </div>
+  <div class="uc-chips" hidden></div>
   <div class="uc-composer">
+    <button class="uc-attach" type="button" data-tooltip="${t('uc.attach')}" aria-label="${t('uc.attach')}">+</button>
+    <input class="uc-file" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden />
     <textarea class="uc-input" rows="2" placeholder="${t('uc.placeholder')}" aria-label="${t('uc.write')}"></textarea>
     <button class="uc-send" type="button">${t('uc.send')}</button>
   </div>
@@ -119,7 +144,48 @@ export function mountUnifiedChat(parent: HTMLElement, handlers: UnifiedChatHandl
   parent.innerHTML = renderUnifiedChat();
   const thread = parent.querySelector<HTMLElement>('.uc-thread')!;
   const input = parent.querySelector<HTMLTextAreaElement>('.uc-input')!;
+  const writeHelp = parent.querySelector<HTMLElement>('.uc-write-help')!;
+  const adviseBar = parent.querySelector<HTMLElement>('.uc-advise-bar')!;
+  const adviseStatus = parent.querySelector<HTMLElement>('.uc-advise-status')!;
   let mode: ChatMode = 'write';
+  const chips = parent.querySelector<HTMLElement>('.uc-chips')!;
+  const fileInput = parent.querySelector<HTMLInputElement>('.uc-file')!;
+  const pendingImages: ChatAttachment[] = [];
+
+  function renderChips() {
+    chips.hidden = pendingImages.length === 0;
+    chips.innerHTML = pendingImages
+      .map(
+        (a, i) =>
+          `<span class="uc-chip">${(a.name ?? 'image').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')}<button class="uc-chip-x" data-chip="${i}" type="button" aria-label="remove">×</button></span>`,
+      )
+      .join('');
+  }
+
+  function addAttachment(att: ChatAttachment) {
+    if (pendingImages.length >= 4) return;
+    pendingImages.push(att);
+    renderChips();
+  }
+
+  async function readFiles(files: FileList | File[]) {
+    for (const file of Array.from(files)) {
+      if (!/^image\/(png|jpeg|webp)$/.test(file.type)) continue;
+      const buf = await file.arrayBuffer();
+      const bytes = buf.byteLength;
+      let bin = '';
+      const view = new Uint8Array(buf);
+      for (let i = 0; i < view.length; i++) bin += String.fromCharCode(view[i]);
+      addAttachment({ mime: file.type, base64: btoa(bin), bytes, name: file.name });
+    }
+  }
+
+  /** Write help shows only on an empty Write thread; the advise bar only on Advise. */
+  function updateChrome() {
+    const empty = !thread.querySelector('.uc-msg') && !thread.querySelector('.uc-separator');
+    writeHelp.hidden = !(mode === 'write' && empty);
+    adviseBar.hidden = mode !== 'advise';
+  }
 
   function scrollToEnd() {
     thread.scrollTop = thread.scrollHeight;
@@ -144,6 +210,7 @@ export function mountUnifiedChat(parent: HTMLElement, handlers: UnifiedChatHandl
     renderBody(node, text, role === 'assistant');
     thread.appendChild(node);
     scrollToEnd();
+    updateChrome();
   }
 
   function beginAssistant(): AssistantStream {
@@ -153,6 +220,7 @@ export function mountUnifiedChat(parent: HTMLElement, handlers: UnifiedChatHandl
     node.classList.add('uc-streaming');
     thread.appendChild(node);
     scrollToEnd();
+    updateChrome();
     let buffer = '';
     return {
       pushDelta(text: string) {
@@ -205,11 +273,29 @@ export function mountUnifiedChat(parent: HTMLElement, handlers: UnifiedChatHandl
       if (item.type === 'separator') addSeparator(item.label);
       else addMessage(item.role, item.text);
     }
+    updateChrome();
   }
 
-  function showPanel(html: string, onAction?: (action: string, panel: HTMLElement) => void) {
-    // Only one transient panel at a time (e.g. Project Wizard steps).
+  let panelDestroy: (() => void) | null = null;
+
+  function clearPanel() {
     for (const existing of Array.from(thread.querySelectorAll('.uc-panel-msg'))) existing.remove();
+    if (panelDestroy) {
+      const d = panelDestroy;
+      panelDestroy = null;
+      d();
+    }
+    updateChrome();
+  }
+
+  function showPanel(
+    html: string,
+    onAction?: (action: string, panel: HTMLElement) => void,
+    onDestroy?: () => void,
+  ) {
+    // Only one transient panel at a time (e.g. Project Wizard / HTML wizard).
+    clearPanel();
+    panelDestroy = onDestroy ?? null;
     const div = document.createElement('div');
     div.className = 'uc-msg uc-assistant uc-panel-msg';
     div.innerHTML = html;
@@ -220,6 +306,7 @@ export function mountUnifiedChat(parent: HTMLElement, handlers: UnifiedChatHandl
     });
     thread.appendChild(div);
     scrollToEnd();
+    updateChrome();
   }
 
   // ----- inline style settings (difficulty + naturalness) -----
@@ -247,24 +334,68 @@ export function mountUnifiedChat(parent: HTMLElement, handlers: UnifiedChatHandl
       toggleStylePanel();
       return;
     }
-    if ((e.target as HTMLElement).closest('.uc-html-export')) {
-      handlers.onHtmlExport?.();
-      return;
-    }
     const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('.uc-mode');
     if (!btn) return;
     mode = (btn.dataset.mode as ChatMode) ?? 'write';
     for (const m of parent.querySelectorAll<HTMLButtonElement>('.uc-mode')) {
       m.setAttribute('aria-selected', String(m === btn));
     }
+    // Leaving project/html drops their transient panel (AC5: no lingering panel).
+    if (mode === 'write' || mode === 'advise') clearPanel();
+    handlers.onModeChange?.(mode);
     if (mode === 'project') handlers.onProjectSetup?.();
+    else if (mode === 'html') handlers.onHtmlExport?.();
+    updateChrome();
+  };
+
+  const onAdviseResync = (e: Event) => {
+    if ((e.target as HTMLElement).closest('.uc-advise-resync')) handlers.onAdviceResync?.();
   };
 
   const send = () => {
+    // Project/HTML are panel-driven tabs with no composer turn — never send or
+    // wipe the user's text from them (would be silent text loss).
+    if (mode === 'project' || mode === 'html') return;
     const text = input.value.trim();
-    if (!text) return;
-    handlers.onSend(text, mode);
+    // Allow an image-only turn (e.g. "OCR this") when attachments are present.
+    if (!text && pendingImages.length === 0) return;
+    const attachments = pendingImages.length ? pendingImages.slice() : undefined;
+    handlers.onSend(text, mode, attachments);
     input.value = '';
+    pendingImages.length = 0;
+    renderChips();
+  };
+
+  const onComposerExtraClick = (e: Event) => {
+    const target = e.target as HTMLElement;
+    if (target.closest('.uc-attach')) {
+      fileInput.click();
+      return;
+    }
+    const chipX = target.closest<HTMLElement>('.uc-chip-x');
+    if (chipX) {
+      const i = Number(chipX.dataset.chip);
+      if (Number.isInteger(i)) {
+        pendingImages.splice(i, 1);
+        renderChips();
+      }
+    }
+  };
+
+  const onPaste = (e: ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    const files: File[] = [];
+    for (const it of Array.from(items)) {
+      if (it.kind === 'file' && /^image\//.test(it.type)) {
+        const f = it.getAsFile();
+        if (f) files.push(f);
+      }
+    }
+    if (files.length) {
+      e.preventDefault();
+      void readFiles(files);
+    }
   };
 
   const onComposerClick = (e: Event) => {
@@ -291,8 +422,16 @@ export function mountUnifiedChat(parent: HTMLElement, handlers: UnifiedChatHandl
 
   parent.querySelector('.uc-modes')!.addEventListener('click', onModeClick);
   parent.querySelector('.uc-composer')!.addEventListener('click', onComposerClick);
+  parent.querySelector('.uc-composer')!.addEventListener('click', onComposerExtraClick);
+  chips.addEventListener('click', onComposerExtraClick);
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files) void readFiles(fileInput.files).then(() => (fileInput.value = ''));
+  });
+  input.addEventListener('paste', onPaste);
+  parent.querySelector('.uc-advise-bar')!.addEventListener('click', onAdviseResync);
   input.addEventListener('keydown', onKeydown);
   thread.addEventListener('click', onThreadClick);
+  updateChrome();
 
   return {
     addMessage,
@@ -301,9 +440,16 @@ export function mountUnifiedChat(parent: HTMLElement, handlers: UnifiedChatHandl
     restore: (snap) => renderItems(restoreUnifiedThread(snap)),
     clear: () => {
       thread.innerHTML = '';
+      updateChrome();
     },
+    setAdviceSync: (label: string) => {
+      adviseStatus.textContent = label;
+    },
+    addAttachment,
     showPanel,
+    clearPanel,
     destroy: () => {
+      clearPanel();
       styleHandle?.destroy();
       parent.innerHTML = '';
     },

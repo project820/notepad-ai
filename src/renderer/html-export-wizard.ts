@@ -13,12 +13,16 @@ import {
   defaultHtmlFileName,
   extractDocumentTitle,
   extractHtmlDocument,
+  injectHtmlExportBaseCss,
 } from './html-export-prompt';
 import {
   htmlExportReducer,
   initialHtmlExportState,
   type HtmlExportEvent,
   type HtmlExportState,
+  type HtmlPurpose,
+  type Density,
+  type ReadableWidth,
 } from './html-export-state';
 
 import { formatContextWindow } from '../main/ai/output-budget';
@@ -44,6 +48,8 @@ export type HtmlExportDeps = {
   /** Persist the user's HTML-model choice. */
   onModelChosen?: (model: HtmlModelChoice) => void;
   fetchDesignMd: (input: string) => Promise<{ ok: boolean; designMd?: string; rawUrl?: string; error?: string }>;
+  /** List available getdesign designs (the catalog index). Omitted → text input only. */
+  listDesigns?: () => Promise<{ ok: boolean; designs?: { slug: string; name: string; pageUrl: string }[]; error?: string }>;
   saveHtml: (args: { html: string; defaultName?: string }) => Promise<{ saved: boolean; filePath?: string }>;
   openSavedHtml: (filePath: string) => Promise<{ opened: boolean; error?: string }>;
   /** Generate HTML for `prompt` using `model` (falls back to the main model when omitted). */
@@ -121,6 +127,21 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
       });
   }
 
+  /** getdesign catalog entries, loaded once on mount (empty until/if they arrive). */
+  let designList: { slug: string; name: string; pageUrl: string }[] = [];
+  if (deps.listDesigns) {
+    deps
+      .listDesigns()
+      .then((res) => {
+        if (disposed) return;
+        designList = res?.ok && Array.isArray(res.designs) ? res.designs : [];
+        if (state.step === 'choose-design') render();
+      })
+      .catch(() => {
+        /* text input still works without the catalog */
+      });
+  }
+
   function defaultModelKey(): string | undefined {
     const d = deps.getDefaultModel?.();
     if (!d) return undefined;
@@ -162,7 +183,14 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
   /** Toggle the small-context advisory when the model selection changes. */
   function onModelChange(event: Event) {
     const el = event.target as HTMLElement | null;
-    if (!el || !host.contains(el) || el.dataset?.heField !== 'model') return;
+    if (!el || !host.contains(el)) return;
+    // Purpose select toggles the free-text custom-purpose input inline (no re-render).
+    if (el.dataset?.heField === 'purpose') {
+      const custom = host.querySelector<HTMLInputElement>('[data-he-field="custom-purpose"]');
+      if (custom) custom.hidden = (el as HTMLSelectElement).value !== 'custom';
+      return;
+    }
+    if (el.dataset?.heField !== 'model') return;
     const note = host.querySelector<HTMLElement>('[data-he-note="model"]');
     if (!note) return;
     const small = isSmallContext(htmlModels.find((m) => modelKey(m) === (el as HTMLSelectElement).value));
@@ -208,6 +236,12 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
     // submission already started generation; a second must not orphan a job.
     if (state.step !== 'style-tone') return;
     const tone = field<HTMLTextAreaElement>('tone')?.value.trim() ?? '';
+    const purpose = ((field<HTMLSelectElement>('purpose')?.value as HtmlPurpose) || state.purpose) ?? undefined;
+    const customPurpose = field<HTMLInputElement>('custom-purpose')?.value.trim() || state.customPurpose;
+    const density = ((field<HTMLSelectElement>('density')?.value as Density) || state.density) ?? undefined;
+    const readableWidth =
+      ((field<HTMLSelectElement>('readable-width')?.value as ReadableWidth) || state.readableWidth) ?? undefined;
+    const interactive = field<HTMLInputElement>('interactive')?.checked ?? state.interactive;
     pendingModel = readSelectedModel();
     if (pendingModel) deps.onModelChosen?.(pendingModel);
     const built = buildHtmlExportPrompt({
@@ -216,10 +250,24 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
       layout: state.layout,
       designMd: state.design?.designMd,
       tone,
+      purpose,
+      customPurpose,
+      density,
+      readableWidth,
+      interactive,
       maxSourceChars: deps.maxSourceCharsForModel?.(pendingModel),
     });
     pendingPrompt = built.promptDoc;
-    dispatch({ type: 'SUBMIT_TONE', tone, tokenWarning: built.warning });
+    dispatch({
+      type: 'SUBMIT_TONE',
+      tone,
+      tokenWarning: built.warning,
+      purpose,
+      customPurpose,
+      density,
+      readableWidth,
+      interactive,
+    });
     maybeStartGeneration();
   }
 
@@ -237,6 +285,11 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
       layout: state.layout,
       designMd: state.design?.designMd,
       tone: state.tone,
+      purpose: state.purpose,
+      customPurpose: state.customPurpose,
+      density: state.density,
+      readableWidth: state.readableWidth,
+      interactive: state.interactive,
       maxSourceChars: deps.maxSourceCharsForModel?.(pendingModel),
     });
     pendingPrompt = built.promptDoc;
@@ -257,11 +310,14 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
           dispatch({ type: 'AI_ERROR', error: extracted.error });
           return;
         }
+        // AC12: inject the bundled readable base CSS beneath the model/design
+        // CSS so even a lazy generation has a sane, non-empty-whitespace baseline.
+        const finalHtml = injectHtmlExportBaseCss(extracted.html);
         dispatch({
           type: 'AI_DONE',
-          html: extracted.html,
-          title: extractDocumentTitle(extracted.html),
-          bytes: byteLength(extracted.html),
+          html: finalHtml,
+          title: extractDocumentTitle(finalHtml),
+          bytes: byteLength(finalHtml),
         });
       },
       (err) => {
@@ -317,7 +373,7 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
     const el = (event.target as HTMLElement | null)?.closest<HTMLElement>('[data-he]');
     if (!el || !host.contains(el)) return;
     const action = el.dataset.he;
-    if (action === 'design-gallery') event.preventDefault();
+    if (action === 'design-gallery' || action === 'design-page') event.preventDefault();
     switch (action) {
       case 'orient-vertical':
         return dispatch({ type: 'SELECT_ORIENTATION', orientation: 'vertical' });
@@ -327,6 +383,17 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
         return dispatch({ type: 'SELECT_LAYOUT', layout: 'scroll' });
       case 'layout-slides':
         return dispatch({ type: 'SELECT_LAYOUT', layout: 'slides' });
+      case 'mode-auto':
+        return dispatch({ type: 'SET_MODE', mode: 'auto' });
+      case 'mode-detail':
+        return dispatch({ type: 'SET_MODE', mode: 'detail' });
+      case 'design-pick': {
+        const input = field<HTMLInputElement>('design');
+        if (input) input.value = el.dataset.slug ?? '';
+        return;
+      }
+      case 'design-page':
+        return deps.openExternal?.(el.dataset.url ?? '');
       case 'design-submit':
         return void submitDesign();
       case 'design-skip':
@@ -388,31 +455,70 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
           </div>
           ${footer(backBtn() + cancelBtn())}`;
 
-      case 'choose-design':
+      case 'choose-design': {
+        const rows = designList.length
+          ? `<div class="he-design-list" role="listbox">${designList
+              .map(
+                (d) =>
+                  `<div class="he-design-row" title="${esc(d.name)}">` +
+                  `<span class="he-design-icon" aria-hidden="true">${esc(d.name.slice(0, 1).toUpperCase())}</span>` +
+                  `<button class="he-design-pick" data-he="design-pick" data-slug="${esc(d.slug)}" type="button">${esc(d.name)}</button>` +
+                  `<a class="he-link he-design-page" data-he="design-page" data-url="${esc(d.pageUrl)}" href="#" role="button">${esc(t('he.design.galleryLink'))}</a>` +
+                  `</div>`,
+              )
+              .join('')}</div>`
+          : '';
         return `
           <div class="he-q">${esc(t('he.design.title'))}</div>
           <div class="he-hint">${esc(t('he.design.galleryHint'))}
             <a class="he-link" data-he="design-gallery" href="#" role="button">${esc(t('he.design.galleryLink'))}</a>
           </div>
+          ${rows}
           <input class="he-input" data-he-field="design" type="text" placeholder="${esc(t('he.design.input'))}" />
           ${footer(
             backBtn() +
               `<button class="he-btn he-ghost" data-he="design-skip" type="button">${esc(t('he.design.skip'))}</button>` +
               `<button class="he-btn he-primary" data-he="design-submit" type="button">${esc(t('he.continue'))}</button>`,
           )}`;
+      }
 
       case 'fetching-design':
         return spinner(t('he.fetching'));
 
-      case 'style-tone':
+      case 'style-tone': {
+        const mode = state.mode ?? 'auto';
+        const curPurpose = state.purpose ?? 'report';
+        const purposeOpts = (['presentation', 'report', 'landing', 'blog', 'portfolio', 'proposal', 'custom'] as const)
+          .map((p) => `<option value="${p}"${p === curPurpose ? ' selected' : ''}>${esc(t(`he.purpose.${p}`))}</option>`)
+          .join('');
+        const sel = (fieldName: string, opts: ReadonlyArray<readonly [string, string]>, cur?: string) =>
+          `<select class="he-select" data-he-field="${fieldName}">` +
+          opts.map(([v, label]) => `<option value="${v}"${v === cur ? ' selected' : ''}>${esc(label)}</option>`).join('') +
+          `</select>`;
+        const detail =
+          mode === 'detail'
+            ? `
+          <label class="he-row"><span>${esc(t('he.detail.density'))}</span>${sel('density', [['compact', 'compact'], ['normal', 'normal'], ['roomy', 'roomy']], state.density)}</label>
+          <label class="he-row"><span>${esc(t('he.detail.width'))}</span>${sel('readable-width', [['narrow', 'narrow'], ['normal', 'normal'], ['wide', 'wide']], state.readableWidth)}</label>
+          <label class="he-row he-check"><input type="checkbox" data-he-field="interactive"${state.interactive ? ' checked' : ''}/> <span>${esc(t('he.detail.interactive'))}</span></label>`
+            : '';
         return `
           ${state.fetchError ? `<div class="he-error">${esc(t('he.error.fetch'))}</div>` : ''}
+          <div class="he-modes">
+            <button class="he-mode${mode === 'auto' ? ' he-mode-on' : ''}" data-he="mode-auto" type="button">${esc(t('he.mode.auto'))}</button>
+            <button class="he-mode${mode === 'detail' ? ' he-mode-on' : ''}" data-he="mode-detail" type="button">${esc(t('he.mode.detail'))}</button>
+          </div>
+          <div class="he-q">${esc(t('he.purpose.title'))}</div>
+          <select class="he-select" data-he-field="purpose">${purposeOpts}</select>
+          <input class="he-input he-custom-purpose" data-he-field="custom-purpose" type="text" value="${esc(state.customPurpose ?? '')}" placeholder="${esc(t('he.purpose.custom'))}"${curPurpose === 'custom' ? '' : ' hidden'}/>
+          ${detail}
           <div class="he-q">${esc(t('he.tone.title'))}</div>
           <textarea class="he-textarea" data-he-field="tone" rows="3" placeholder="${esc(t('he.tone.placeholder'))}"></textarea>
           ${modelPickerHtml()}
           ${footer(
             backBtn() + `<button class="he-btn he-primary" data-he="tone-submit" type="button">${esc(t('he.generate'))}</button>`,
           )}`;
+      }
 
       case 'token-warning':
         return `

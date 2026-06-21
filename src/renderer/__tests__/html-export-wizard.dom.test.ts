@@ -78,7 +78,10 @@ describe('mountHtmlExportWizard — full flow', () => {
     await flush();
     expect(deps.saveHtml).toHaveBeenCalledTimes(1);
     const saveArg = (deps.saveHtml as ReturnType<typeof vi.fn>).mock.calls[0][0];
-    expect(saveArg.html).toBe(GENERATED_HTML);
+    // AC12: the saved artifact carries the injected base CSS plus all original content.
+    expect(saveArg.html).toContain('data-notepad-ai-base="1"');
+    expect(saveArg.html).toContain('<h1>Hi</h1>');
+    expect(saveArg.html).toContain('<title>My Report</title>');
     expect(saveArg.defaultName).toBe('My Report.html'); // from AI <title> (doc is Untitled)
     expect(handle.getState().step).toBe('saved');
     expect(handle.getState().savedPath).toBe('/tmp/My Report.html');
@@ -259,5 +262,84 @@ describe('mountHtmlExportWizard — local model context badge + small-model noti
     await flush();
     const note = host.querySelector<HTMLElement>('[data-he-note="model"]');
     expect(note!.hidden).toBe(true);
+  });
+});
+
+describe('mountHtmlExportWizard — auto/detail mode + purpose (G005 AC7/AC8/AC9/AC10)', () => {
+  const toStyleTone = (host: HTMLElement) => {
+    click(host, 'orient-vertical');
+    click(host, 'layout-scroll');
+    click(host, 'design-skip');
+  };
+
+  it('defaults to auto mode (no detail knobs) and shows the purpose select', () => {
+    const { host } = setup();
+    toStyleTone(host);
+    expect(host.querySelector('[data-he-field="purpose"]')).toBeTruthy();
+    // auto mode hides the detail knobs
+    expect(host.querySelector('[data-he-field="density"]')).toBeNull();
+    expect(host.querySelector('[data-he-field="interactive"]')).toBeNull();
+  });
+
+  it('switching to detail reveals density/width/interactive knobs', () => {
+    const { host, handle } = setup();
+    toStyleTone(host);
+    click(host, 'mode-detail');
+    expect(handle.getState().mode).toBe('detail');
+    expect(host.querySelector('[data-he-field="density"]')).toBeTruthy();
+    expect(host.querySelector('[data-he-field="readable-width"]')).toBeTruthy();
+    expect(host.querySelector('[data-he-field="interactive"]')).toBeTruthy();
+  });
+
+  it('routes the chosen purpose + detail knobs into the generation prompt', async () => {
+    const { host, deps } = setup();
+    toStyleTone(host);
+    click(host, 'mode-detail');
+    (host.querySelector('[data-he-field="purpose"]') as HTMLSelectElement).value = 'landing';
+    (host.querySelector('[data-he-field="density"]') as HTMLSelectElement).value = 'roomy';
+    (host.querySelector('[data-he-field="interactive"]') as HTMLInputElement).checked = true;
+    setField(host, 'tone', 'bold and modern');
+    click(host, 'tone-submit');
+    await flush();
+    const prompt = (deps.aiGenerate as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+    expect(prompt).toContain('PURPOSE:');
+    expect(prompt).toContain('landing page');
+    expect(prompt).toContain('DENSITY: roomy');
+    expect(prompt).toContain('INTERACTIVITY: tasteful');
+  });
+});
+
+describe('mountHtmlExportWizard — getdesign list rows (G005 AC11)', () => {
+  const designs = [
+    { slug: 'claude', name: 'Claude', pageUrl: 'https://getdesign.md/claude' },
+    { slug: 'replicate', name: 'Replicate', pageUrl: 'https://getdesign.md/replicate' },
+  ];
+
+  it('renders a row per design, fills the input on pick, and opens the page link', async () => {
+    const openExternal = vi.fn();
+    const { host } = setup({
+      listDesigns: vi.fn(async () => ({ ok: true, designs })),
+      openExternal,
+    });
+    click(host, 'orient-vertical');
+    click(host, 'layout-scroll');
+    await flush(); // design list resolves + re-renders the choose-design step
+    const rows = host.querySelectorAll('.he-design-row');
+    expect(rows.length).toBe(2);
+
+    host.querySelector<HTMLButtonElement>('[data-he="design-pick"][data-slug="replicate"]')!.click();
+    expect(host.querySelector<HTMLInputElement>('[data-he-field="design"]')!.value).toBe('replicate');
+
+    host.querySelector<HTMLElement>('[data-he="design-page"][data-url="https://getdesign.md/claude"]')!.click();
+    expect(openExternal).toHaveBeenCalledWith('https://getdesign.md/claude');
+  });
+
+  it('falls back to the text input only when the catalog is empty/unavailable', async () => {
+    const { host } = setup({ listDesigns: vi.fn(async () => ({ ok: false, error: 'offline' })) });
+    click(host, 'orient-vertical');
+    click(host, 'layout-scroll');
+    await flush();
+    expect(host.querySelectorAll('.he-design-row').length).toBe(0);
+    expect(host.querySelector('[data-he-field="design"]')).toBeTruthy();
   });
 });

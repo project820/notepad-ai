@@ -1,9 +1,11 @@
+// @vitest-environment happy-dom
 import { describe, it, expect } from 'vitest';
 import {
   renderProjectWizardConsent,
   renderManualExplanationPrompt,
   renderEditableDraft,
 } from '../renderer/project-wizard-panel';
+import { setLocale } from '../renderer/i18n';
 
 describe('project wizard panel render helpers', () => {
   it('renders consent actions without writing Overview.md', () => {
@@ -36,5 +38,20 @@ describe('project wizard panel render helpers', () => {
     const html = renderEditableDraft('</textarea><script>alert("x")</script>');
     expect(html).toContain('&lt;/textarea&gt;&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
     expect(html).not.toContain('</textarea><script>alert("x")</script>');
+  });
+
+  it('localizes the consent panel to the active locale (follows language setting)', () => {
+    setLocale('ko');
+    try {
+      const html = renderProjectWizardConsent('/Users/m5max/Downloads');
+      expect(html).toContain('설정 시작');
+      expect(html).toContain('이 폴더에서는 묻지 않기');
+      expect(html).toContain('<strong>/Users/m5max/Downloads</strong>');
+      expect(html).not.toContain('Start setup');
+      const ja = (setLocale('ja'), renderManualExplanationPrompt('purpose'));
+      expect(ja).toContain('このプロジェクトやフォルダー');
+    } finally {
+      setLocale('en');
+    }
   });
 });

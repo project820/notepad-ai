@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
   htmlExportReducer,
   initialHtmlExportState,
+  resolvePurposeConfig,
+  HTML_PURPOSE_PRESETS,
   type HtmlExportEvent,
   type HtmlExportState,
   type LayoutKind,
@@ -164,5 +166,80 @@ describe('htmlExportReducer — generate, save, and open-saved', () => {
 
   it('CANCEL resets to idle from anywhere', () => {
     expect(htmlExportReducer(generated, { type: 'CANCEL' }).step).toBe('idle');
+  });
+});
+
+describe('htmlExportReducer — mode + purpose config (G005 AC7/AC8/AC9/AC10)', () => {
+  it('SET_MODE stores the entry mode without changing the step', () => {
+    const s1 = run([{ type: 'START' }, { type: 'SET_MODE', mode: 'detail' }]);
+    expect(s1.mode).toBe('detail');
+    expect(s1.step).toBe('choose-orientation');
+  });
+
+  it('START preserves a previously chosen mode', () => {
+    const s1 = htmlExportReducer({ step: 'idle', mode: 'detail' }, { type: 'START' });
+    expect(s1.mode).toBe('detail');
+    expect(s1.step).toBe('choose-orientation');
+  });
+
+  it('SUBMIT_TONE carries purpose + detail knobs into the generating state', () => {
+    const base = run([
+      { type: 'START' },
+      { type: 'SELECT_ORIENTATION', orientation: 'vertical' },
+      { type: 'SELECT_LAYOUT', layout: 'scroll' },
+      { type: 'SKIP_DESIGN' },
+    ]);
+    const gen = htmlExportReducer(base, {
+      type: 'SUBMIT_TONE',
+      tone: 't',
+      purpose: 'landing',
+      density: 'roomy',
+      readableWidth: 'wide',
+      interactive: true,
+    });
+    expect(gen.step).toBe('generating');
+    expect(gen.purpose).toBe('landing');
+    expect(gen.density).toBe('roomy');
+    expect(gen.readableWidth).toBe('wide');
+    expect(gen.interactive).toBe(true);
+  });
+
+  it('regression: SUBMIT_TONE still works with only a tone (no config)', () => {
+    const base = run([
+      { type: 'START' },
+      { type: 'SELECT_ORIENTATION', orientation: 'vertical' },
+      { type: 'SELECT_LAYOUT', layout: 'scroll' },
+      { type: 'SKIP_DESIGN' },
+    ]);
+    const gen = htmlExportReducer(base, { type: 'SUBMIT_TONE', tone: 'minimal' });
+    expect(gen.step).toBe('generating');
+    expect(gen.tone).toBe('minimal');
+  });
+});
+
+describe('resolvePurposeConfig (G005 AC10 read-good defaults)', () => {
+  it('applies the preset defaults for a known purpose', () => {
+    const c = resolvePurposeConfig({ purpose: 'presentation' });
+    expect(c.purpose).toBe('presentation');
+    expect(c.density).toBe(HTML_PURPOSE_PRESETS.presentation.density);
+    expect(c.readableWidth).toBe(HTML_PURPOSE_PRESETS.presentation.readableWidth);
+    expect(c.interactive).toBe(HTML_PURPOSE_PRESETS.presentation.interactive);
+    expect(c.brief.length).toBeGreaterThan(10);
+  });
+
+  it('detail overrides win over the purpose default', () => {
+    const c = resolvePurposeConfig({ purpose: 'report', density: 'roomy', interactive: true });
+    expect(c.density).toBe('roomy');
+    expect(c.interactive).toBe(true);
+  });
+
+  it('custom purpose uses the user free-text as the brief with balanced defaults', () => {
+    const c = resolvePurposeConfig({ purpose: 'custom', customPurpose: 'an interactive recipe card' });
+    expect(c.purpose).toBe('custom');
+    expect(c.brief).toContain('interactive recipe card');
+  });
+
+  it('defaults to report when no purpose is given', () => {
+    expect(resolvePurposeConfig({}).purpose).toBe('report');
   });
 });
