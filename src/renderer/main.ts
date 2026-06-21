@@ -127,7 +127,7 @@ type Api = {
   saveHtml: (args: { html: string; defaultName?: string }) => Promise<{ saved: boolean; filePath?: string }>;
   openSavedHtml: (filePath: string) => Promise<{ opened: boolean; error?: string }>;
   mdHandlerStatus: () => Promise<{ supported: boolean; registered?: boolean }>;
-  registerMdHandler: () => Promise<{ ok: boolean; registered?: boolean; error?: string }>;
+  registerMdHandler: () => Promise<{ ok: boolean; registered?: boolean; defaultSet?: boolean; error?: string }>;
 };
 
 declare global {

@@ -4,6 +4,8 @@ import {
   isMdHandlerSupported,
   bundlePathFromExecPath,
   buildLsRegisterTarget,
+  buildApplyDefaultHandlerCommand,
+  MARKDOWN_EXTENSIONS,
   LSREGISTER_PATH,
 } from '../main/md-handler';
 
@@ -95,5 +97,25 @@ describe('buildLsRegisterTarget (idempotent, bundle-only)', () => {
   it('points at the system Launch Services lsregister tool', () => {
     expect(LSREGISTER_PATH).toContain('LaunchServices.framework');
     expect(LSREGISTER_PATH.endsWith('/lsregister')).toBe(true);
+  });
+});
+
+describe('buildApplyDefaultHandlerCommand (attempt set + read back the real default)', () => {
+  it('drives Launch Services via AppleScriptObjC and reads the resolved handler', () => {
+    const c = buildApplyDefaultHandlerCommand('/Applications/Notepad AI.app');
+    expect(c.command).toBe('/usr/bin/osascript');
+    expect(c.args[0]).toBe('-e');
+    // app path passed via argv (no shell, no string escaping needed).
+    expect(c.args[c.args.length - 1]).toBe('/Applications/Notepad AI.app');
+    const script = c.args[1];
+    // ASOC can load UniformTypeIdentifiers / UTType (JXA cannot).
+    expect(script).toContain('use framework "UniformTypeIdentifiers"');
+    expect(script).toContain('UTType');
+    // attempts the modern setter…
+    expect(script).toContain('setDefaultApplicationAtURL:appURL toOpenContentType:ut');
+    // …then reads the resolved default back so the caller can verify success.
+    expect(script).toContain('URLForApplicationToOpenContentType:utmd');
+    expect(script).toContain('bundleIdentifier');
+    for (const ext of MARKDOWN_EXTENSIONS) expect(script).toContain(`"${ext}"`);
   });
 });

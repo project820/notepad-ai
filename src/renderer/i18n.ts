@@ -220,9 +220,10 @@ const DICTS: Record<Locale, Dict> = {
     'he.error.save': 'Could not save the file. Please try again.',
     // v0.2 — settings: default .md editor
     'settings.mdHandler.title': 'Default .md editor',
-    'settings.mdHandler.desc': 'Register Notepad AI as a Markdown opener. An unsigned app cannot be set as the system default automatically — register here, then set it once in Finder.',
+    'settings.mdHandler.desc': 'Click to make Notepad AI open your Markdown files. If macOS blocks the automatic change (this build is unsigned), the exact one-time Finder steps will appear.',
     'settings.mdHandler.button': 'Set as default .md editor',
-    'settings.mdHandler.registered': 'Registered. To make it the default: in Finder, right-click any .md → Get Info → "Open with" → Notepad AI → "Change All".',
+    'settings.mdHandler.registered': 'Done — Notepad AI is now your default .md editor. Double-click any .md file to open it here.',
+    'settings.mdHandler.partial': 'Added to “Open With”, but the default could not be set automatically. In Finder: right-click a .md → Get Info → “Open with” → Notepad AI → “Change All”.',
     'settings.mdHandler.unsupported': 'Not supported on this OS/build',
     // v0.4 — local AI providers (Ollama / LM Studio) + small-context HTML notice
     'settings.local.urlLabel': 'Server URL',
@@ -433,9 +434,10 @@ const DICTS: Record<Locale, Dict> = {
     'he.error.save': '파일을 저장하지 못했습니다. 다시 시도해주세요.',
     // v0.2 — settings: default .md editor
     'settings.mdHandler.title': '기본 .md 편집기',
-    'settings.mdHandler.desc': 'Notepad AI를 마크다운 열기 앱으로 등록합니다. 무서명 앱은 macOS가 자동 기본 지정을 막아서, 등록 후 Finder에서 한 번만 지정하면 됩니다.',
+    'settings.mdHandler.desc': '클릭하면 Notepad AI로 마크다운 파일을 엽니다. macOS가 자동 변경을 막으면(미서명 빌드) Finder에서 한 번만 하는 방법을 정확히 안내합니다.',
     'settings.mdHandler.button': '기본 .md 편집기로 설정',
-    'settings.mdHandler.registered': '등록됨. 기본으로 쓰려면 Finder에서 .md 파일 우클릭 → 정보 가져오기 → "다음으로 열기" → Notepad AI → "모두 변경".',
+    'settings.mdHandler.registered': '완료 — 이제 Notepad AI가 기본 .md 편집기입니다. .md 파일을 더블클릭하면 여기서 열립니다.',
+    'settings.mdHandler.partial': '"다음으로 열기" 목록에는 추가됐지만 기본 지정이 자동으로 되지 않았어요. Finder에서 .md 우클릭 → 정보 가져오기 → "다음으로 열기" → Notepad AI → "모두 변경".',
     'settings.mdHandler.unsupported': '이 OS/빌드에서는 지원되지 않습니다',
     // v0.4 — local AI providers (Ollama / LM Studio) + small-context HTML notice
     'settings.local.urlLabel': '서버 URL',
@@ -506,7 +508,7 @@ const DICTS: Record<Locale, Dict> = {
     'he.back': '返回', 'he.cancel': '取消', 'he.continue': '继续', 'he.generate': '生成', 'he.fetching': '正在获取设计…',
     'he.design.galleryLink': '打开 getdesign.md', 'he.error.open': '无法打开已保存的文件。文件仍保存在磁盘上。', 'he.error.save': '无法保存文件。请重试。',
     // v0.2 — settings: default .md editor
-    'settings.mdHandler.title': '默认 .md 编辑器', 'settings.mdHandler.desc': '将 Notepad AI 注册为 Markdown 打开方式。未签名应用无法自动设为系统默认——先注册，再在访达中手动设置一次。', 'settings.mdHandler.button': '设为默认 .md 编辑器', 'settings.mdHandler.registered': '已注册。设为默认：在访达中右键任意 .md → 显示简介 → “打开方式” → Notepad AI → “全部更改”。', 'settings.mdHandler.unsupported': '此操作系统/版本不支持',
+    'settings.mdHandler.title': '默认 .md 编辑器', 'settings.mdHandler.desc': '点击让 Notepad AI 打开你的 Markdown 文件。若 macOS 阻止自动更改（未签名版本），将显示一次性的访达操作步骤。', 'settings.mdHandler.button': '设为默认 .md 编辑器', 'settings.mdHandler.registered': '完成——Notepad AI 现在是你的默认 .md 编辑器。双击任意 .md 文件即可在此打开。', 'settings.mdHandler.partial': '已加入“打开方式”，但无法自动设为默认。请在访达中右键 .md → 显示简介 → “打开方式” → Notepad AI → “全部更改”。', 'settings.mdHandler.unsupported': '此操作系统/版本不支持',
     // v0.4 — local AI providers (Ollama / LM Studio) + small-context HTML notice
     'settings.local.urlLabel': '服务器 URL', 'settings.local.save': '保存 URL', 'settings.local.reset': '默认值', 'settings.local.modelsFound': '可用模型', 'settings.local.hint': '在本机运行 — 无需 API 密钥。', 'settings.local.noModels': '未找到本地模型。请启动 Ollama 或在 LM Studio 中加载模型。', 'he.smallContext': '该模型的上下文窗口较小 — 长文档可能会被削弱或截断。',
   },
@@ -570,7 +572,7 @@ const DICTS: Record<Locale, Dict> = {
     'he.back': '返回', 'he.cancel': '取消', 'he.continue': '繼續', 'he.generate': '產生', 'he.fetching': '正在取得設計…',
     'he.design.galleryLink': '開啟 getdesign.md', 'he.error.open': '無法開啟已儲存的檔案。檔案仍儲存在磁碟上。', 'he.error.save': '無法儲存檔案。請重試。',
     // v0.2 — settings: default .md editor
-    'settings.mdHandler.title': '預設 .md 編輯器', 'settings.mdHandler.desc': '將 Notepad AI 註冊為 Markdown 開啟方式。未簽署應用無法自動設為系統預設——先註冊，再在 Finder 手動設定一次。', 'settings.mdHandler.button': '設為預設 .md 編輯器', 'settings.mdHandler.registered': '已註冊。設為預設：在 Finder 右鍵任一 .md → 顯示簡介 → 「開啟方式」→ Notepad AI →「全部變更」。', 'settings.mdHandler.unsupported': '此作業系統/版本不支援',
+    'settings.mdHandler.title': '預設 .md 編輯器', 'settings.mdHandler.desc': '點擊讓 Notepad AI 開啟你的 Markdown 檔案。若 macOS 阻止自動變更（未簽署版本），會顯示一次性的 Finder 操作步驟。', 'settings.mdHandler.button': '設為預設 .md 編輯器', 'settings.mdHandler.registered': '完成——Notepad AI 現在是你的預設 .md 編輯器。雙擊任一 .md 檔案即可在此開啟。', 'settings.mdHandler.partial': '已加入「開啟方式」，但無法自動設為預設。請在 Finder 右鍵 .md → 顯示簡介 → 「開啟方式」→ Notepad AI →「全部變更」。', 'settings.mdHandler.unsupported': '此作業系統/版本不支援',
     // v0.4 — local AI providers (Ollama / LM Studio) + small-context HTML notice
     'settings.local.urlLabel': '伺服器 URL', 'settings.local.save': '儲存 URL', 'settings.local.reset': '預設值', 'settings.local.modelsFound': '可用模型', 'settings.local.hint': '在本機執行 — 不需要 API 金鑰。', 'settings.local.noModels': '找不到本機模型。請啟動 Ollama 或在 LM Studio 中載入模型。', 'he.smallContext': '此模型的上下文視窗較小 — 長文件可能會被削弱或截斷。',
   },
@@ -634,7 +636,7 @@ const DICTS: Record<Locale, Dict> = {
     'he.back': '戻る', 'he.cancel': 'キャンセル', 'he.continue': '続ける', 'he.generate': '生成', 'he.fetching': 'デザインを取得中…',
     'he.design.galleryLink': 'getdesign.md を開く', 'he.error.open': '保存したファイルを開けませんでした。ファイルはディスクに保存されています。', 'he.error.save': 'ファイルを保存できませんでした。もう一度お試しください。',
     // v0.2 — settings: default .md editor
-    'settings.mdHandler.title': '既定の .md エディター', 'settings.mdHandler.desc': 'Notepad AI を Markdown を開くアプリとして登録します。未署名アプリは自動で既定にできないため、登録後 Finder で一度設定してください。', 'settings.mdHandler.button': '既定の .md エディターに設定', 'settings.mdHandler.registered': '登録しました。既定にするには Finder で .md を右クリック → 情報を見る →「このアプリケーションで開く」→ Notepad AI →「すべてを変更」。', 'settings.mdHandler.unsupported': 'この OS/ビルドでは未対応',
+    'settings.mdHandler.title': '既定の .md エディター', 'settings.mdHandler.desc': 'クリックで Notepad AI が Markdown ファイルを開くようにします。macOS が自動変更をブロックする場合（未署名ビルド）、一度だけ行う Finder の手順を表示します。', 'settings.mdHandler.button': '既定の .md エディターに設定', 'settings.mdHandler.registered': '完了 — Notepad AI が既定の .md エディターになりました。.md ファイルをダブルクリックするとここで開きます。', 'settings.mdHandler.partial': '「このアプリケーションで開く」に追加しましたが、既定の自動設定はできませんでした。Finder で .md を右クリック → 情報を見る →「このアプリケーションで開く」→ Notepad AI →「すべてを変更」。', 'settings.mdHandler.unsupported': 'この OS/ビルドでは未対応',
     // v0.4 — local AI providers (Ollama / LM Studio) + small-context HTML notice
     'settings.local.urlLabel': 'サーバー URL', 'settings.local.save': 'URL を保存', 'settings.local.reset': '既定値', 'settings.local.modelsFound': '利用可能なモデル', 'settings.local.hint': 'お使いのマシンで実行 — API キーは不要です。', 'settings.local.noModels': 'ローカルモデルが見つかりません。Ollama を起動するか、LM Studio でモデルを読み込んでください。', 'he.smallContext': 'このモデルはコンテキストウィンドウが小さいため、長い文書は品質が低下したり切り詰められる場合があります。',
   },

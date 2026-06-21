@@ -38,7 +38,7 @@ import {
   normalizeDesignMdUrl,
 } from './safe-external';
 import { checkForUpdate } from './update-check';
-import { mdHandlerStatus, buildLsRegisterTarget, bundlePathFromExecPath } from './md-handler';
+import { mdHandlerStatus, buildLsRegisterTarget, bundlePathFromExecPath, buildApplyDefaultHandlerCommand } from './md-handler';
 import { OPENABLE_DOCUMENT_EXTS, CONVERTIBLE_EXTS as CONVERTIBLE_EXT_LIST } from '../shared/file-types';
 import {
   listDirectory,
@@ -920,13 +920,35 @@ ipcMain.handle('os:register-md-handler', async () => {
   // packaged darwin so dev / non-darwin returns an explicit unsupported state.
   const { supported } = mdHandlerStatus({ isPackaged: app.isPackaged, platform: process.platform });
   if (!supported) return { ok: false, error: 'unsupported' };
-  const target = buildLsRegisterTarget(bundlePathFromExecPath(app.getPath('exe')));
-  if (!target) return { ok: false, error: 'bundle-not-found' };
-  try {
-    await new Promise<void>((resolve, reject) => {
-      execFile(target.command, target.args, (err) => (err ? reject(err) : resolve()));
+  const bundlePath = bundlePathFromExecPath(app.getPath('exe'));
+  const target = buildLsRegisterTarget(bundlePath);
+  if (!target || !bundlePath) return { ok: false, error: 'bundle-not-found' };
+  const runVoid = (cmd: string, args: string[]): Promise<void> =>
+    new Promise((resolve, reject) => {
+      execFile(cmd, args, (err) => (err ? reject(err) : resolve()));
     });
-    return { ok: true, registered: true };
+  const runCapture = (cmd: string, args: string[]): Promise<string> =>
+    new Promise((resolve, reject) => {
+      execFile(cmd, args, (err, stdout) => (err ? reject(err) : resolve(String(stdout))));
+    });
+  const APP_BUNDLE_ID = 'com.notepad-ai.app'; // = build.appId
+  try {
+    // 1) Register the bundle so Launch Services lists it under "Open With…".
+    await runVoid(target.command, target.args);
+    // 2) Best-effort: attempt to set the default AND read back the resolved
+    //    handler. macOS may refuse the programmatic write (unsigned app / not a
+    //    trusted GUI context), so we trust the READ-BACK, not the attempt: only
+    //    report defaultSet when our bundle id is actually the resolved default.
+    let defaultSet = false;
+    try {
+      const apply = buildApplyDefaultHandlerCommand(bundlePath);
+      const resolved = (await runCapture(apply.command, apply.args)).trim();
+      defaultSet = resolved === APP_BUNDLE_ID;
+      console.log(`[md-handler] registered; default resolves to "${resolved}" (ours=${defaultSet})`);
+    } catch (e) {
+      console.log(`[md-handler] default check failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    return { ok: true, registered: true, defaultSet };
   } catch (e: any) {
     return { ok: false, error: e?.message ?? String(e) };
   }

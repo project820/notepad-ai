@@ -238,7 +238,14 @@ function mountMdHandlerSection(host: HTMLElement) {
       try {
         const r = await window.api.registerMdHandler();
         if (r.ok && r.registered) {
-          showRegistered();
+          // defaultSet === false → registered but the default couldn't be set
+          // automatically; guide the one-time Finder fallback instead.
+          if (r.defaultSet === false) {
+            setStatus(t('settings.mdHandler.partial'), true);
+            btn.disabled = true;
+          } else {
+            showRegistered();
+          }
         } else if (r.error === 'unsupported') {
           showUnsupported();
         } else {

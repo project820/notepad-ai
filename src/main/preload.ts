@@ -193,7 +193,7 @@ const api = {
   // OS integration (⑥) — default .md editor handler
   mdHandlerStatus: (): Promise<{ supported: boolean; registered?: boolean }> =>
     ipcRenderer.invoke('os:md-handler-status'),
-  registerMdHandler: (): Promise<{ ok: boolean; registered?: boolean; error?: string }> =>
+  registerMdHandler: (): Promise<{ ok: boolean; registered?: boolean; defaultSet?: boolean; error?: string }> =>
     ipcRenderer.invoke('os:register-md-handler'),
 };
 

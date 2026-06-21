@@ -84,3 +84,57 @@ export function buildLsRegisterTarget(bundlePath: unknown): LsRegisterTarget | n
   if (!p.endsWith('.app')) return null; // must be an app bundle
   return { command: LSREGISTER_PATH, args: ['-f', p] };
 }
+
+/** The markdown filename extensions we claim (mirrors CFBundleDocumentTypes). */
+export const MARKDOWN_EXTENSIONS = ['md', 'markdown', 'mdx'] as const;
+
+/**
+ * Build the command that (best-effort) sets this app as the DEFAULT markdown
+ * handler AND reports the bundle id that is actually the default afterwards.
+ *
+ * Why this shape (hard-won on macOS 26):
+ *   - `lsregister` only makes the app a candidate ("Open With…"); it never sets
+ *     the default. That was the original bug.
+ *   - The old `LSSetDefaultRoleHandlerForContentType` returns noErr but is a
+ *     silent no-op on current macOS.
+ *   - The modern `NSWorkspace.setDefaultApplicationAtURL:toOpenContentType:` is
+ *     the only real setter, but Launch Services refuses the write from a
+ *     CLI/background (and for unsigned apps) — so it may not persist.
+ * Therefore we ATTEMPT the modern set and then READ BACK the resolved default,
+ * returning its bundle id. The caller compares it to our own id to decide whether
+ * to report success or guide the one-time Finder step. AppleScriptObjC is used
+ * because it can load `UniformTypeIdentifiers`/`UTType` (JXA cannot).
+ *
+ * `appBundlePath` is passed via argv (no shell, no string-escaping needed).
+ */
+export function buildApplyDefaultHandlerCommand(appBundlePath: string): LsRegisterTarget {
+  const extList = MARKDOWN_EXTENSIONS.map((e) => `"${e}"`).join(', ');
+  const cur = 'current application';
+  const script = [
+    'use framework "AppKit"',
+    'use framework "UniformTypeIdentifiers"',
+    'use scripting additions',
+    'on run argv',
+    '  set appPath to item 1 of argv',
+    `  set ws to ${cur}'s NSWorkspace's sharedWorkspace`,
+    `  set appURL to ${cur}'s NSURL's fileURLWithPath:appPath`,
+    `  repeat with e in {${extList}}`,
+    `    set ut to ${cur}'s UTType's typeWithFilenameExtension:(e as text)`,
+    '    if ut is not missing value then',
+    "      ws's setDefaultApplicationAtURL:appURL toOpenContentType:ut completionHandler:(missing value)",
+    '    end if',
+    '  end repeat',
+    '  delay 1',
+    `  set utmd to ${cur}'s UTType's typeWithFilenameExtension:"md"`,
+    '  if utmd is missing value then return "no-uti"',
+    "  set u to ws's URLForApplicationToOpenContentType:utmd",
+    '  if u is missing value then return "none"',
+    `  set b to ${cur}'s NSBundle's bundleWithURL:u`,
+    '  if b is missing value then return "no-bundle"',
+    "  set bid to b's bundleIdentifier",
+    '  if bid is missing value then return "no-id"',
+    '  return bid as text',
+    'end run',
+  ].join('\n');
+  return { command: '/usr/bin/osascript', args: ['-e', script, appBundlePath] };
+}
