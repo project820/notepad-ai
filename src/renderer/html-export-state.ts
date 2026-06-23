@@ -1,19 +1,25 @@
 /**
- * html-export-state.ts — pure reducer for the HTML-export wizard (G004 / ⑤).
+ * html-export-state.ts — pure reducer for the HTML-export wizard (G002).
  *
  * No side effects, no DOM, no IPC: `htmlExportReducer(state, event) -> state`.
- * The controller (`html-export-wizard.ts`) owns fetch/save/open side effects and
- * feeds their results back in as events. All four orientation×layout combos are
- * reachable (including vertical + slides). A failed design fetch falls back to
- * the tone-only path (style-tone) and never jumps straight to generation.
+ * The controller (`html-export-wizard.ts`) owns fetch/AI side effects and feeds
+ * their results back in as events. The user makes four core selections —
+ * orientation, layout, a design.md, and summary/chart strength (A/B/C/D) — plus
+ * a free-text requirement; "generate" composes them into a single content-model
+ * prompt. A design is mandatory: a failed fetch keeps the user on choose-design,
+ * and the only no-fetch path forward is an explicit "use the default design".
+ * The deterministic HTML renderer lands later (G004); for now AI_DONE holds the
+ * validated ContentModel rather than authored HTML.
  */
+
+import type { SummaryChartMode, DesignSource, ContentModel } from './html-export-model';
 
 export type Orientation = 'vertical' | 'horizontal';
 export type LayoutKind = 'scroll' | 'slides';
 
-/** Entry mode: auto = minimal picks + read-good defaults; detail = extra knobs. */
+/** Entry mode for the advanced panel: auto = read-good defaults; detail = extra knobs. */
 export type HtmlExportMode = 'auto' | 'detail';
-/** Generation purpose — drives read-good defaults (density/width/typography). */
+/** Generation purpose — an optional ADVANCED knob (no longer part of the 4-core flow). */
 export type HtmlPurpose =
   | 'presentation'
   | 'report'
@@ -22,17 +28,9 @@ export type HtmlPurpose =
   | 'portfolio'
   | 'proposal'
   | 'custom';
-/** Detail-mode density + reading-width knobs (auto applies the purpose default). */
+/** Optional advanced density + reading-width knobs. */
 export type Density = 'compact' | 'normal' | 'roomy';
 export type ReadableWidth = 'narrow' | 'normal' | 'wide';
-
-/** Resolved design context once the design step is done. */
-export type DesignSource =
-  | { kind: 'skipped' }
-  | { kind: 'fetched'; rawUrl: string; designMd: string };
-
-/** The generated artifact held in renderer memory (never inserted into the doc). */
-export type GeneratedHtml = { html: string; title: string; bytes: number };
 
 export type HtmlExportStep =
   | 'idle'
@@ -40,38 +38,40 @@ export type HtmlExportStep =
   | 'choose-layout'
   | 'choose-design'
   | 'fetching-design'
-  | 'style-tone'
+  | 'summary-requirement'
   | 'token-warning'
   | 'generating'
   | 'generated'
-  | 'saving'
-  | 'saved'
-  | 'opening-saved'
   | 'error';
 
 export type HtmlExportState = {
   step: HtmlExportStep;
   orientation?: Orientation;
   layout?: LayoutKind;
-  /** Present only when a DESIGN.md was successfully fetched. */
+  /** Present only when a design.md was successfully fetched. */
   design?: { rawUrl: string; designMd: string };
-  /** Set when the most recent design fetch failed (drives the tone-only fallback UI). */
+  /** Provenance of the chosen design (drives the request's designSource). */
+  designSource?: DesignSource;
+  /** Set when the most recent design fetch failed (keeps the user on choose-design). */
   fetchError?: string;
-  tone?: string;
-  /** Auto vs detail entry; auto fills read-good defaults for the rest. */
+  /** Core selection: summary/chart strength A/B/C/D. */
+  summaryChartMode?: SummaryChartMode;
+  /** Core selection: the user's free-text requirement (renamed from the old 'tone'). */
+  freeRequirement?: string;
+  /** Advanced (optional): auto vs detail entry; auto fills read-good defaults. */
   mode?: HtmlExportMode;
-  /** Generation purpose preset (or 'custom' with customPurpose text). */
+  /** Advanced (optional): purpose preset (or 'custom' with customPurpose text). */
   purpose?: HtmlPurpose;
   customPurpose?: string;
-  /** Detail-mode overrides (omitted → purpose default). */
+  /** Advanced (optional): detail-mode overrides. */
   density?: Density;
   readableWidth?: ReadableWidth;
   interactive?: boolean;
-  /** Tone awaiting an explicit token-warning confirmation before generation. */
-  pendingTone?: string;
-  generated?: GeneratedHtml;
-  savedPath?: string;
-  /** Error message for the error step, or a non-fatal open error shown on the saved card. */
+  /** Free requirement awaiting an explicit token-warning confirmation before generation. */
+  pendingRequirement?: string;
+  /** The validated content model held in renderer memory (the AI_DONE result). */
+  contentModel?: ContentModel;
+  /** Error message for the error step. */
   error?: string;
 };
 
@@ -83,10 +83,12 @@ export type HtmlExportEvent =
   | { type: 'SUBMIT_DESIGN'; input: string }
   | { type: 'FETCH_OK'; rawUrl: string; designMd: string }
   | { type: 'FETCH_FAIL'; error: string }
-  | { type: 'SKIP_DESIGN' }
+  | { type: 'USE_DEFAULT_DESIGN' }
+  | { type: 'SELECT_SUMMARY_CHART'; mode: SummaryChartMode }
   | {
-      type: 'SUBMIT_TONE';
-      tone: string;
+      type: 'SUBMIT_REQUIREMENT';
+      freeRequirement: string;
+      summaryChartMode: SummaryChartMode;
       tokenWarning?: boolean;
       purpose?: HtmlPurpose;
       customPurpose?: string;
@@ -95,15 +97,8 @@ export type HtmlExportEvent =
       interactive?: boolean;
     }
   | { type: 'CONFIRM_TOKEN_WARNING' }
-  | { type: 'AI_DONE'; html: string; title: string; bytes: number }
+  | { type: 'AI_DONE'; model: ContentModel }
   | { type: 'AI_ERROR'; error: string }
-  | { type: 'DOWNLOAD' }
-  | { type: 'SAVE_OK'; savedPath: string }
-  | { type: 'SAVE_CANCEL' }
-  | { type: 'SAVE_ERROR'; error: string }
-  | { type: 'OPEN_SAVED' }
-  | { type: 'OPEN_OK' }
-  | { type: 'OPEN_ERROR'; error: string }
   | { type: 'BACK' }
   | { type: 'CANCEL' };
 
@@ -115,19 +110,16 @@ function back(state: HtmlExportState): HtmlExportState {
     case 'choose-layout':
       return { ...state, step: 'choose-orientation' };
     case 'choose-design':
-      return { ...state, step: 'choose-layout' };
-    case 'style-tone':
-      return { ...state, step: 'choose-design', fetchError: undefined };
+      return { ...state, step: 'choose-layout', fetchError: undefined };
+    case 'summary-requirement':
+      return { ...state, step: 'choose-design' };
     case 'token-warning':
-      return { ...state, step: 'style-tone' };
+      return { ...state, step: 'summary-requirement' };
     case 'generated':
-      return { ...state, step: 'style-tone' };
-    case 'saved':
-      // Result card is still meaningful — return to it.
-      return { ...state, step: 'generated', error: undefined };
+      return { ...state, step: 'summary-requirement' };
     case 'error':
-      // A save error keeps the artifact; a generation error sends us back to tone.
-      return { ...state, step: state.generated ? 'generated' : 'style-tone', error: undefined };
+      // The only error is a generation failure — return to the summary step.
+      return { ...state, step: 'summary-requirement', error: undefined };
     default:
       return state;
   }
@@ -158,24 +150,44 @@ export function htmlExportReducer(state: HtmlExportState, event: HtmlExportEvent
       if (state.step !== 'fetching-design') return state;
       return {
         ...state,
-        step: 'style-tone',
+        step: 'summary-requirement',
         design: { rawUrl: event.rawUrl, designMd: event.designMd },
+        designSource: 'getdesign',
         fetchError: undefined,
       };
 
     case 'FETCH_FAIL':
-      // Tone-only fallback — never proceeds directly to generation.
+      // design.md is mandatory: stay on choose-design with a visible error.
+      // NEVER silently proceed to the next step with no design.
       if (state.step !== 'fetching-design') return state;
-      return { ...state, step: 'style-tone', design: undefined, fetchError: event.error };
+      return {
+        ...state,
+        step: 'choose-design',
+        design: undefined,
+        designSource: undefined,
+        fetchError: event.error,
+      };
 
-    case 'SKIP_DESIGN':
+    case 'USE_DEFAULT_DESIGN':
+      // The only no-fetch path forward: an explicit choice of the built-in theme.
       if (state.step !== 'choose-design') return state;
-      return { ...state, step: 'style-tone', design: undefined, fetchError: undefined };
+      return {
+        ...state,
+        step: 'summary-requirement',
+        design: undefined,
+        designSource: 'default',
+        fetchError: undefined,
+      };
 
-    case 'SUBMIT_TONE': {
-      // Valid from style-tone (first run) or generated (regenerate).
-      if (state.step !== 'style-tone' && state.step !== 'generated') return state;
+    case 'SELECT_SUMMARY_CHART':
+      if (state.step !== 'summary-requirement') return state;
+      return { ...state, summaryChartMode: event.mode };
+
+    case 'SUBMIT_REQUIREMENT': {
+      // Valid from summary-requirement (first run) or generated (regenerate).
+      if (state.step !== 'summary-requirement' && state.step !== 'generated') return state;
       const cfg = {
+        summaryChartMode: event.summaryChartMode,
         purpose: event.purpose ?? state.purpose,
         customPurpose: event.customPurpose ?? state.customPurpose,
         density: event.density ?? state.density,
@@ -183,57 +195,39 @@ export function htmlExportReducer(state: HtmlExportState, event: HtmlExportEvent
         interactive: event.interactive ?? state.interactive,
       };
       if (event.tokenWarning) {
-        return { ...state, ...cfg, step: 'token-warning', tone: event.tone, pendingTone: event.tone };
+        return {
+          ...state,
+          ...cfg,
+          step: 'token-warning',
+          freeRequirement: event.freeRequirement,
+          pendingRequirement: event.freeRequirement,
+        };
       }
-      return { ...state, ...cfg, step: 'generating', tone: event.tone, pendingTone: undefined };
+      return {
+        ...state,
+        ...cfg,
+        step: 'generating',
+        freeRequirement: event.freeRequirement,
+        pendingRequirement: undefined,
+      };
     }
 
     case 'CONFIRM_TOKEN_WARNING':
       if (state.step !== 'token-warning') return state;
-      return { ...state, step: 'generating', tone: state.pendingTone ?? state.tone, pendingTone: undefined };
+      return {
+        ...state,
+        step: 'generating',
+        freeRequirement: state.pendingRequirement ?? state.freeRequirement,
+        pendingRequirement: undefined,
+      };
 
     case 'AI_DONE':
       if (state.step !== 'generating') return state;
-      return {
-        ...state,
-        step: 'generated',
-        generated: { html: event.html, title: event.title, bytes: event.bytes },
-        error: undefined,
-      };
+      return { ...state, step: 'generated', contentModel: event.model, error: undefined };
 
     case 'AI_ERROR':
       if (state.step !== 'generating') return state;
       return { ...state, step: 'error', error: event.error };
-
-    case 'DOWNLOAD':
-      if (state.step !== 'generated') return state;
-      return { ...state, step: 'saving' };
-
-    case 'SAVE_OK':
-      if (state.step !== 'saving') return state;
-      return { ...state, step: 'saved', savedPath: event.savedPath, error: undefined };
-
-    case 'SAVE_CANCEL':
-      // User dismissed the native save dialog — keep the generated artifact.
-      if (state.step !== 'saving') return state;
-      return { ...state, step: 'generated' };
-
-    case 'SAVE_ERROR':
-      if (state.step !== 'saving') return state;
-      return { ...state, step: 'error', error: event.error };
-
-    case 'OPEN_SAVED':
-      if (state.step !== 'saved') return state;
-      return { ...state, step: 'opening-saved', error: undefined };
-
-    case 'OPEN_OK':
-      if (state.step !== 'opening-saved') return state;
-      return { ...state, step: 'saved', error: undefined };
-
-    case 'OPEN_ERROR':
-      // The saved HTML is not lost — return to the saved card with a visible error.
-      if (state.step !== 'opening-saved') return state;
-      return { ...state, step: 'saved', error: event.error };
 
     case 'BACK':
       return back(state);

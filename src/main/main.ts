@@ -913,6 +913,37 @@ ipcMain.on('window:ready', (event) => {
 
 ipcMain.handle('update:check', async () => checkForUpdate(app.getVersion()));
 ipcMain.handle('app:version', () => app.getVersion());
+/**
+ * Convert an attached document (PDF/DOCX/HWP/XLSX) buffer to Markdown text so it
+ * can be fed to the AI as context. Reuses the same kordoc pipeline as file-open.
+ * Bounded (25 MiB) and never throws — returns an actionable error instead.
+ */
+ipcMain.handle('ai:convert-attachment', async (_e, payload: unknown) => {
+  const p = (payload ?? {}) as { base64?: unknown; ext?: unknown };
+  const ext = typeof p.ext === 'string' ? p.ext.toLowerCase() : '';
+  const base64 = typeof p.base64 === 'string' ? p.base64 : '';
+  if (!CONVERTIBLE_EXTS.has(ext)) return { ok: false, error: `Unsupported attachment type: ${ext || 'unknown'}` };
+  let buf: Buffer;
+  try {
+    buf = Buffer.from(base64, 'base64');
+  } catch {
+    return { ok: false, error: 'Could not read the attached file.' };
+  }
+  if (buf.length === 0) return { ok: false, error: 'The attached file is empty.' };
+  if (buf.length > 25 * 1024 * 1024) return { ok: false, error: 'Attached file is too large (max 25 MB).' };
+  try {
+    const nativeImport: (s: string) => Promise<any> = new Function('s', 'return import(s)') as any;
+    const kordoc = await nativeImport('kordoc');
+    const parseFn = kordoc.parse ?? kordoc.default?.parse;
+    if (typeof parseFn !== 'function') return { ok: false, error: 'Document converter unavailable.' };
+    const r = await parseFn(buf, { removeHeaderFooter: true });
+    if (r?.success && typeof r.markdown === 'string') return { ok: true, markdown: r.markdown };
+    const msg = ('error' in (r ?? {}) && (r as any).error?.message) || 'unknown error';
+    return { ok: false, error: `Could not convert ${ext.toUpperCase()}: ${msg}` };
+  } catch (e: any) {
+    return { ok: false, error: `Failed to convert ${ext.toUpperCase()}: ${e?.message ?? e}` };
+  }
+});
 ipcMain.handle('app:relaunch', () => {
   // Full restart so every renderer surface re-renders in the newly selected
   // language. Renderers flush their session snapshot before invoking this, so

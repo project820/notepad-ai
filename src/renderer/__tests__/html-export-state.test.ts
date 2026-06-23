@@ -9,167 +9,219 @@ import {
   type LayoutKind,
   type Orientation,
 } from '../html-export-state';
+import type { ContentModel, SummaryChartMode } from '../html-export-model';
 
 function run(events: HtmlExportEvent[], from: HtmlExportState = initialHtmlExportState): HtmlExportState {
   return events.reduce((state, event) => htmlExportReducer(state, event), from);
 }
 
-describe('htmlExportReducer — orientation × layout (all four combos)', () => {
-  const combos: Array<[Orientation, LayoutKind]> = [
-    ['vertical', 'scroll'],
-    ['vertical', 'slides'],
-    ['horizontal', 'scroll'],
-    ['horizontal', 'slides'],
-  ];
+const COMBOS: Array<[Orientation, LayoutKind]> = [
+  ['vertical', 'scroll'],
+  ['vertical', 'slides'],
+  ['horizontal', 'scroll'],
+  ['horizontal', 'slides'],
+];
 
-  for (const [orientation, layout] of combos) {
+/** Drive to choose-design for a combo. */
+function toDesign(orientation: Orientation, layout: LayoutKind): HtmlExportState {
+  return run([
+    { type: 'START' },
+    { type: 'SELECT_ORIENTATION', orientation },
+    { type: 'SELECT_LAYOUT', layout },
+  ]);
+}
+
+const MODEL: ContentModel = { title: 'Report', sections: [{ blocks: [{ kind: 'paragraph', text: 'hi' }] }] };
+
+describe('htmlExportReducer — orientation × layout reach the summary/requirement step (all four combos)', () => {
+  for (const [orientation, layout] of COMBOS) {
     it(`reaches choose-design for ${orientation} + ${layout}`, () => {
-      const state = run([
-        { type: 'START' },
-        { type: 'SELECT_ORIENTATION', orientation },
-        { type: 'SELECT_LAYOUT', layout },
-      ]);
+      const state = toDesign(orientation, layout);
       expect(state.step).toBe('choose-design');
       expect(state.orientation).toBe(orientation);
       expect(state.layout).toBe(layout);
     });
+
+    it(`reaches summary-requirement for ${orientation} + ${layout} (via default design)`, () => {
+      const state = htmlExportReducer(toDesign(orientation, layout), { type: 'USE_DEFAULT_DESIGN' });
+      expect(state.step).toBe('summary-requirement');
+      expect(state.orientation).toBe(orientation);
+      expect(state.layout).toBe(layout);
+      expect(state.designSource).toBe('default');
+    });
+
+    it(`reaches summary-requirement for ${orientation} + ${layout} (via fetched design)`, () => {
+      const fetching = htmlExportReducer(toDesign(orientation, layout), { type: 'SUBMIT_DESIGN', input: 'replicate' });
+      const state = htmlExportReducer(fetching, {
+        type: 'FETCH_OK',
+        rawUrl: 'https://raw/x/DESIGN.md',
+        designMd: '# tokens',
+      });
+      expect(state.step).toBe('summary-requirement');
+      expect(state.orientation).toBe(orientation);
+      expect(state.layout).toBe(layout);
+      expect(state.designSource).toBe('getdesign');
+      expect(state.design).toEqual({ rawUrl: 'https://raw/x/DESIGN.md', designMd: '# tokens' });
+    });
   }
 
   it('ignores out-of-order events (pure, no implicit jumps)', () => {
-    // A SELECT_LAYOUT before an orientation is chosen is a no-op.
     const state = run([{ type: 'START' }, { type: 'SELECT_LAYOUT', layout: 'scroll' }]);
     expect(state.step).toBe('choose-orientation');
   });
 });
 
-describe('htmlExportReducer — design fetch and tone-only fallback', () => {
-  const base = run([
-    { type: 'START' },
-    { type: 'SELECT_ORIENTATION', orientation: 'vertical' },
-    { type: 'SELECT_LAYOUT', layout: 'scroll' },
-  ]);
+describe('htmlExportReducer — design.md is mandatory (no silent skip)', () => {
+  const base = toDesign('vertical', 'scroll');
 
-  it('SUBMIT_DESIGN → fetching-design, FETCH_OK → style-tone with design', () => {
+  it('SUBMIT_DESIGN → fetching-design, FETCH_OK → summary-requirement with design', () => {
     const fetching = htmlExportReducer(base, { type: 'SUBMIT_DESIGN', input: 'replicate' });
     expect(fetching.step).toBe('fetching-design');
-    const tone = htmlExportReducer(fetching, {
+    const next = htmlExportReducer(fetching, {
       type: 'FETCH_OK',
       rawUrl: 'https://raw.githubusercontent.com/x/DESIGN.md',
       designMd: '# tokens',
     });
-    expect(tone.step).toBe('style-tone');
-    expect(tone.design).toEqual({ rawUrl: 'https://raw.githubusercontent.com/x/DESIGN.md', designMd: '# tokens' });
-    expect(tone.fetchError).toBeUndefined();
+    expect(next.step).toBe('summary-requirement');
+    expect(next.design).toEqual({ rawUrl: 'https://raw.githubusercontent.com/x/DESIGN.md', designMd: '# tokens' });
+    expect(next.designSource).toBe('getdesign');
+    expect(next.fetchError).toBeUndefined();
   });
 
-  it('FETCH_FAIL falls back to tone-only style-tone — never jumps to generating', () => {
+  it('FETCH_FAIL keeps the user on choose-design with an error — NEVER advances to generation', () => {
     const fetching = htmlExportReducer(base, { type: 'SUBMIT_DESIGN', input: 'replicate' });
     const failed = htmlExportReducer(fetching, { type: 'FETCH_FAIL', error: 'offline' });
-    expect(failed.step).toBe('style-tone');
+    expect(failed.step).toBe('choose-design');
+    expect(failed.step).not.toBe('summary-requirement');
     expect(failed.step).not.toBe('generating');
     expect(failed.design).toBeUndefined();
+    expect(failed.designSource).toBeUndefined();
     expect(failed.fetchError).toBe('offline');
   });
 
-  it('SKIP_DESIGN → style-tone with no design', () => {
-    const skipped = htmlExportReducer(base, { type: 'SKIP_DESIGN' });
-    expect(skipped.step).toBe('style-tone');
-    expect(skipped.design).toBeUndefined();
-    expect(skipped.fetchError).toBeUndefined();
+  it('USE_DEFAULT_DESIGN is the only no-fetch path forward → summary-requirement with designSource=default', () => {
+    const next = htmlExportReducer(base, { type: 'USE_DEFAULT_DESIGN' });
+    expect(next.step).toBe('summary-requirement');
+    expect(next.design).toBeUndefined();
+    expect(next.designSource).toBe('default');
+    expect(next.fetchError).toBeUndefined();
+  });
+
+  it('there is no SKIP_DESIGN success path (an unknown event is a no-op on choose-design)', () => {
+    // SKIP_DESIGN was removed; firing it must not advance the wizard.
+    const next = htmlExportReducer(base, { type: 'SKIP_DESIGN' } as unknown as HtmlExportEvent);
+    expect(next.step).toBe('choose-design');
+  });
+
+  it('BACK from choose-design clears a prior fetch error', () => {
+    const failed = run([{ type: 'SUBMIT_DESIGN', input: 'x' }, { type: 'FETCH_FAIL', error: 'offline' }], base);
+    expect(failed.fetchError).toBe('offline');
+    const back = htmlExportReducer(failed, { type: 'BACK' });
+    expect(back.step).toBe('choose-layout');
+    expect(back.fetchError).toBeUndefined();
+  });
+});
+
+describe('htmlExportReducer — A/B/C/D summary/chart selection', () => {
+  const onSummary = htmlExportReducer(toDesign('vertical', 'scroll'), { type: 'USE_DEFAULT_DESIGN' });
+
+  for (const mode of ['A', 'B', 'C', 'D'] as SummaryChartMode[]) {
+    it(`SELECT_SUMMARY_CHART records mode ${mode}`, () => {
+      const next = htmlExportReducer(onSummary, { type: 'SELECT_SUMMARY_CHART', mode });
+      expect(next.step).toBe('summary-requirement');
+      expect(next.summaryChartMode).toBe(mode);
+    });
+  }
+
+  it('SELECT_SUMMARY_CHART is a no-op outside the summary step (pure)', () => {
+    const onOrientation = run([{ type: 'START' }]);
+    const next = htmlExportReducer(onOrientation, { type: 'SELECT_SUMMARY_CHART', mode: 'C' });
+    expect(next.summaryChartMode).toBeUndefined();
+    expect(next.step).toBe('choose-orientation');
   });
 });
 
 describe('htmlExportReducer — token warning requires confirmation before generating', () => {
-  const tone = run([
+  const onSummary = run([
     { type: 'START' },
     { type: 'SELECT_ORIENTATION', orientation: 'horizontal' },
     { type: 'SELECT_LAYOUT', layout: 'slides' },
-    { type: 'SKIP_DESIGN' },
+    { type: 'USE_DEFAULT_DESIGN' },
   ]);
 
   it('a flagged long document stops at token-warning, not generating', () => {
-    const warned = htmlExportReducer(tone, { type: 'SUBMIT_TONE', tone: 'punchy', tokenWarning: true });
+    const warned = htmlExportReducer(onSummary, {
+      type: 'SUBMIT_REQUIREMENT',
+      freeRequirement: 'punchy',
+      summaryChartMode: 'A',
+      tokenWarning: true,
+    });
     expect(warned.step).toBe('token-warning');
     expect(warned.step).not.toBe('generating');
-    expect(warned.pendingTone).toBe('punchy');
+    expect(warned.pendingRequirement).toBe('punchy');
+    expect(warned.summaryChartMode).toBe('A');
 
     const generating = htmlExportReducer(warned, { type: 'CONFIRM_TOKEN_WARNING' });
     expect(generating.step).toBe('generating');
-    expect(generating.tone).toBe('punchy');
+    expect(generating.freeRequirement).toBe('punchy');
   });
 
-  it('without a warning, SUBMIT_TONE generates directly', () => {
-    const generating = htmlExportReducer(tone, { type: 'SUBMIT_TONE', tone: 'calm' });
+  it('without a warning, SUBMIT_REQUIREMENT generates directly and carries both core fields', () => {
+    const generating = htmlExportReducer(onSummary, {
+      type: 'SUBMIT_REQUIREMENT',
+      freeRequirement: 'calm',
+      summaryChartMode: 'D',
+    });
     expect(generating.step).toBe('generating');
-    expect(generating.tone).toBe('calm');
+    expect(generating.freeRequirement).toBe('calm');
+    expect(generating.summaryChartMode).toBe('D');
   });
 });
 
-describe('htmlExportReducer — generate, save, and open-saved', () => {
+describe('htmlExportReducer — generate holds the validated content model', () => {
   const generating = run([
     { type: 'START' },
     { type: 'SELECT_ORIENTATION', orientation: 'vertical' },
     { type: 'SELECT_LAYOUT', layout: 'scroll' },
-    { type: 'SKIP_DESIGN' },
-    { type: 'SUBMIT_TONE', tone: '' },
+    { type: 'USE_DEFAULT_DESIGN' },
+    { type: 'SUBMIT_REQUIREMENT', freeRequirement: '', summaryChartMode: 'B' },
   ]);
 
-  const generated = htmlExportReducer(generating, {
-    type: 'AI_DONE',
-    html: '<!doctype html><html></html>',
-    title: 'Report',
-    bytes: 1234,
-  });
-
-  it('AI_DONE → generated, holding the artifact', () => {
+  it('AI_DONE → generated, holding the ContentModel (no HTML)', () => {
+    const generated = htmlExportReducer(generating, { type: 'AI_DONE', model: MODEL });
     expect(generated.step).toBe('generated');
-    expect(generated.generated).toEqual({ html: '<!doctype html><html></html>', title: 'Report', bytes: 1234 });
+    expect(generated.contentModel).toEqual(MODEL);
+    // No HTML artifact is ever stored on this path.
+    expect((generated as Record<string, unknown>).generated).toBeUndefined();
   });
 
   it('AI_ERROR → error', () => {
-    const errored = htmlExportReducer(generating, { type: 'AI_ERROR', error: 'rate limited' });
+    const errored = htmlExportReducer(generating, { type: 'AI_ERROR', error: 'invalid model' });
     expect(errored.step).toBe('error');
-    expect(errored.error).toBe('rate limited');
+    expect(errored.error).toBe('invalid model');
   });
 
-  it('DOWNLOAD → saving, SAVE_OK → saved with savedPath', () => {
-    const saving = htmlExportReducer(generated, { type: 'DOWNLOAD' });
-    expect(saving.step).toBe('saving');
-    const saved = htmlExportReducer(saving, { type: 'SAVE_OK', savedPath: '/tmp/report.html' });
-    expect(saved.step).toBe('saved');
-    expect(saved.savedPath).toBe('/tmp/report.html');
+  it('BACK from generated returns to the summary/requirement step', () => {
+    const generated = htmlExportReducer(generating, { type: 'AI_DONE', model: MODEL });
+    const back = htmlExportReducer(generated, { type: 'BACK' });
+    expect(back.step).toBe('summary-requirement');
+    expect(back.contentModel).toEqual(MODEL);
   });
 
-  it('SAVE_CANCEL keeps the generated artifact', () => {
-    const saving = htmlExportReducer(generated, { type: 'DOWNLOAD' });
-    const back = htmlExportReducer(saving, { type: 'SAVE_CANCEL' });
-    expect(back.step).toBe('generated');
-    expect(back.generated).toBeDefined();
-  });
-
-  it('OPEN_SAVED → opening-saved, OPEN_OK → saved, OPEN_ERROR → saved with visible error', () => {
-    const saved = run([{ type: 'DOWNLOAD' }, { type: 'SAVE_OK', savedPath: '/tmp/report.html' }], generated);
-    expect(saved.step).toBe('saved');
-
-    const opening = htmlExportReducer(saved, { type: 'OPEN_SAVED' });
-    expect(opening.step).toBe('opening-saved');
-
-    const ok = htmlExportReducer(opening, { type: 'OPEN_OK' });
-    expect(ok.step).toBe('saved');
-    expect(ok.error).toBeUndefined();
-
-    const errored = htmlExportReducer(opening, { type: 'OPEN_ERROR', error: 'no handler' });
-    expect(errored.step).toBe('saved');
-    expect(errored.savedPath).toBe('/tmp/report.html');
-    expect(errored.error).toBe('no handler');
+  it('regenerate path: SUBMIT_REQUIREMENT is valid again from generated', () => {
+    const generated = htmlExportReducer(generating, { type: 'AI_DONE', model: MODEL });
+    const again = htmlExportReducer(generated, { type: 'SUBMIT_REQUIREMENT', freeRequirement: 'x', summaryChartMode: 'C' });
+    expect(again.step).toBe('generating');
+    expect(again.summaryChartMode).toBe('C');
   });
 
   it('CANCEL resets to idle from anywhere', () => {
+    const generated = htmlExportReducer(generating, { type: 'AI_DONE', model: MODEL });
     expect(htmlExportReducer(generated, { type: 'CANCEL' }).step).toBe('idle');
   });
 });
 
-describe('htmlExportReducer — mode + purpose config (G005 AC7/AC8/AC9/AC10)', () => {
+describe('htmlExportReducer — mode + advanced knobs stay optional (demoted, not core)', () => {
   it('SET_MODE stores the entry mode without changing the step', () => {
     const s1 = run([{ type: 'START' }, { type: 'SET_MODE', mode: 'detail' }]);
     expect(s1.mode).toBe('detail');
@@ -182,16 +234,17 @@ describe('htmlExportReducer — mode + purpose config (G005 AC7/AC8/AC9/AC10)', 
     expect(s1.step).toBe('choose-orientation');
   });
 
-  it('SUBMIT_TONE carries purpose + detail knobs into the generating state', () => {
+  it('SUBMIT_REQUIREMENT carries optional advanced knobs into the generating state', () => {
     const base = run([
       { type: 'START' },
       { type: 'SELECT_ORIENTATION', orientation: 'vertical' },
       { type: 'SELECT_LAYOUT', layout: 'scroll' },
-      { type: 'SKIP_DESIGN' },
+      { type: 'USE_DEFAULT_DESIGN' },
     ]);
     const gen = htmlExportReducer(base, {
-      type: 'SUBMIT_TONE',
-      tone: 't',
+      type: 'SUBMIT_REQUIREMENT',
+      freeRequirement: 't',
+      summaryChartMode: 'B',
       purpose: 'landing',
       density: 'roomy',
       readableWidth: 'wide',
@@ -204,20 +257,21 @@ describe('htmlExportReducer — mode + purpose config (G005 AC7/AC8/AC9/AC10)', 
     expect(gen.interactive).toBe(true);
   });
 
-  it('regression: SUBMIT_TONE still works with only a tone (no config)', () => {
+  it('SUBMIT_REQUIREMENT works with only the two core fields (no advanced config)', () => {
     const base = run([
       { type: 'START' },
       { type: 'SELECT_ORIENTATION', orientation: 'vertical' },
       { type: 'SELECT_LAYOUT', layout: 'scroll' },
-      { type: 'SKIP_DESIGN' },
+      { type: 'USE_DEFAULT_DESIGN' },
     ]);
-    const gen = htmlExportReducer(base, { type: 'SUBMIT_TONE', tone: 'minimal' });
+    const gen = htmlExportReducer(base, { type: 'SUBMIT_REQUIREMENT', freeRequirement: 'minimal', summaryChartMode: 'A' });
     expect(gen.step).toBe('generating');
-    expect(gen.tone).toBe('minimal');
+    expect(gen.freeRequirement).toBe('minimal');
+    expect(gen.summaryChartMode).toBe('A');
   });
 });
 
-describe('resolvePurposeConfig (G005 AC10 read-good defaults)', () => {
+describe('resolvePurposeConfig (advanced read-good defaults)', () => {
   it('applies the preset defaults for a known purpose', () => {
     const c = resolvePurposeConfig({ purpose: 'presentation' });
     expect(c.purpose).toBe('presentation');

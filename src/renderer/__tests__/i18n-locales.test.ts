@@ -175,4 +175,61 @@ describe('i18n — 5 locales (#3)', () => {
       expect(t('lang.restartPrompt'), `lang.restartPrompt @ ${loc}`).toBe(label);
     }
   });
+
+  it('exposes the G002 HTML-export wizard keys (A/B/C/D, free requirement, default design) in all five locales', () => {
+    const locales = ['en', 'ko', 'zh-Hans', 'zh-Hant', 'ja'] as const;
+    const newKeys = [
+      'he.summary.title',
+      'he.summary.A',
+      'he.summary.B',
+      'he.summary.C',
+      'he.summary.D',
+      'he.freeReq.title',
+      'he.freeReq.placeholder',
+      'he.advanced.title',
+      'he.design.useDefault',
+      'he.result.modelReady',
+      'he.result.rendererPending',
+    ];
+    for (const loc of locales) {
+      setLocale(loc);
+      for (const key of newKeys) {
+        const v = t(key as never);
+        expect(v, `${key} @ ${loc}`).toBeTruthy();
+        expect(v, `${key} @ ${loc} not the raw key (missing in this locale)`).not.toBe(key);
+      }
+    }
+
+    // Exact per-locale values prove the key is translated in each locale, not just the en fallback.
+    const expected: Record<string, Record<string, string>> = {
+      'he.design.useDefault': {
+        en: 'Use default design',
+        ko: '기본 디자인 사용',
+        'zh-Hans': '使用默认设计',
+        'zh-Hant': '使用預設設計',
+        ja: '既定のデザインを使用',
+      },
+      'he.summary.A': {
+        en: 'A · Visual brief',
+        ko: 'A · 비주얼 요약',
+        'zh-Hans': 'A · 视觉摘要',
+        'zh-Hant': 'A · 視覺摘要',
+        ja: 'A · ビジュアル要約',
+      },
+    };
+    for (const [key, perLocale] of Object.entries(expected)) {
+      for (const [loc, label] of Object.entries(perLocale)) {
+        setLocale(loc as never);
+        expect(t(key as never), `${key} @ ${loc}`).toBe(label);
+      }
+    }
+
+    // The design-fetch error was updated and no longer promises a tone-only retry.
+    for (const loc of locales) {
+      setLocale(loc);
+      const v = t('he.error.fetch' as never);
+      expect(v, `he.error.fetch @ ${loc}`).toBeTruthy();
+      expect(v, `he.error.fetch @ ${loc} not the raw key`).not.toBe('he.error.fetch');
+    }
+  });
 });

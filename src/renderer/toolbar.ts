@@ -41,10 +41,15 @@ export type ToolbarHandlers = {
   /** Typography (letter-spacing / char-width / line-height) for the text-size panel. */
   getTypography?: () => import('./typography').TypographyPref;
   onTypographyChange?: (next: import('./typography').TypographyPref) => void;
+  /** Undo / redo the editor (CM6 history). */
+  onUndo?: () => void;
+  onRedo?: () => void;
 };
 
 // ---- SVG glyphs (no emoji) ----
 export const ICONS = {
+  undo: `<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8 a5 5 0 1 1 1.6 3.7"/><polyline points="3,4.5 3,8 6.5,8"/></svg>`,
+  redo: `<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8 a5 5 0 1 0 -1.6 3.7"/><polyline points="13,4.5 13,8 9.5,8"/></svg>`,
   bold: 'B',
   italic: 'I',
   strike: 'S',
@@ -116,6 +121,8 @@ export function createToolbar(parent: HTMLElement, h: ToolbarHandlers) {
       <div class="tb-row">
         <div class="tb-lead">
           <button class="tb-icbtn" id="tb-toggle-outline" data-tooltip="${t('tip.outline')}" aria-label="${t('tip.outline')}">${ICONS.outline}</button>
+          <button class="tb-icbtn" id="tb-undo" data-tooltip="${t('tip.undo')}" aria-label="${t('tip.undo')}">${ICONS.undo}</button>
+          <button class="tb-icbtn" id="tb-redo" data-tooltip="${t('tip.redo')}" aria-label="${t('tip.redo')}">${ICONS.redo}</button>
         </div>
         <div class="tb-sep" aria-hidden="true"></div>
         <div class="tb-format">${formatGroup}</div>
@@ -153,6 +160,12 @@ export function createToolbar(parent: HTMLElement, h: ToolbarHandlers) {
     insertBtn.addEventListener('click', () => openTablePicker(insertBtn, h.onInsertTable));
     togglePreviewBtn.addEventListener('click', () => h.onTogglePreview());
     parent.querySelector<HTMLButtonElement>('#tb-toggle-outline')?.addEventListener('click', () => h.onToggleOutline?.());
+    const undoBtn = parent.querySelector<HTMLButtonElement>('#tb-undo');
+    undoBtn?.addEventListener('mousedown', (e) => e.preventDefault());
+    undoBtn?.addEventListener('click', () => h.onUndo?.());
+    const redoBtn = parent.querySelector<HTMLButtonElement>('#tb-redo');
+    redoBtn?.addEventListener('mousedown', (e) => e.preventDefault());
+    redoBtn?.addEventListener('click', () => h.onRedo?.());
     const previewLinesBtn = parent.querySelector<HTMLButtonElement>('#tb-preview-lines');
     previewLinesBtn?.addEventListener('click', () => {
       h.onTogglePreviewLines?.();

@@ -1,6 +1,6 @@
 import { EditorState, EditorSelection, Transaction } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers, highlightActiveLine, drawSelection, dropCursor } from '@codemirror/view';
-import { history, historyKeymap, defaultKeymap, indentWithTab } from '@codemirror/commands';
+import { history, historyKeymap, defaultKeymap, indentWithTab, undo, redo } from '@codemirror/commands';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { markdownLiveDecorations } from './cm-decorations';
 import { buildMarkdownTable } from './table-md';
@@ -102,6 +102,9 @@ export type EditorHandle = {
   setDoc: (doc: string) => void;
   insertTable: (rows: number, cols: number) => void;
   focus: () => void;
+  /** Undo / redo the CM6 edit history. */
+  undo: () => void;
+  redo: () => void;
   applyTheme: (dark: boolean) => void;
   /** Subscribe to selection changes; `null` is emitted when the selection is empty. */
   onSelectionChange: (cb: SelectionHandler) => void;
@@ -208,6 +211,14 @@ export function createEditor(parent: HTMLElement, opts: { onChange: ChangeHandle
       view.focus();
     },
     focus: () => view.focus(),
+    undo: () => {
+      undo(view);
+      view.focus();
+    },
+    redo: () => {
+      redo(view);
+      view.focus();
+    },
     // Kept for API compat — CM6 now follows CSS vars, so theme switching is a no-op here.
     applyTheme: (_dark: boolean) => {},
     onSelectionChange: (cb: SelectionHandler) => {

@@ -26,14 +26,53 @@ export type FormatAction =
 
 function wrap(view: EditorView, before: string, after = before) {
   const { state } = view;
+  const doc = state.doc;
   const changes = state.changeByRange((range) => {
     if (range.empty) {
+      // Toggle off an empty pair the cursor is sitting inside (e.g. `==|==`).
+      const b = doc.sliceString(Math.max(0, range.from - before.length), range.from);
+      const a = doc.sliceString(range.to, Math.min(doc.length, range.to + after.length));
+      if (b === before && a === after) {
+        return {
+          changes: [
+            { from: range.from - before.length, to: range.from, insert: '' },
+            { from: range.to, to: range.to + after.length, insert: '' },
+          ],
+          range: EditorSelection.cursor(range.from - before.length),
+        };
+      }
       const cursor = range.from + before.length;
       return {
         changes: { from: range.from, insert: before + after },
         range: EditorSelection.cursor(cursor),
       };
     }
+    const selected = doc.sliceString(range.from, range.to);
+    // Toggle off when the selection already contains the markers (e.g. `==text==`).
+    if (
+      selected.length >= before.length + after.length &&
+      selected.startsWith(before) &&
+      selected.endsWith(after)
+    ) {
+      const inner = selected.slice(before.length, selected.length - after.length);
+      return {
+        changes: { from: range.from, to: range.to, insert: inner },
+        range: EditorSelection.range(range.from, range.from + inner.length),
+      };
+    }
+    // Toggle off when the markers sit just outside the selection (e.g. `==<text>==`).
+    const outerBefore = doc.sliceString(Math.max(0, range.from - before.length), range.from);
+    const outerAfter = doc.sliceString(range.to, Math.min(doc.length, range.to + after.length));
+    if (outerBefore === before && outerAfter === after) {
+      return {
+        changes: [
+          { from: range.from - before.length, to: range.from, insert: '' },
+          { from: range.to, to: range.to + after.length, insert: '' },
+        ],
+        range: EditorSelection.range(range.from - before.length, range.to - before.length),
+      };
+    }
+    // Otherwise wrap the selection.
     return {
       changes: [
         { from: range.from, insert: before },

@@ -12,7 +12,7 @@ import { wirePreviewTables } from './preview-table-edit';
 import { applyToEditor, applyToPreview, type FormatAction } from './formatting';
 import { htmlToMarkdown } from './html-to-md';
 import { openLoginModal } from './login-modal';
-import { mountUnifiedChat, type ChatMode, type ChatAttachment } from './unified-chat';
+import { mountUnifiedChat, type ChatMode, type ChatAttachment, type ChatTextAttachment } from './unified-chat';
 import { clampChatWidth } from './chat-layout';
 import { openSettingsModal } from './settings-modal';
 import { restoreUnifiedThread, threadToTurns, type UnifiedChatItem } from './unified-chat-history';
@@ -39,7 +39,7 @@ import { installTooltips } from './tooltips';
 import { wireWordmark } from './header-wordmark';
 import { installSelectionFormatMenu } from './selection-format-menu';
 import { mountHtmlExportWizard, type HtmlExportWizardHandle } from './html-export-wizard';
-import { HTML_EXPORT_INSTRUCTIONS } from './html-export-prompt';
+import { HTML_EXPORT_CONTENT_INSTRUCTIONS } from './html-export-content-prompt';
 import { EditorSelection } from '@codemirror/state';
 
 type AuthSnapshot = {
@@ -124,6 +124,7 @@ type Api = {
   openExternal: (url: string) => Promise<void>;
   appVersion: () => Promise<string>;
   relaunchApp: () => Promise<void>;
+  convertAttachment: (base64: string, ext: string) => Promise<{ ok: boolean; markdown?: string; error?: string }>;
   fetchDesignMd: (input: string) => Promise<{ ok: boolean; designMd?: string; rawUrl?: string; error?: string }>;
   listDesigns: () => Promise<{ ok: boolean; designs?: { slug: string; name: string; pageUrl: string }[]; error?: string }>;
   saveHtml: (args: { html: string; defaultName?: string }) => Promise<{ saved: boolean; filePath?: string }>;
@@ -822,6 +823,16 @@ createToolbar(toolbarHost, {
   },
   onToggleSideChat: () => toggleUnifiedChat(),
   onToggleOutline: () => toggleLeftPanel(),
+  onUndo: () => {
+    if (activeSurface === 'preview' && editingInPreview) flushPreviewToSource();
+    editor.undo();
+    preview.setDoc(editor.getDoc());
+  },
+  onRedo: () => {
+    if (activeSurface === 'preview' && editingInPreview) flushPreviewToSource();
+    editor.redo();
+    preview.setDoc(editor.getDoc());
+  },
   onTogglePreviewLines: () => {
     const next = !(prefs.previewLineNumbers ?? false);
     prefs.previewLineNumbers = next;
@@ -1233,7 +1244,12 @@ function openSettings() {
   });
 }
 
-async function sendUnified(text: string, mode: ChatMode, attachments?: ChatAttachment[]) {
+async function sendUnified(
+  text: string,
+  mode: ChatMode,
+  attachments?: ChatAttachment[],
+  textFiles?: ChatTextAttachment[],
+) {
   const hasAuth = await window.api.aiHasAnyAuth().catch(() => true);
   if (!hasAuth) {
     unifiedChat.addMessage('user', text);
@@ -1248,9 +1264,19 @@ async function sendUnified(text: string, mode: ChatMode, attachments?: ChatAttac
   }
   // Snapshot prior history BEFORE appending the new user turn.
   const priorTurns = threadToTurns(unifiedChatHistory);
-  const userDisplay = text || `📎 ${attachments?.length ?? 0} image(s)`;
+  // Fold attached text/document files into the message SENT to the AI, but keep
+  // the visible bubble + persisted history clean (chip labels only, no blob).
+  const fileContext = (textFiles ?? [])
+    .map((f) => `[Attached file: ${f.name}]\n"""\n${f.text}\n"""`)
+    .join('\n\n');
+  const aiText = fileContext ? `${text ? text + '\n\n' : ''}${fileContext}` : text;
+  const attachLabels = [
+    ...(attachments?.length ? [`${attachments.length} image(s)`] : []),
+    ...(textFiles ?? []).map((f) => f.name),
+  ];
+  const userDisplay = text || (attachLabels.length ? `📎 ${attachLabels.join(', ')}` : '');
   unifiedChat.addMessage('user', userDisplay);
-  // Image bytes are never persisted in session history (text only).
+  // Image bytes / file blobs are never persisted in session history (text only).
   unifiedChatHistory.push({ type: 'message', role: 'user', text: userDisplay });
 
   const stream = unifiedChat.beginAssistant();
@@ -1296,7 +1322,7 @@ async function sendUnified(text: string, mode: ChatMode, attachments?: ChatAttac
   ucInflight = { id, cleanup };
 
   try {
-    await window.api.aiChat(id, instructions, priorTurns, text, currentModelArg(), mode === 'write' ? 'write' : 'advise', attachments);
+    await window.api.aiChat(id, instructions, priorTurns, aiText, currentModelArg(), mode === 'write' ? 'write' : 'advise', attachments);
   } catch (err: any) {
     stream.fail(err?.message ?? String(err));
     cleanup();
@@ -1313,10 +1339,11 @@ function syncAdviceSnapshot() {
 }
 
 const unifiedChat = mountUnifiedChat(unifiedChatHost, {
-  onSend: (text, mode, attachments) => {
+  onSend: (text, mode, attachments, textFiles) => {
     if (mode === 'project' || mode === 'html') return; // driven by their own tabs
-    void sendUnified(text, mode, attachments);
+    void sendUnified(text, mode, attachments, textFiles);
   },
+  convertFile: (base64, ext) => window.api.convertAttachment(base64, ext),
   onInsert: (md) => applyAiOutput('insert', '\n' + md.trim() + '\n'),
   onReplace: (md) => {
     const next = md.trim();
@@ -1390,7 +1417,7 @@ function runHtmlGeneration(
         void window.api.aiCancel(id);
         cleanup();
       };
-      window.api.aiChat(id, HTML_EXPORT_INSTRUCTIONS, [], prompt, modelArg).catch((err) => {
+      window.api.aiChat(id, HTML_EXPORT_CONTENT_INSTRUCTIONS, [], prompt, modelArg).catch((err) => {
         cleanup();
         reject(err instanceof Error ? err : new Error(String(err)));
       });

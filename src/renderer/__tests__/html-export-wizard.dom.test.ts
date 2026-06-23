@@ -9,7 +9,12 @@ afterEach(() => {
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-const GENERATED_HTML = '<!doctype html><html><head><title>My Report</title></head><body><h1>Hi</h1></body></html>';
+/** A valid ContentModel JSON reply (the AI outputs a content model, never HTML). */
+const CONTENT_MODEL = {
+  title: 'My Report',
+  sections: [{ title: 'Intro', blocks: [{ kind: 'paragraph', text: 'Hello world.' }] }],
+};
+const CONTENT_JSON = JSON.stringify(CONTENT_MODEL);
 
 function setup(over: Partial<HtmlExportDeps> = {}, markdown = '# Title\n\nSome body.') {
   const host = document.createElement('div');
@@ -17,12 +22,8 @@ function setup(over: Partial<HtmlExportDeps> = {}, markdown = '# Title\n\nSome b
   const mdRef = { value: markdown };
   const deps: HtmlExportDeps = {
     getMarkdown: () => mdRef.value,
-    getCurrentPath: () => null,
-    getPendingTitle: () => 'Untitled',
     fetchDesignMd: vi.fn(async () => ({ ok: true, designMd: '## tokens', rawUrl: 'https://raw/x/DESIGN.md' })),
-    saveHtml: vi.fn(async () => ({ saved: true, filePath: '/tmp/My Report.html' })),
-    openSavedHtml: vi.fn(async () => ({ opened: true })),
-    aiGenerate: vi.fn(() => ({ result: Promise.resolve(GENERATED_HTML), cancel: vi.fn() })),
+    aiGenerate: vi.fn(() => ({ result: Promise.resolve(CONTENT_JSON), cancel: vi.fn() })),
     openExternal: vi.fn(),
     t: (k) => k,
     ...over,
@@ -43,66 +44,91 @@ function setField(host: HTMLElement, name: string, value: string) {
   el.value = value;
 }
 
-describe('mountHtmlExportWizard — full flow', () => {
-  it('orientation → layout → design → tone → generate → download → open-saved', async () => {
+/** Last prompt string passed to aiGenerate. */
+function lastPrompt(deps: HtmlExportDeps): string {
+  const calls = (deps.aiGenerate as ReturnType<typeof vi.fn>).mock.calls;
+  return calls[calls.length - 1][0] as string;
+}
+
+describe('mountHtmlExportWizard — generate composes ONE prompt from all four selections + the free requirement', () => {
+  it('sends a single aiGenerate prompt reflecting orientation, layout, design, A/B/C/D mode, and the free requirement', async () => {
     const { host, deps, handle, mdRef } = setup();
     expect(handle.getState().step).toBe('choose-orientation');
 
+    // Core selection 1 + 2: orientation + layout (vertical + slides is allowed).
     click(host, 'orient-vertical');
-    expect(handle.getState().step).toBe('choose-layout');
-
-    click(host, 'layout-slides'); // vertical + slides combo is allowed
+    click(host, 'layout-slides');
     expect(handle.getState().step).toBe('choose-design');
 
+    // Core selection 3: a mandatory design.md (fetched from getdesign).
     setField(host, 'design', 'replicate');
     click(host, 'design-submit');
     expect(handle.getState().step).toBe('fetching-design');
     await flush();
     expect(deps.fetchDesignMd).toHaveBeenCalledWith('replicate');
-    expect(handle.getState().step).toBe('style-tone');
-    expect(handle.getState().design).toEqual({ designMd: '## tokens', rawUrl: 'https://raw/x/DESIGN.md' });
+    expect(handle.getState().step).toBe('summary-requirement');
+    expect(handle.getState().designSource).toBe('getdesign');
 
-    setField(host, 'tone', 'minimal and elegant');
-    click(host, 'tone-submit');
-    // Short markdown → no token warning → straight to generating.
-    expect(handle.getState().step).toBe('generating');
+    // Core selection 4: summary/chart strength A/B/C/D.
+    click(host, 'summary-C');
+    expect(handle.getState().summaryChartMode).toBe('C');
+
+    // The single free-text requirement.
+    setField(host, 'free-requirement', 'keep it punchy and chart-heavy');
+    click(host, 'generate-submit');
+
+    // Exactly ONE composed prompt block is sent to the model.
     expect(deps.aiGenerate).toHaveBeenCalledTimes(1);
-    expect((deps.aiGenerate as ReturnType<typeof vi.fn>).mock.calls[0][0]).toContain('minimal and elegant');
+    const prompt = lastPrompt(deps);
+    // Every selection is provably reflected in that single block.
+    expect(prompt).toContain('VERTICAL'); // orientation
+    expect(prompt).toContain('SLIDES'); // layout
+    expect(prompt).toContain('design source: getdesign'); // design provenance
+    expect(prompt).toContain('## tokens'); // the fetched design.md content
+    expect(prompt).toContain('summary/chart mode: C'); // A/B/C/D selection
+    expect(prompt).toContain('keep it punchy and chart-heavy'); // free requirement
+
+    // The reply is parsed into a validated content model — no HTML is authored.
+    expect(handle.getState().step).toBe('generating');
     await flush();
     expect(handle.getState().step).toBe('generated');
-    expect(handle.getState().generated?.title).toBe('My Report');
-    expect(handle.getState().generated?.bytes).toBeGreaterThan(0);
-
-    click(host, 'download');
-    expect(handle.getState().step).toBe('saving');
-    await flush();
-    expect(deps.saveHtml).toHaveBeenCalledTimes(1);
-    const saveArg = (deps.saveHtml as ReturnType<typeof vi.fn>).mock.calls[0][0];
-    // AC12: the saved artifact carries the injected base CSS plus all original content.
-    expect(saveArg.html).toContain('data-notepad-ai-base="1"');
-    expect(saveArg.html).toContain('<h1>Hi</h1>');
-    expect(saveArg.html).toContain('<title>My Report</title>');
-    expect(saveArg.defaultName).toBe('My Report.html'); // from AI <title> (doc is Untitled)
-    expect(handle.getState().step).toBe('saved');
-    expect(handle.getState().savedPath).toBe('/tmp/My Report.html');
-
-    // Saved card shows "open in browser" and clicking it calls openSavedHtml once with the saved path.
-    const openBtn = host.querySelector('[data-he="open-saved"]');
-    expect(openBtn).toBeTruthy();
-    click(host, 'open-saved');
-    expect(handle.getState().step).toBe('opening-saved');
-    await flush();
-    expect(deps.openSavedHtml).toHaveBeenCalledTimes(1);
-    expect(deps.openSavedHtml).toHaveBeenCalledWith('/tmp/My Report.html');
-    expect(handle.getState().step).toBe('saved');
+    expect(handle.getState().contentModel?.title).toBe('My Report');
 
     // The Markdown source was never mutated by the wizard.
     expect(mdRef.value).toBe('# Title\n\nSome body.');
   });
+
+  it('defaults to summary mode B when the user does not pick one', async () => {
+    const { host, deps } = setup();
+    click(host, 'orient-vertical');
+    click(host, 'layout-scroll');
+    click(host, 'design-default');
+    setField(host, 'free-requirement', '');
+    click(host, 'generate-submit');
+    await flush();
+    expect(lastPrompt(deps)).toContain('summary/chart mode: B');
+  });
+
+  it('keeps the typed free requirement when switching A/B/C/D (no re-render wipe)', async () => {
+    const { host, deps } = setup();
+    click(host, 'orient-vertical');
+    click(host, 'layout-scroll');
+    click(host, 'design-default');
+    // Type the requirement, then change the summary mode (which re-renders).
+    const ta = host.querySelector<HTMLTextAreaElement>('[data-he-field="free-requirement"]')!;
+    ta.value = 'audience: execs';
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    click(host, 'summary-A');
+    // The textarea is repopulated from state after the re-render.
+    expect(host.querySelector<HTMLTextAreaElement>('[data-he-field="free-requirement"]')!.value).toBe('audience: execs');
+    click(host, 'generate-submit');
+    await flush();
+    expect(lastPrompt(deps)).toContain('audience: execs');
+  });
 });
 
-describe('mountHtmlExportWizard — fetch failure falls back to tone-only', () => {
-  it('FETCH_FAIL lands on style-tone with an error, then still generates', async () => {
+describe('mountHtmlExportWizard — design fetch failure keeps choose-design (design.md is mandatory)', () => {
+  it('FETCH_FAIL stays on choose-design with an error and never advances to generation', async () => {
     const { host, deps, handle } = setup({
       fetchDesignMd: vi.fn(async () => ({ ok: false, error: 'offline' })),
     });
@@ -111,18 +137,24 @@ describe('mountHtmlExportWizard — fetch failure falls back to tone-only', () =
     setField(host, 'design', 'replicate');
     click(host, 'design-submit');
     await flush();
-    expect(handle.getState().step).toBe('style-tone');
+
+    // The wizard did NOT silently proceed.
+    expect(handle.getState().step).toBe('choose-design');
     expect(handle.getState().fetchError).toBe('offline');
     expect(handle.getState().design).toBeUndefined();
-    // The error banner is rendered.
     expect(host.querySelector('.he-error')).toBeTruthy();
+    expect(deps.aiGenerate).not.toHaveBeenCalled();
 
-    // Tone-only generation still works.
-    setField(host, 'tone', '');
-    click(host, 'tone-submit');
+    // The explicit default-design action is the only no-fetch way forward.
+    click(host, 'design-default');
+    expect(handle.getState().step).toBe('summary-requirement');
+    setField(host, 'free-requirement', '');
+    click(host, 'generate-submit');
     expect(handle.getState().step).toBe('generating');
     await flush();
     expect(handle.getState().step).toBe('generated');
+    // The default-design provenance is recorded in the single prompt.
+    expect(lastPrompt(deps)).toContain('design source: default');
   });
 });
 
@@ -131,11 +163,11 @@ describe('mountHtmlExportWizard — token warning gate', () => {
     const { host, deps, handle } = setup({ maxSourceCharsForModel: () => 1000 }, 'z'.repeat(20000));
     click(host, 'orient-vertical');
     click(host, 'layout-scroll');
-    click(host, 'design-skip');
-    expect(handle.getState().step).toBe('style-tone');
+    click(host, 'design-default');
+    expect(handle.getState().step).toBe('summary-requirement');
 
-    setField(host, 'tone', 'bold');
-    click(host, 'tone-submit');
+    setField(host, 'free-requirement', 'bold');
+    click(host, 'generate-submit');
     // Generation must NOT start before confirmation.
     expect(handle.getState().step).toBe('token-warning');
     expect(deps.aiGenerate).not.toHaveBeenCalled();
@@ -149,8 +181,8 @@ describe('mountHtmlExportWizard — token warning gate', () => {
 });
 
 describe('mountHtmlExportWizard — HTML-only model picker', () => {
-  it('renders a model picker on style-tone and routes the chosen model to aiGenerate', async () => {
-    const { host, deps, handle } = setup({
+  it('renders a model picker on summary-requirement and routes the chosen model to aiGenerate', async () => {
+    const { host, deps } = setup({
       listHtmlModels: async () => [
         { provider: 'chatgpt', id: 'gpt-5.4-mini', label: 'GPT-5.4 mini', contextWindow: 400_000 },
         { provider: 'chatgpt', id: 'gpt-5.4', label: 'GPT-5.4', contextWindow: 1_000_000 },
@@ -159,19 +191,17 @@ describe('mountHtmlExportWizard — HTML-only model picker', () => {
     });
     click(host, 'orient-vertical');
     click(host, 'layout-scroll');
-    click(host, 'design-skip');
-    await flush(); // model list resolves, style-tone re-renders with the picker
+    click(host, 'design-default');
+    await flush(); // model list resolves, summary-requirement re-renders with the picker
     const select = host.querySelector<HTMLSelectElement>('[data-he-field="model"]');
     expect(select).toBeTruthy();
-    // Default is preselected.
     expect(select!.value).toBe('chatgpt:gpt-5.4-mini');
-    // 1M-context models are distinguishable by a context badge in the option text.
     const optText = Array.from(select!.querySelectorAll('option')).map((o) => o.textContent);
     expect(optText).toContain('GPT-5.4 · 1M');
     expect(optText).toContain('GPT-5.4 mini · 400K');
     // Pick the bigger model.
     select!.value = 'chatgpt:gpt-5.4';
-    click(host, 'tone-submit');
+    click(host, 'generate-submit');
     await flush();
     expect(deps.aiGenerate).toHaveBeenCalledTimes(1);
     const passedModel = (deps.aiGenerate as ReturnType<typeof vi.fn>).mock.calls[0][1];
@@ -179,41 +209,35 @@ describe('mountHtmlExportWizard — HTML-only model picker', () => {
   });
 });
 
-describe('mountHtmlExportWizard — non-HTML AI reply surfaces an error', () => {
-  it('AI replies without an HTML document → error step', async () => {
+describe('mountHtmlExportWizard — invalid AI reply surfaces an error', () => {
+  it('an AI reply that is not a valid content model → error step', async () => {
     const { host, handle } = setup({
-      aiGenerate: vi.fn(() => ({ result: Promise.resolve('Sorry, here is markdown instead'), cancel: vi.fn() })),
+      aiGenerate: vi.fn(() => ({ result: Promise.resolve('Sorry, here is some markdown instead'), cancel: vi.fn() })),
     });
     click(host, 'orient-vertical');
     click(host, 'layout-scroll');
-    click(host, 'design-skip');
-    setField(host, 'tone', '');
-    click(host, 'tone-submit');
+    click(host, 'design-default');
+    setField(host, 'free-requirement', '');
+    click(host, 'generate-submit');
     await flush();
     expect(handle.getState().step).toBe('error');
     expect(host.querySelector('.he-error')).toBeTruthy();
   });
-});
 
-describe('mountHtmlExportWizard — open failure keeps the saved file', () => {
-  it('OPEN_ERROR returns to the saved card with a visible error', async () => {
+  it('an AI reply that smuggles HTML is rejected (content models never contain markup)', async () => {
     const { host, handle } = setup({
-      openSavedHtml: vi.fn(async () => ({ opened: false, error: 'no handler' })),
+      aiGenerate: vi.fn(() => ({
+        result: Promise.resolve('<!doctype html><html><body><h1>nope</h1></body></html>'),
+        cancel: vi.fn(),
+      })),
     });
     click(host, 'orient-vertical');
     click(host, 'layout-scroll');
-    click(host, 'design-skip');
-    setField(host, 'tone', '');
-    click(host, 'tone-submit');
+    click(host, 'design-default');
+    setField(host, 'free-requirement', '');
+    click(host, 'generate-submit');
     await flush();
-    click(host, 'download');
-    await flush();
-    expect(handle.getState().step).toBe('saved');
-    click(host, 'open-saved');
-    await flush();
-    expect(handle.getState().step).toBe('saved');
-    expect(handle.getState().error).toBe('no handler');
-    expect(handle.getState().savedPath).toBeTruthy();
+    expect(handle.getState().step).toBe('error');
   });
 });
 
@@ -228,16 +252,14 @@ describe('mountHtmlExportWizard — local model context badge + small-model noti
     });
     click(host, 'orient-vertical');
     click(host, 'layout-scroll');
-    click(host, 'design-skip');
-    await flush(); // model list resolves → style-tone re-renders with the picker
+    click(host, 'design-default');
+    await flush(); // model list resolves → summary-requirement re-renders with the picker
     const select = host.querySelector<HTMLSelectElement>('[data-he-field="model"]');
     expect(select).toBeTruthy();
-    // The small local model (the default) is preselected; provider:id key survives a colon-in-id.
     expect(select!.value).toBe('ollama:llama3:latest');
     const optText = Array.from(select!.querySelectorAll('option')).map((o) => o.textContent);
-    expect(optText).toContain('llama3:latest · 8K'); // local option + context badge
+    expect(optText).toContain('llama3:latest · 8K');
     expect(optText).toContain('GPT-5.4 · 1M');
-    // Small-context advisory visible for the small local default (deps.t echoes the key).
     const note = host.querySelector<HTMLElement>('[data-he-note="model"]');
     expect(note).toBeTruthy();
     expect(note!.hidden).toBe(false);
@@ -246,7 +268,7 @@ describe('mountHtmlExportWizard — local model context badge + small-model noti
     select!.value = 'chatgpt:gpt-5.4';
     select!.dispatchEvent(new Event('change', { bubbles: true }));
     expect(host.querySelector<HTMLElement>('[data-he-note="model"]')!.hidden).toBe(true);
-    expect(handle.getState().step).toBe('style-tone');
+    expect(handle.getState().step).toBe('summary-requirement');
   });
 
   it('does not show the small-context notice for large cloud models', async () => {
@@ -258,58 +280,49 @@ describe('mountHtmlExportWizard — local model context badge + small-model noti
     });
     click(host, 'orient-vertical');
     click(host, 'layout-scroll');
-    click(host, 'design-skip');
+    click(host, 'design-default');
     await flush();
     const note = host.querySelector<HTMLElement>('[data-he-note="model"]');
     expect(note!.hidden).toBe(true);
   });
 });
 
-describe('mountHtmlExportWizard — auto/detail mode + purpose (G005 AC7/AC8/AC9/AC10)', () => {
-  const toStyleTone = (host: HTMLElement) => {
+describe('mountHtmlExportWizard — purpose/density/etc are demoted to an optional advanced panel', () => {
+  const toSummary = (host: HTMLElement) => {
     click(host, 'orient-vertical');
     click(host, 'layout-scroll');
-    click(host, 'design-skip');
+    click(host, 'design-default');
   };
 
-  it('defaults to auto mode (no detail knobs) and shows the purpose select', () => {
+  it('shows the core controls and keeps the advanced knobs collapsed/optional', () => {
     const { host } = setup();
-    toStyleTone(host);
+    toSummary(host);
+    // Core controls are present and not gated by the advanced panel.
+    expect(host.querySelector('[data-he-field="free-requirement"]')).toBeTruthy();
+    expect(host.querySelector('[data-he="summary-A"]')).toBeTruthy();
+    expect(host.querySelector('[data-he="summary-D"]')).toBeTruthy();
+    // Advanced is a collapsed <details> by default.
+    const adv = host.querySelector('details.he-advanced');
+    expect(adv).toBeTruthy();
+    expect((adv as HTMLDetailsElement).open).toBe(false);
+    // Purpose lives inside advanced; auto mode hides the detail knobs.
     expect(host.querySelector('[data-he-field="purpose"]')).toBeTruthy();
-    // auto mode hides the detail knobs
     expect(host.querySelector('[data-he-field="density"]')).toBeNull();
     expect(host.querySelector('[data-he-field="interactive"]')).toBeNull();
   });
 
   it('switching to detail reveals density/width/interactive knobs', () => {
     const { host, handle } = setup();
-    toStyleTone(host);
+    toSummary(host);
     click(host, 'mode-detail');
     expect(handle.getState().mode).toBe('detail');
     expect(host.querySelector('[data-he-field="density"]')).toBeTruthy();
     expect(host.querySelector('[data-he-field="readable-width"]')).toBeTruthy();
     expect(host.querySelector('[data-he-field="interactive"]')).toBeTruthy();
   });
-
-  it('routes the chosen purpose + detail knobs into the generation prompt', async () => {
-    const { host, deps } = setup();
-    toStyleTone(host);
-    click(host, 'mode-detail');
-    (host.querySelector('[data-he-field="purpose"]') as HTMLSelectElement).value = 'landing';
-    (host.querySelector('[data-he-field="density"]') as HTMLSelectElement).value = 'roomy';
-    (host.querySelector('[data-he-field="interactive"]') as HTMLInputElement).checked = true;
-    setField(host, 'tone', 'bold and modern');
-    click(host, 'tone-submit');
-    await flush();
-    const prompt = (deps.aiGenerate as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
-    expect(prompt).toContain('PURPOSE:');
-    expect(prompt).toContain('landing page');
-    expect(prompt).toContain('DENSITY: roomy');
-    expect(prompt).toContain('INTERACTIVITY: tasteful');
-  });
 });
 
-describe('mountHtmlExportWizard — getdesign list rows (G005 AC11)', () => {
+describe('mountHtmlExportWizard — getdesign list rows', () => {
   const designs = [
     { slug: 'claude', name: 'Claude', pageUrl: 'https://getdesign.md/claude' },
     { slug: 'replicate', name: 'Replicate', pageUrl: 'https://getdesign.md/replicate' },

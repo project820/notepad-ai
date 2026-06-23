@@ -43,7 +43,7 @@ describe('mountUnifiedChat — composer', () => {
     const input = parent.querySelector<HTMLTextAreaElement>('.uc-input')!;
     input.value = 'draft an intro';
     parent.querySelector<HTMLButtonElement>('.uc-send')!.click();
-    expect(handlers.onSend).toHaveBeenCalledWith('draft an intro', 'write', undefined);
+    expect(handlers.onSend).toHaveBeenCalledWith('draft an intro', 'write', undefined, undefined);
     expect(input.value).toBe('');
   });
 
@@ -82,7 +82,7 @@ describe('mountUnifiedChat — modes', () => {
     const input = parent.querySelector<HTMLTextAreaElement>('.uc-input')!;
     input.value = 'what do you think?';
     parent.querySelector<HTMLButtonElement>('.uc-send')!.click();
-    expect(handlers.onSend).toHaveBeenCalledWith('what do you think?', 'advise', undefined);
+    expect(handlers.onSend).toHaveBeenCalledWith('what do you think?', 'advise', undefined, undefined);
   });
 
   it('project mode triggers the Project Wizard handler', () => {
@@ -297,7 +297,7 @@ describe('mountUnifiedChat — image attachments (G007 AC14)', () => {
     const input = parent.querySelector<HTMLTextAreaElement>('.uc-input')!;
     input.value = 'OCR this';
     parent.querySelector<HTMLButtonElement>('.uc-send')!.click();
-    expect(handlers.onSend).toHaveBeenCalledWith('OCR this', 'write', [att]);
+    expect(handlers.onSend).toHaveBeenCalledWith('OCR this', 'write', [att], undefined);
     expect(parent.querySelector<HTMLElement>('.uc-chips')!.querySelectorAll('.uc-chip').length).toBe(0);
   });
 
@@ -305,7 +305,7 @@ describe('mountUnifiedChat — image attachments (G007 AC14)', () => {
     const { parent, handlers, handle } = mount();
     handle.addAttachment(att);
     parent.querySelector<HTMLButtonElement>('.uc-send')!.click();
-    expect(handlers.onSend).toHaveBeenCalledWith('', 'write', [att]);
+    expect(handlers.onSend).toHaveBeenCalledWith('', 'write', [att], undefined);
   });
 
   it('the attach button opens the hidden file input', () => {
@@ -314,5 +314,51 @@ describe('mountUnifiedChat — image attachments (G007 AC14)', () => {
     const clickSpy = vi.spyOn(file, 'click');
     parent.querySelector<HTMLButtonElement>('.uc-attach')!.click();
     expect(clickSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('mountUnifiedChat — non-image file attachments (minor #2)', () => {
+  const setFiles = (input: HTMLInputElement, files: File[]) =>
+    Object.defineProperty(input, 'files', { configurable: true, value: files });
+  const tick = () => new Promise((r) => setTimeout(r, 10));
+
+  it('attaches a readable text file and passes it as a textFiles context on send', async () => {
+    const { parent, handlers } = mount();
+    const fileInput = parent.querySelector<HTMLInputElement>('.uc-file')!;
+    const file = new File(['col1,col2\n1,2'], 'data.csv', { type: 'text/csv' });
+    setFiles(fileInput, [file]);
+    fileInput.dispatchEvent(new Event('change'));
+    await tick();
+    expect(parent.querySelector('.uc-chips')!.querySelectorAll('.uc-chip').length).toBe(1);
+    parent.querySelector<HTMLTextAreaElement>('.uc-input')!.value = 'summarize';
+    parent.querySelector<HTMLButtonElement>('.uc-send')!.click();
+    expect(handlers.onSend).toHaveBeenCalledWith('summarize', 'write', undefined, [
+      { name: 'data.csv', text: 'col1,col2\n1,2', bytes: file.size },
+    ]);
+  });
+
+  it('routes a convertible document (PDF) through convertFile → text', async () => {
+    const convertFile = vi.fn().mockResolvedValue({ ok: true, markdown: '# Converted' });
+    const { parent, handlers } = mount({ convertFile });
+    const fileInput = parent.querySelector<HTMLInputElement>('.uc-file')!;
+    const file = new File([new Uint8Array([1, 2, 3])], 'report.pdf', { type: 'application/pdf' });
+    setFiles(fileInput, [file]);
+    fileInput.dispatchEvent(new Event('change'));
+    await tick();
+    expect(convertFile).toHaveBeenCalledWith(expect.any(String), 'pdf', 'report.pdf');
+    parent.querySelector<HTMLButtonElement>('.uc-send')!.click();
+    expect(handlers.onSend).toHaveBeenCalledWith('', 'write', undefined, [
+      { name: 'report.pdf', text: '# Converted', bytes: file.size },
+    ]);
+  });
+
+  it('silently skips an unsupported binary type (no chip, no send payload)', async () => {
+    const { parent } = mount();
+    const fileInput = parent.querySelector<HTMLInputElement>('.uc-file')!;
+    const file = new File([new Uint8Array([0, 1, 2])], 'archive.zip', { type: 'application/zip' });
+    setFiles(fileInput, [file]);
+    fileInput.dispatchEvent(new Event('change'));
+    await tick();
+    expect(parent.querySelector('.uc-chips')!.querySelectorAll('.uc-chip').length).toBe(0);
   });
 });

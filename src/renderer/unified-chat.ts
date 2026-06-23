@@ -19,15 +19,37 @@ import taskLists from 'markdown-it-task-lists';
 import { restoreUnifiedThread, type UnifiedChatItem, type UnifiedThreadSnapshot } from './unified-chat-history';
 import { mountStyleSettingPanel, type StyleSettingHandle } from './style-setting-panel';
 import type { StyleSetting } from './humanize-engine';
+import { CONVERTIBLE_EXTS } from '../shared/file-types';
+
+/** Non-image extensions read directly as UTF-8 text and attached as context. */
+const TEXT_READABLE_EXTS = new Set<string>([
+  'txt', 'md', 'markdown', 'mdx', 'csv', 'tsv', 'json', 'jsonl', 'yaml', 'yml', 'toml', 'ini',
+  'xml', 'html', 'htm', 'css', 'log', 'rtf', 'tex', 'srt', 'vtt',
+  'js', 'jsx', 'ts', 'tsx', 'py', 'rb', 'go', 'rs', 'java', 'kt', 'c', 'h', 'cpp', 'cc', 'hpp',
+  'cs', 'php', 'swift', 'sh', 'bash', 'zsh', 'sql', 'r', 'lua', 'pl', 'dart', 'scala', 'vue', 'svelte',
+]);
+const CONVERTIBLE_EXT_SET = new Set<string>(CONVERTIBLE_EXTS as readonly string[]);
+/** Max characters of a single attached text/document fed to the model. */
+const MAX_TEXT_FILE_CHARS = 100_000;
 
 export type ChatMode = 'write' | 'advise' | 'project' | 'html';
 
 /** A pending image attachment in the composer (base64, no data: prefix). */
 export type ChatAttachment = { mime: string; base64: string; bytes: number; name?: string };
 
+/** A pending non-image file attachment, already decoded to text for AI context. */
+export type ChatTextAttachment = { name: string; text: string; bytes: number };
+
 export type UnifiedChatHandlers = {
   /** Send the composed message (with any image attachments) in the active mode. */
-  onSend: (text: string, mode: ChatMode, attachments?: ChatAttachment[]) => void;
+  onSend: (
+    text: string,
+    mode: ChatMode,
+    attachments?: ChatAttachment[],
+    textFiles?: ChatTextAttachment[],
+  ) => void;
+  /** Convert an attached document (PDF/DOCX/HWP/XLSX) buffer to Markdown for context. */
+  convertFile?: (base64: string, ext: string, name: string) => Promise<{ ok: boolean; markdown?: string; error?: string }>;
   /** Apply an assistant message's content to the document. */
   onInsert: (text: string) => void;
   onReplace: (text: string) => void;
@@ -120,7 +142,7 @@ export function renderUnifiedChat(): string {
   <div class="uc-chips" hidden></div>
   <div class="uc-composer">
     <button class="uc-attach" type="button" data-tooltip="${t('uc.attach')}" aria-label="${t('uc.attach')}">+</button>
-    <input class="uc-file" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden />
+    <input class="uc-file" type="file" accept="image/png,image/jpeg,image/webp,.txt,.md,.markdown,.mdx,.csv,.tsv,.json,.yaml,.yml,.xml,.html,.css,.log,.pdf,.docx,.xlsx,.xls,.hwp,.hwpx,text/*" multiple hidden />
     <textarea class="uc-input" rows="2" placeholder="${t('uc.placeholder')}" aria-label="${t('uc.write')}"></textarea>
     <button class="uc-send" type="button">${t('uc.send')}</button>
   </div>
@@ -150,33 +172,65 @@ export function mountUnifiedChat(parent: HTMLElement, handlers: UnifiedChatHandl
   let mode: ChatMode = 'write';
   const chips = parent.querySelector<HTMLElement>('.uc-chips')!;
   const fileInput = parent.querySelector<HTMLInputElement>('.uc-file')!;
-  const pendingImages: ChatAttachment[] = [];
+  type PendingItem = { kind: 'image'; img: ChatAttachment } | { kind: 'text'; txt: ChatTextAttachment };
+  const pending: PendingItem[] = [];
+  const MAX_ATTACHMENTS = 6;
+  const MAX_IMAGES = 4;
+  const imageCount = () => pending.reduce((n, p) => n + (p.kind === 'image' ? 1 : 0), 0);
+  const esc = (s: string) =>
+    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
   function renderChips() {
-    chips.hidden = pendingImages.length === 0;
-    chips.innerHTML = pendingImages
-      .map(
-        (a, i) =>
-          `<span class="uc-chip">${(a.name ?? 'image').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')}<button class="uc-chip-x" data-chip="${i}" type="button" aria-label="remove">×</button></span>`,
-      )
+    chips.hidden = pending.length === 0;
+    chips.innerHTML = pending
+      .map((p, i) => {
+        const name = p.kind === 'image' ? p.img.name ?? 'image' : p.txt.name;
+        const icon = p.kind === 'image' ? '🖼' : '📄';
+        return `<span class="uc-chip">${icon} ${esc(name)}<button class="uc-chip-x" data-chip="${i}" type="button" aria-label="remove">×</button></span>`;
+      })
       .join('');
   }
 
   function addAttachment(att: ChatAttachment) {
-    if (pendingImages.length >= 4) return;
-    pendingImages.push(att);
+    if (imageCount() >= MAX_IMAGES || pending.length >= MAX_ATTACHMENTS) return;
+    pending.push({ kind: 'image', img: att });
     renderChips();
+  }
+
+  function addTextFile(txt: ChatTextAttachment) {
+    if (pending.length >= MAX_ATTACHMENTS) return;
+    pending.push({ kind: 'text', txt });
+    renderChips();
+  }
+
+  async function fileToBase64(file: File): Promise<string> {
+    const view = new Uint8Array(await file.arrayBuffer());
+    let bin = '';
+    const CHUNK = 0x8000;
+    for (let i = 0; i < view.length; i += CHUNK) {
+      bin += String.fromCharCode(...view.subarray(i, i + CHUNK));
+    }
+    return btoa(bin);
   }
 
   async function readFiles(files: FileList | File[]) {
     for (const file of Array.from(files)) {
-      if (!/^image\/(png|jpeg|webp)$/.test(file.type)) continue;
-      const buf = await file.arrayBuffer();
-      const bytes = buf.byteLength;
-      let bin = '';
-      const view = new Uint8Array(buf);
-      for (let i = 0; i < view.length; i++) bin += String.fromCharCode(view[i]);
-      addAttachment({ mime: file.type, base64: btoa(bin), bytes, name: file.name });
+      if (pending.length >= MAX_ATTACHMENTS) break;
+      const ext = (file.name.split('.').pop() ?? '').toLowerCase();
+      if (/^image\/(png|jpeg|webp)$/.test(file.type)) {
+        if (imageCount() >= MAX_IMAGES) continue;
+        addAttachment({ mime: file.type, base64: await fileToBase64(file), bytes: file.size, name: file.name });
+      } else if (CONVERTIBLE_EXT_SET.has(ext) && handlers.convertFile) {
+        // PDF / DOCX / XLSX / HWP → convert to Markdown text in the main process.
+        const r = await handlers.convertFile(await fileToBase64(file), ext, file.name).catch(() => ({ ok: false }));
+        if ((r as { ok: boolean }).ok && (r as { markdown?: string }).markdown) {
+          addTextFile({ name: file.name, text: (r as { markdown: string }).markdown.slice(0, MAX_TEXT_FILE_CHARS), bytes: file.size });
+        }
+      } else if (TEXT_READABLE_EXTS.has(ext) || /^text\//.test(file.type) || file.type === 'application/json') {
+        const text = await file.text();
+        if (text.trim()) addTextFile({ name: file.name, text: text.slice(0, MAX_TEXT_FILE_CHARS), bytes: file.size });
+      }
+      // Unsupported binary types are silently skipped.
     }
   }
 
@@ -357,12 +411,13 @@ export function mountUnifiedChat(parent: HTMLElement, handlers: UnifiedChatHandl
     // wipe the user's text from them (would be silent text loss).
     if (mode === 'project' || mode === 'html') return;
     const text = input.value.trim();
-    // Allow an image-only turn (e.g. "OCR this") when attachments are present.
-    if (!text && pendingImages.length === 0) return;
-    const attachments = pendingImages.length ? pendingImages.slice() : undefined;
-    handlers.onSend(text, mode, attachments);
+    const images = pending.filter((p): p is { kind: 'image'; img: ChatAttachment } => p.kind === 'image').map((p) => p.img);
+    const textFiles = pending.filter((p): p is { kind: 'text'; txt: ChatTextAttachment } => p.kind === 'text').map((p) => p.txt);
+    // Allow an attachment-only turn (e.g. "OCR this" / "summarize this file").
+    if (!text && pending.length === 0) return;
+    handlers.onSend(text, mode, images.length ? images : undefined, textFiles.length ? textFiles : undefined);
     input.value = '';
-    pendingImages.length = 0;
+    pending.length = 0;
     renderChips();
   };
 
@@ -376,7 +431,7 @@ export function mountUnifiedChat(parent: HTMLElement, handlers: UnifiedChatHandl
     if (chipX) {
       const i = Number(chipX.dataset.chip);
       if (Number.isInteger(i)) {
-        pendingImages.splice(i, 1);
+        pending.splice(i, 1);
         renderChips();
       }
     }

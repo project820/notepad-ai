@@ -182,6 +182,12 @@ const api = {
   appVersion: (): Promise<string> => ipcRenderer.invoke('app:version'),
   /** Relaunch the whole app (used to fully apply a language change). */
   relaunchApp: (): Promise<void> => ipcRenderer.invoke('app:relaunch'),
+  /** Convert an attached document (PDF/DOCX/HWP/XLSX) buffer to Markdown text for AI context. */
+  convertAttachment: (
+    base64: string,
+    ext: string,
+  ): Promise<{ ok: boolean; markdown?: string; error?: string }> =>
+    ipcRenderer.invoke('ai:convert-attachment', { base64, ext }),
 
   // HTML export (⑤)
   fetchDesignMd: (

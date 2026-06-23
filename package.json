@@ -16,6 +16,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:main": "tsc -p tsconfig.main.json && node --test dist/main/overview-traversal.test.js",
+    "test:html-export": "electron scripts/html-export-containment-runner.mjs",
     "install:local": "npm run build && electron-builder --mac --dir && rm -rf '/Applications/Notepad AI.app' && ditto 'release/mac-arm64/Notepad AI.app' '/Applications/Notepad AI.app' && rm -rf release/mac-arm64 && echo 'installed to /Applications (build staging removed)'"
   },
   "keywords": [
