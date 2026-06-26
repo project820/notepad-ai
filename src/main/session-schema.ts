@@ -152,6 +152,11 @@ function legacyToV2(raw: Record<string, unknown>): SessionSnapshotV2 {
 export function migrateSessionSnapshot(raw: unknown): SessionSnapshotV2 {
   if (!isRecord(raw)) return { version: 2, windows: [] };
   if (raw.version === 2) return normalizeV2(raw);
+  // A future/unknown numeric version must NOT be coerced into a legacy single
+  // snapshot (that would clobber a newer on-disk format written by a later app
+  // build). Treat it as unreadable → safe empty aggregate (M-04).
+  if (typeof raw.version === 'number') return { version: 2, windows: [] };
+  // No `version` field → a genuine pre-v2 legacy single snapshot.
   return legacyToV2(raw);
 }
 

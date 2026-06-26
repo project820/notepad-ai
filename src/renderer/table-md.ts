@@ -94,6 +94,23 @@ export function parseTables(doc: string): ParsedTable[] {
   return tables;
 }
 
+/**
+ * Resolve a 0-based source line to the (tableIdx, rowIdx) it addresses, using
+ * markdown-it-derived row line numbers rather than fragile DOM ordinal position.
+ * Returns null when the line is not an addressable table row (G006 source-range).
+ */
+export function resolveTableCellAtLine(
+  doc: string,
+  line0: number,
+): { tableIdx: number; rowIdx: number } | null {
+  const tables = parseTables(doc);
+  for (let tableIdx = 0; tableIdx < tables.length; tableIdx++) {
+    const rowIdx = tables[tableIdx].rowLines.indexOf(line0);
+    if (rowIdx >= 0) return { tableIdx, rowIdx };
+  }
+  return null;
+}
+
 /** Build a fresh empty Markdown table with localized header labels. */
 export function buildMarkdownTable(rows: number, cols: number, locale: 'ko' | 'en'): string {
   const safeCols = Math.max(1, cols);

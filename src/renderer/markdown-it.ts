@@ -43,14 +43,14 @@ export function createMarkdownIt(): MarkdownIt {
     .use(deflist)
     .use(attrs, { allowedAttributes: ['id'] });
 
-  // Open links in the system browser (Electron preload doesn't add
-  // target=_blank automatically).
+  // Links never get an automatic target="_blank" (Phase 1 security gate): a new
+  // top-level target would route through Electron's window-open path. Instead the
+  // preview's click handler (preview-links + link-policy) intercepts every anchor
+  // and opens only normalized http/https URLs in the OS browser via IPC. We still
+  // stamp rel="noopener noreferrer" as defense-in-depth.
   const defaultLinkOpen =
     md.renderer.rules.link_open ?? ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options));
   md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
-    const aIndex = tokens[idx].attrIndex('target');
-    if (aIndex < 0) tokens[idx].attrPush(['target', '_blank']);
-    else tokens[idx].attrs![aIndex][1] = '_blank';
     tokens[idx].attrSet('rel', 'noopener noreferrer');
     return defaultLinkOpen(tokens, idx, options, env, self);
   };

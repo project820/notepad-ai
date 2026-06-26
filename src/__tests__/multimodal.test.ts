@@ -64,9 +64,18 @@ describe('resolveOcrAssetPaths (G007/A2 local-only, no CDN)', () => {
 
 describe('validateImageAttachments (G007 IPC boundary)', () => {
   it('accepts a valid attachment and normalizes name length', () => {
-    const res = validateImageAttachments([img({ name: 'x'.repeat(500) })]);
+    const res = validateImageAttachments([img({ name: 'x'.repeat(500), base64: 'iVBORw0KGgo=' })]);
     expect(res.ok).toBe(true);
     if (res.ok) expect(res.images[0].name!.length).toBe(200);
+  });
+  it('rejects content whose magic bytes do not match the declared mime (G006)', () => {
+    // 'AAAA' decodes to 0x00 0x00 0x00 — not a PNG/JPEG/WEBP signature.
+    expect(validateImageAttachments([img({ mime: 'image/png', base64: 'AAAA' })]).ok).toBe(false);
+    // A real JPEG header declared as PNG must also be rejected.
+    expect(validateImageAttachments([img({ mime: 'image/png', base64: '/9j/4A==' })]).ok).toBe(false);
+    // Correctly-labelled JPEG/WEBP magic is accepted.
+    expect(validateImageAttachments([img({ mime: 'image/jpeg', base64: '/9j/4A==' })]).ok).toBe(true);
+    expect(validateImageAttachments([img({ mime: 'image/webp', base64: 'UklGRgAAAABXRUJQ' })]).ok).toBe(true);
   });
   it('treats null/undefined as no images', () => {
     expect(validateImageAttachments(undefined)).toEqual({ ok: true, images: [] });

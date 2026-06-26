@@ -116,6 +116,27 @@ describe('renderChartSvg — invalid specs never throw', () => {
     { label: 'empty series', value: { type: 'bar', labels: ['a'], series: [] } },
     { label: 'non-finite values', value: { type: 'line', labels: ['a'], series: [{ values: [Number.NaN] }] } },
     { label: 'values not numbers', value: { type: 'pie', labels: ['a'], series: [{ values: ['x'] }] } },
+    {
+      label: 'series/labels length mismatch',
+      value: { type: 'bar', labels: ['a', 'b', 'c'], series: [{ values: [1, 2] }] },
+    },
+    { label: 'empty labels', value: { type: 'bar', labels: [], series: [{ values: [] }] } },
+    {
+      label: 'too many labels',
+      value: {
+        type: 'bar',
+        labels: Array.from({ length: 201 }, (_, i) => `L${i}`),
+        series: [{ values: Array.from({ length: 201 }, () => 1) }],
+      },
+    },
+    {
+      label: 'too many series',
+      value: {
+        type: 'line',
+        labels: ['a', 'b'],
+        series: Array.from({ length: 25 }, () => ({ values: [1, 2] })),
+      },
+    },
   ];
 
   for (const { label, value } of bad) {

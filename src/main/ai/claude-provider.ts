@@ -25,7 +25,13 @@ export class ClaudeProvider implements AiProvider {
   readonly id = 'claude' as const;
   readonly authKind = 'api_key' as const;
 
-  constructor(private keys: ApiKeyStore) {}
+  // `streamFn` is injectable so tests can count Anthropic API calls and force
+  // failures, and so a future CLI-first composition (G004) can assert the API
+  // path is NOT taken when the CLI handles the request (G002 DI seam).
+  constructor(
+    private keys: ApiKeyStore,
+    private streamFn: typeof streamSseChat = streamSseChat,
+  ) {}
 
   async getAuthStatus(): Promise<ProviderAuthStatus> {
     const status = await this.keys.getKeyStatus('claude');
@@ -61,7 +67,7 @@ export class ClaudeProvider implements AiProvider {
       req.userText,
       supportsVision('claude', req.model.id) ? req.images : undefined,
     );
-    await streamSseChat(
+    await this.streamFn(
       {
         url: ANTHROPIC_URL,
         providerLabel: 'Claude',

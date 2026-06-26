@@ -149,3 +149,37 @@ describe('wirePreviewTables — right-click context menu', () => {
     expect(document.querySelector('.table-ctx-menu')).toBeNull();
   });
 });
+
+describe('wirePreviewTables — source-range addressing (G006)', () => {
+  it('edits the table the row maps to by source line, not its DOM ordinal', () => {
+    // Document has TWO tables; the preview shows only the SECOND one, so its DOM
+    // ordinal is 0 — which under the old ordinal scheme would wrongly patch the
+    // FIRST source table. The row's data-src-start anchors the edit correctly.
+    const TWO = ['| a | b |', '| - | - |', '| 1 | 2 |', '', '| c | d |', '| - | - |', '| 3 | 4 |'].join('\n');
+    const root = document.createElement('div');
+    root.innerHTML = `<table>
+      <thead><tr><th>c</th><th>d</th></tr></thead>
+      <tbody><tr><td>3</td><td>4</td></tr></tbody>
+    </table>`;
+    document.body.appendChild(root);
+    let doc = TWO;
+    const getDoc = () => doc;
+    wirePreviewTables(root, getDoc, (next) => {
+      doc = next;
+    });
+    // Tag the rows with their 1-based source lines (header line 4 → 5; body 6 → 7).
+    const trs = Array.from(root.querySelectorAll('tr'));
+    trs[0].setAttribute('data-src-start', '5');
+    trs[1].setAttribute('data-src-start', '7');
+
+    const headerCell = Array.from(root.querySelectorAll<HTMLTableCellElement>('th,td')).find(
+      (c) => c.textContent === 'c',
+    )!;
+    headerCell.textContent = 'C';
+    headerCell.dispatchEvent(new Event('blur', { bubbles: false }));
+
+    const lines = getDoc().split('\n');
+    expect(lines[4]).toBe('| C | d |'); // second table edited
+    expect(lines[0]).toBe('| a | b |'); // first table untouched
+  });
+});

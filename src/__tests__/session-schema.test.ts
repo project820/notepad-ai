@@ -147,6 +147,19 @@ describe('migrateSessionSnapshot — malformed / null', () => {
     expect(a).not.toBe(b);
     expect(a.windows).not.toBe(b.windows);
   });
+
+  it('rejects a FUTURE version (>2) as unreadable instead of legacy-wrapping it (M-04)', () => {
+    const future = { version: 3, windows: [{ id: 'w1', doc: 'hi' }], somethingNew: true };
+    // Must NOT be coerced into a one-window legacy aggregate (which would clobber
+    // a newer on-disk format); it is treated as unreadable → safe empty.
+    expect(migrateSessionSnapshot(future)).toEqual({ version: 2, windows: [] });
+  });
+
+  it('still wraps a genuine legacy snapshot (no version field) into one window', () => {
+    const out = migrateSessionSnapshot({ doc: 'legacy body', currentPath: '/a.md' });
+    expect(out.version).toBe(2);
+    expect(out.windows).toHaveLength(1);
+  });
 });
 
 // ============================================================================

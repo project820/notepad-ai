@@ -55,6 +55,21 @@ describe('compareProtectedSpans', () => {
     expect(cmp.ok).toBe(false);
     expect(cmp.missingInlineCode).toContain('`build`');
   });
+  it('detects a sign flip (-5 → 5) instead of masking it as the same digit', () => {
+    const cmp = compareProtectedSpans('Temperature was -5 today.', 'Temperature was 5 today.');
+    expect(cmp.ok).toBe(false);
+    expect(cmp.missingNumbers).toContain('-5');
+  });
+  it('detects a dropped currency symbol ($100 → 100) as a value change', () => {
+    const cmp = compareProtectedSpans('It costs $100 total.', 'It costs 100 total.');
+    expect(cmp.ok).toBe(false);
+    expect(cmp.missingNumbers).toContain('$100');
+  });
+  it('detects a dropped percent (5% → 5) as a value change', () => {
+    const cmp = compareProtectedSpans('Growth was 5% here.', 'Growth was 5 here.');
+    expect(cmp.ok).toBe(false);
+    expect(cmp.missingNumbers).toContain('5%');
+  });
 });
 
 describe('changeRate', () => {

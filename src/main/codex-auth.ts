@@ -1,6 +1,7 @@
 import { app, safeStorage, shell } from 'electron';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { readCappedText } from './ai/stream-http';
 
 /**
  * OpenAI Codex device-code OAuth — ported from Hermes (auth.py).
@@ -21,6 +22,8 @@ const DEVICE_TOKEN_URL = `${ISSUER}/api/accounts/deviceauth/token`;
 const OAUTH_TOKEN_URL = `${ISSUER}/oauth/token`;
 const REDIRECT_URI = `${ISSUER}/deviceauth/callback`;
 const REFRESH_SKEW_SECONDS = 120;
+const REFRESH_TIMEOUT_MS = 20_000;
+const REFRESH_BODY_CAP = 256 * 1024; // OAuth token responses are tiny; cap defensively (H-22).
 
 export type AuthSnapshot = {
   signedIn: boolean;
@@ -52,6 +55,12 @@ function storePath() {
 // the current session only and NEVER write plaintext to disk (S2).
 let memoryAuth: StoredAuth | null = null;
 let persistedToDisk = false;
+// Single-flight token refresh: concurrent getAccessToken callers share one
+// in-flight refresh instead of each racing their own writeStored (H-22).
+let refreshPromise: Promise<string | null> | null = null;
+// Auth generation epoch: bumped on logout/login-cancel so a refresh that began
+// before a logout cannot resurrect tokens by writing them back after sign-out.
+let authGeneration = 0;
 
 /** Main-process-only env credential source (read-only). Never written. */
 function readEnvAuth(): StoredAuth | null {
@@ -70,15 +79,18 @@ function readEnvAuth(): StoredAuth | null {
  * Returns whether the data was persisted to encrypted disk.
  */
 async function writeStored(data: StoredAuth): Promise<{ persisted: boolean }> {
-  memoryAuth = data;
   if (safeStorage.isEncryptionAvailable()) {
     const buf = safeStorage.encryptString(JSON.stringify(data));
     await fs.mkdir(path.dirname(storePath()), { recursive: true });
+    // Durable write FIRST; commit the in-memory token only after it succeeds so a
+    // failed disk write never leaves a contradictory "signed-in" memory state (H-24).
     await fs.writeFile(storePath(), buf);
+    memoryAuth = data;
     persistedToDisk = true;
     return { persisted: true };
   }
-  // Secure storage unavailable: memory-only, never plaintext on disk.
+  // Secure storage unavailable: memory-only for this session, never plaintext on disk.
+  memoryAuth = data;
   persistedToDisk = false;
   return { persisted: false };
 }
@@ -176,7 +188,11 @@ export async function startLogin(onUpdate: (u: LoginUpdate) => void): Promise<vo
 
   const userCode = usercodeResp.user_code as string;
   const deviceAuthId = usercodeResp.device_auth_id as string;
-  const pollInterval = Math.max(3, parseInt(String(usercodeResp.interval ?? '5'), 10)) * 1000;
+  // Clamp the server-supplied poll interval to a sane 3–30s window. `parseInt`
+  // can return NaN (and `Math.max(3, NaN)` is NaN → setTimeout(…, NaN) would
+  // hammer the endpoint with ~0ms polls); Number.isFinite guards against that (H-21).
+  const parsedInterval = Number.parseInt(String(usercodeResp.interval ?? '5'), 10);
+  const pollInterval = (Number.isFinite(parsedInterval) ? Math.min(Math.max(parsedInterval, 3), 30) : 5) * 1000;
 
   if (!userCode || !deviceAuthId) {
     onUpdate({ kind: 'error', message: 'Device code response missing required fields.' });
@@ -191,9 +207,9 @@ export async function startLogin(onUpdate: (u: LoginUpdate) => void): Promise<vo
   let codeResp: { authorization_code?: string; code_verifier?: string } | null = null;
 
   while (Date.now() < deadline) {
-    if (signal.aborted) return;
+    if (signal.aborted) return onUpdate({ kind: 'error', message: 'Login cancelled.' });
     await new Promise((res) => setTimeout(res, pollInterval));
-    if (signal.aborted) return;
+    if (signal.aborted) return onUpdate({ kind: 'error', message: 'Login cancelled.' });
     let r: Response;
     try {
       r = await fetch(DEVICE_TOKEN_URL, {
@@ -203,6 +219,9 @@ export async function startLogin(onUpdate: (u: LoginUpdate) => void): Promise<vo
         signal,
       });
     } catch (e: any) {
+      // An abort is a user cancel, not a network error — emit a terminal cancel
+      // so the renderer's login flow resolves instead of hanging (P1 login cancel).
+      if (signal.aborted) return onUpdate({ kind: 'error', message: 'Login cancelled.' });
       onUpdate({ kind: 'error', message: `Polling error: ${e.message ?? e}` });
       return;
     }
@@ -293,6 +312,10 @@ export async function getStatus(): Promise<AuthSnapshot> {
 
 export async function logout(): Promise<void> {
   cancelLogin();
+  // Bump the epoch BEFORE deleting so any refresh already in flight sees the
+  // change and refuses to write tokens back after sign-out (H-22 resurrection).
+  authGeneration++;
+  refreshPromise = null;
   await deleteStored();
 }
 
@@ -303,23 +326,39 @@ export async function getAccessToken(): Promise<string | null> {
   const now = Math.floor(Date.now() / 1000);
   if (expiry && now < expiry - REFRESH_SKEW_SECONDS) return s.access_token;
   if (!s.refresh_token) return s.access_token; // best effort
-  // refresh
+  // Single-flight: concurrent callers share one refresh round-trip.
+  if (!refreshPromise) {
+    refreshPromise = refreshAccessToken(s).finally(() => {
+      refreshPromise = null;
+    });
+  }
+  return refreshPromise;
+}
+
+async function refreshAccessToken(s: StoredAuth): Promise<string | null> {
+  const gen = authGeneration;
   try {
     const form = new URLSearchParams({
       grant_type: 'refresh_token',
-      refresh_token: s.refresh_token,
+      refresh_token: s.refresh_token!,
       client_id: CLIENT_ID,
     });
     const r = await fetch(OAUTH_TOKEN_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: form.toString(),
+      redirect: 'error',
+      signal: AbortSignal.timeout(REFRESH_TIMEOUT_MS),
     });
     if (!r.ok) return s.access_token;
-    const j = await r.json();
+    const j = JSON.parse(await readCappedText(r, REFRESH_BODY_CAP));
+    const access = j.access_token ?? s.access_token;
+    // If a logout/login happened while this refresh was in flight, do NOT
+    // persist — that would resurrect tokens for a signed-out user (H-22).
+    if (gen !== authGeneration) return access;
     const next: StoredAuth = {
       ...s,
-      access_token: j.access_token ?? s.access_token,
+      access_token: access,
       refresh_token: j.refresh_token ?? s.refresh_token,
       id_token: j.id_token ?? s.id_token,
       expires_in: j.expires_in ?? s.expires_in,

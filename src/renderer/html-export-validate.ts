@@ -83,3 +83,114 @@ export function layoutDiagnostics(args: { layout: LayoutKind; orientation?: Orie
         ];
   return { layout, orientation: args.orientation ?? null, invariants };
 }
+
+// ---------------------------------------------------------------------------
+// validateExportDom — structural allowlist validator (G006).
+//
+// The regex `validateSelfContainedHtml` above is a denylist of known-bad
+// substrings. This complements it with a DOM walk that STRUCTURALLY rejects:
+//   - forbidden embedding/redirect tags (iframe/object/embed/base/frame…),
+//   - any on* event-handler attribute on any element,
+//   - any URL-bearing attribute whose value escapes the self-contained,
+//     no-script-scheme allowlist (only data:, #fragment, or relative paths),
+//   - <meta http-equiv="refresh"> redirects.
+// Parsing the real DOM catches obfuscated attribute spellings/placements a
+// flat regex misses. Pure + injectable parser → unit-testable under jsdom.
+// ---------------------------------------------------------------------------
+
+export type DomParse = (html: string) => Document;
+
+const FORBIDDEN_TAGS = new Set(['iframe', 'object', 'embed', 'base', 'frame', 'frameset', 'applet']);
+
+const URL_ATTRS = [
+  'src',
+  'href',
+  'xlink:href',
+  'poster',
+  'data',
+  'action',
+  'formaction',
+  'background',
+  'cite',
+  'longdesc',
+  'manifest',
+  'codebase',
+];
+
+/** Allowed only: empty, #fragment, data: URI, or a scheme-less relative path. */
+function isAllowedExportUrl(raw: string): boolean {
+  const v = raw.trim();
+  if (v === '') return true;
+  if (v.startsWith('#')) return true;
+  if (/^data:/i.test(v)) return true;
+  if (v.startsWith('//')) return false; // protocol-relative → remote
+  if (/^[a-z][a-z0-9+.-]*:/i.test(v)) return false; // any explicit scheme (http/blob/javascript/file…)
+  return true; // scheme-less relative path
+}
+
+/** Every URL candidate in a srcset must satisfy the allowlist. */
+function srcsetAllowed(value: string): boolean {
+  return value
+    .split(',')
+    .map((c) => c.trim().split(/\s+/)[0] ?? '')
+    .every((u) => isAllowedExportUrl(u));
+}
+
+function defaultDomParse(html: string): Document {
+  if (typeof DOMParser === 'undefined') {
+    throw new Error('validateExportDom requires a DOMParser (pass one explicitly outside a DOM env)');
+  }
+  return new DOMParser().parseFromString(html, 'text/html');
+}
+
+export function validateExportDom(html: string, parse: DomParse = defaultDomParse): SelfContainedVerdict {
+  const violations: string[] = [];
+  const src = typeof html === 'string' ? html : '';
+  let doc: Document;
+  try {
+    doc = parse(src);
+  } catch {
+    return { ok: false, violations: ['unparseable export HTML'] };
+  }
+  const seen = new Set<string>();
+  const flag = (msg: string) => {
+    if (!seen.has(msg)) {
+      seen.add(msg);
+      violations.push(msg);
+    }
+  };
+
+  for (const el of Array.from(doc.querySelectorAll('*'))) {
+    const tag = el.tagName.toLowerCase();
+    if (FORBIDDEN_TAGS.has(tag)) flag(`forbidden <${tag}>`);
+    if (tag === 'meta') {
+      const equiv = (el.getAttribute('http-equiv') ?? '').trim().toLowerCase();
+      if (equiv === 'refresh') flag('<meta http-equiv="refresh"> redirect');
+    }
+    for (const attr of Array.from(el.attributes)) {
+      const name = attr.name.toLowerCase();
+      const value = attr.value ?? '';
+      if (name.startsWith('on')) {
+        flag(`event-handler attribute ${name}`);
+        continue;
+      }
+      if (name === 'srcset') {
+        if (!srcsetAllowed(value)) flag('remote srcset');
+        continue;
+      }
+      if (name === 'style') {
+        const urls = value.match(/url\(\s*['"]?([^'")]*)['"]?\s*\)/gi) ?? [];
+        for (const u of urls) {
+          const inner = u.replace(/^url\(\s*['"]?/i, '').replace(/['"]?\s*\)$/, '');
+          if (!isAllowedExportUrl(inner)) flag('remote url() in inline style');
+        }
+        continue;
+      }
+      if (URL_ATTRS.includes(name) && !isAllowedExportUrl(value)) {
+        flag(`disallowed URL in ${name}=`);
+      }
+    }
+  }
+
+  return { ok: violations.length === 0, violations };
+}

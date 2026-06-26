@@ -144,8 +144,6 @@ function bundleFor(
   return bundleHtml({
     model,
     theme,
-    themeCss,
-    componentCss,
     orientation,
     layout,
     summaryChartMode: 'B',

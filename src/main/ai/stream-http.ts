@@ -9,6 +9,54 @@
 import { AiProviderError, classifyHttpError, type AiChatEvent } from './types';
 import { splitSseEvents, sseDataPayload } from './sse';
 
+/**
+ * Stream resource bounds (Phase 3). A hostile or buggy provider/local server must
+ * not be able to exhaust the main process: unparsed buffer, assembled output, and
+ * an error-response body are all capped, and a non-2xx body is read with a hard
+ * limit (never `resp.text()` on an unbounded stream).
+ */
+export const STREAM_LIMITS = {
+  /** Max bytes of an HTTP error response body read for diagnostics. */
+  errorBodyMax: 64 * 1024,
+  /** Max size of the unparsed frame buffer before we treat the stream as abusive. */
+  bufferMax: 2 * 1024 * 1024,
+  /** Max assembled output text before the stream is force-terminated. */
+  outputMax: 8 * 1024 * 1024,
+} as const;
+
+/** Read a response body as text with a hard byte cap (never buffers an unbounded body). */
+export async function readCappedText(resp: Response, maxBytes: number): Promise<string> {
+  if (!resp.body) {
+    try {
+      return (await resp.text()).slice(0, maxBytes);
+    } catch {
+      return '';
+    }
+  }
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let out = '';
+  let bytes = 0;
+  try {
+    while (bytes < maxBytes) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      out += decoder.decode(value, { stream: true });
+    }
+  } catch {
+    /* return whatever we have */
+  } finally {
+    await reader.cancel().catch(() => {});
+    try {
+      reader.releaseLock();
+    } catch {
+      /* ignore */
+    }
+  }
+  return out.slice(0, maxBytes);
+}
+
 export type SseMap = {
   /** Text to append (empty string for keep-alives / non-text events). */
   delta: string;
@@ -39,6 +87,9 @@ export async function streamSseChat(
       headers: { ...args.headers, 'Content-Type': 'application/json', Accept: 'text/event-stream' },
       body: JSON.stringify(args.body),
       signal: args.signal,
+      // Never follow a redirect: a localhost provider that 307/308s to a remote
+      // host would otherwise forward the document/prompt body off-machine (SSRF).
+      redirect: 'error',
     });
   } catch (e: unknown) {
     if (args.signal?.aborted) {
@@ -55,12 +106,7 @@ export async function streamSseChat(
   }
 
   if (!resp.ok) {
-    let detail = '';
-    try {
-      detail = await resp.text();
-    } catch {
-      /* ignore */
-    }
+    const detail = await readCappedText(resp, STREAM_LIMITS.errorBodyMax);
     const err = classifyHttpError(args.providerLabel, resp.status, detail);
     onEvent({ kind: 'error', message: err.message, errorKind: err.errorKind });
     return;
@@ -87,6 +133,12 @@ export async function streamSseChat(
       buffer += decoder.decode(value, { stream: true });
       const { events, rest } = splitSseEvents(buffer);
       buffer = rest;
+      // Abusive stream guard: an event with no separator can grow `buffer`
+      // unbounded; a runaway provider can grow `assembled` unbounded.
+      if (buffer.length > STREAM_LIMITS.bufferMax) {
+        onEvent({ kind: 'error', message: `${args.providerLabel}: stream frame exceeded ${STREAM_LIMITS.bufferMax} bytes.`, errorKind: 'provider' });
+        return;
+      }
       for (const block of events) {
         const payload = sseDataPayload(block);
         if (!payload) continue;
@@ -97,6 +149,10 @@ export async function streamSseChat(
         }
         if (mapped.delta) {
           assembled += mapped.delta;
+          if (assembled.length > STREAM_LIMITS.outputMax) {
+            onEvent({ kind: 'error', message: `${args.providerLabel}: response exceeded ${STREAM_LIMITS.outputMax} bytes.`, errorKind: 'provider' });
+            return;
+          }
           onEvent({ kind: 'delta', text: mapped.delta });
         }
         if (mapped.done) {
@@ -113,8 +169,14 @@ export async function streamSseChat(
     const msg = e instanceof Error ? e.message : String(e);
     onEvent({ kind: 'error', message: `${args.providerLabel} stream error: ${msg}`, errorKind: 'network' });
     return;
+  } finally {
+    await reader.cancel().catch(() => {});
+    try {
+      reader.releaseLock();
+    } catch {
+      /* already released */
+    }
   }
-
   onEvent({ kind: 'done', text: assembled });
 }
 
@@ -145,6 +207,8 @@ export async function streamNdjsonChat(
       headers: { ...args.headers, 'Content-Type': 'application/json', Accept: 'application/x-ndjson' },
       body: JSON.stringify(args.body),
       signal: args.signal,
+      // Never follow a redirect (SSRF guard — see streamSseChat).
+      redirect: 'error',
     });
   } catch (e: unknown) {
     if (args.signal?.aborted) {
@@ -161,12 +225,7 @@ export async function streamNdjsonChat(
   }
 
   if (!resp.ok) {
-    let detail = '';
-    try {
-      detail = await resp.text();
-    } catch {
-      /* ignore */
-    }
+    const detail = await readCappedText(resp, STREAM_LIMITS.errorBodyMax);
     const err = classifyHttpError(args.providerLabel, resp.status, detail);
     onEvent({ kind: 'error', message: err.message, errorKind: err.errorKind });
     return;
@@ -190,6 +249,10 @@ export async function streamNdjsonChat(
     }
     if (mapped.delta) {
       assembled += mapped.delta;
+      if (assembled.length > STREAM_LIMITS.outputMax) {
+        onEvent({ kind: 'error', message: `${args.providerLabel}: response exceeded ${STREAM_LIMITS.outputMax} bytes.`, errorKind: 'provider' });
+        return true;
+      }
       onEvent({ kind: 'delta', text: mapped.delta });
     }
     if (mapped.done) {
@@ -208,6 +271,10 @@ export async function streamNdjsonChat(
       const { value, done } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
+      if (buffer.length > STREAM_LIMITS.bufferMax) {
+        onEvent({ kind: 'error', message: `${args.providerLabel}: stream line exceeded ${STREAM_LIMITS.bufferMax} bytes.`, errorKind: 'provider' });
+        return;
+      }
       let nl: number;
       while ((nl = buffer.indexOf('\n')) !== -1) {
         const line = buffer.slice(0, nl).trim();
@@ -226,8 +293,14 @@ export async function streamNdjsonChat(
     const msg = e instanceof Error ? e.message : String(e);
     onEvent({ kind: 'error', message: `${args.providerLabel} stream error: ${msg}`, errorKind: 'network' });
     return;
+  } finally {
+    await reader.cancel().catch(() => {});
+    try {
+      reader.releaseLock();
+    } catch {
+      /* already released */
+    }
   }
-
   onEvent({ kind: 'done', text: assembled });
 }
 

@@ -39,25 +39,31 @@ type PersistShape = Partial<Record<AiProviderId, string>>;
 
 export class ApiKeyStore {
   private memory = new Map<AiProviderId, string>();
-  private diskLoaded = false;
+  private loadPromise: Promise<void> | null = null;
   private disk: PersistShape = {};
+  /** Serializes setApiKey/deleteApiKey so concurrent writes never lose a key (H-25). */
+  private mutationChain: Promise<unknown> = Promise.resolve();
 
   constructor(private backend: KeyStoreBackend) {}
 
-  private async loadDisk(): Promise<void> {
-    if (this.diskLoaded) return;
-    this.diskLoaded = true;
-    if (!this.backend.isEncryptionAvailable()) return;
-    const buf = await this.backend.readFile();
-    if (!buf) return;
-    try {
-      const json = this.backend.decryptString(buf);
-      const parsed = JSON.parse(json);
-      if (parsed && typeof parsed === 'object') this.disk = parsed as PersistShape;
-    } catch {
-      // Corrupt/undecryptable store — ignore, treat as empty.
-      this.disk = {};
+  /** Single-flight disk load: concurrent callers share one read (no init race). */
+  private loadDisk(): Promise<void> {
+    if (!this.loadPromise) {
+      this.loadPromise = (async () => {
+        if (!this.backend.isEncryptionAvailable()) return;
+        const buf = await this.backend.readFile();
+        if (!buf) return;
+        try {
+          const json = this.backend.decryptString(buf);
+          const parsed = JSON.parse(json);
+          if (parsed && typeof parsed === 'object') this.disk = parsed as PersistShape;
+        } catch {
+          // Corrupt/undecryptable store — ignore, treat as empty.
+          this.disk = {};
+        }
+      })();
     }
+    return this.loadPromise;
   }
 
   private async persistDisk(): Promise<void> {
@@ -66,9 +72,17 @@ export class ApiKeyStore {
     await this.backend.writeFile(buf);
   }
 
+  /** Run a disk mutation serialized behind any in-flight one. */
+  private mutate<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.mutationChain.then(fn);
+    this.mutationChain = run.catch(() => {});
+    return run;
+  }
+
   /**
    * Store a key. Returns whether it was persisted to disk (true) or held in
-   * memory only because encryption is unavailable (false).
+   * memory only because encryption is unavailable (false). Disk mutations are
+   * serialized so two concurrent sets cannot drop each other's key.
    */
   async setApiKey(provider: AiProviderId, key: string): Promise<{ persisted: boolean }> {
     const trimmed = key.trim();
@@ -78,10 +92,12 @@ export class ApiKeyStore {
       // REFUSE PERSIST: never write plaintext to disk.
       return { persisted: false };
     }
-    await this.loadDisk();
-    this.disk[provider] = trimmed;
-    await this.persistDisk();
-    return { persisted: true };
+    return this.mutate(async () => {
+      await this.loadDisk();
+      this.disk[provider] = trimmed;
+      await this.persistDisk();
+      return { persisted: true };
+    });
   }
 
   async getApiKey(provider: AiProviderId): Promise<string | null> {
@@ -93,13 +109,15 @@ export class ApiKeyStore {
 
   async deleteApiKey(provider: AiProviderId): Promise<void> {
     this.memory.delete(provider);
-    await this.loadDisk();
-    if (this.disk[provider] !== undefined) {
-      delete this.disk[provider];
-      if (this.backend.isEncryptionAvailable()) {
-        await this.persistDisk();
+    await this.mutate(async () => {
+      await this.loadDisk();
+      if (this.disk[provider] !== undefined) {
+        delete this.disk[provider];
+        if (this.backend.isEncryptionAvailable()) {
+          await this.persistDisk();
+        }
       }
-    }
+    });
   }
 
   async getKeyStatus(provider: AiProviderId): Promise<KeyStatus> {

@@ -37,7 +37,7 @@ import { modelKey, parseModelKey } from './model-key';
 import { planSlides, type PlannedSlide } from './html-export-layout';
 import { createDomMeasure, domFontsReady } from './html-export-measure-dom';
 import { bundleHtml, buildExportStyle } from './html-export-bundle';
-import { validateSelfContainedHtml } from './html-export-validate';
+import { validateSelfContainedHtml, validateExportDom } from './html-export-validate';
 import {
   parseDesignTheme,
   toCssVariables,
@@ -385,8 +385,6 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
       const { html } = bundleHtml({
         model,
         theme,
-        themeCss,
-        componentCss,
         orientation,
         layout,
         summaryChartMode,
@@ -397,7 +395,10 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
         plan,
       });
       const verdict = validateSelfContainedHtml(html);
-      if (!verdict.ok) {
+      // Structural allowlist pass (G006): the regex denylist above plus a DOM
+      // walk that rejects forbidden tags, on* handlers, and non-allowlisted URLs.
+      const domVerdict = validateExportDom(html);
+      if (!verdict.ok || !domVerdict.ok) {
         saving = false;
         saveError = t('he.error.notSelfContained');
         render();

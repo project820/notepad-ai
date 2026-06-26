@@ -46,6 +46,7 @@ const PROVIDER_DEFAULT_OUTPUT: Record<AiProviderId, number> = {
   // per-model sizing lands. They accept a max_tokens param, so a finite default is safe.
   ollama: 8_192,
   lmstudio: 8_192,
+  grok: 8_192, // Grok CLI: finite default; CLI ignores max_tokens but keep a sane cap.
 };
 
 /**
@@ -93,6 +94,7 @@ const PROVIDER_DEFAULT_CONTEXT: Record<AiProviderId, number> = {
   // Local providers (G002+): conservative default context window; refined per-model later.
   ollama: 32_768,
   lmstudio: 32_768,
+  grok: 256_000, // Grok default context window (CLI provider).
 };
 
 /**

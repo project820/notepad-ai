@@ -57,7 +57,8 @@
 | 프로바이더 | 연결 방식 |
 |-----------|-----------|
 | ChatGPT | 구독 로그인(device-code OAuth) |
-| Claude (Anthropic) | API 키 |
+| Claude (Anthropic) | 로컬 `claude` CLI 우선(구독·무과금) + Anthropic API 키 폴백 |
+| Grok | 로컬 `grok` CLI(구독·무과금) — API 키 불필요 |
 | OpenRouter | API 키 (Gemini·Grok 등 여러 모델 접근) |
 | Ollama | 로컬 서버 자동 감지(기본 `:11434`) — 키·인터넷 불필요 |
 | LM Studio | 로컬 서버 자동 감지(기본 `:1234`) — 키·인터넷 불필요 |
@@ -66,7 +67,8 @@
 - 내장 **모델 카탈로그**에서 프로바이더와 모델을 고르며, 카탈로그에 없는 모델은 **커스텀 모델 ID**로 직접 입력할 수 있습니다.
 - 아무 프로바이더도 연결하지 않으면 AI 기능은 잠기고, 연결을 안내합니다.
 - API 키는 macOS Keychain(`safeStorage`)으로 암호화 저장하며, 암호화를 쓸 수 없는 환경에서는 **디스크에 저장하지 않고** 해당 세션 메모리에만 둡니다. 키는 화면에 끝 4자리만 표시됩니다.
-- **Gemini·Grok 네이티브 구독 로그인**은 v1 범위가 아니며 후속 과제입니다(현재는 OpenRouter로 접근).
+- **구독형 로컬 CLI 프로바이더(v0.7)** — Claude/Grok 모델을 고르면 유료 API 대신 **로컬 구독 CLI**(`claude -p`, `grok`)로 먼저 호출해 과금을 최소화합니다. 프롬프트는 argv가 아닌 stdin/임시파일로 전달하고, 외부 CLI에는 최소 환경변수만 넘겨 다른 프로바이더의 API 키가 새지 않게 합니다. `claude`는 CLI가 없으면 Anthropic API로 자동 폴백하고, `grok`은 CLI 전용이라 미설치 시 설치/로그인 안내를 표시합니다(유료 폴백 없음). 에이전트 모드 채팅·Antigravity는 후속 과제입니다.
+- **Gemini 네이티브 구독 로그인**은 후속 과제입니다(현재는 OpenRouter로 접근).
 
 ## 개발
 
@@ -76,8 +78,17 @@ npm run dev          # Electron + Vite HMR 개발 모드
 npm run typecheck    # 타입 검사 (main + renderer)
 npm run test         # 단위 테스트 (vitest)
 npm run build        # main + renderer 빌드
+npm run install:local # ⭐ 로컬 설치(빌드 → /Applications에 1개만 설치 → release 정리)
 npm run build:dmg    # 배포용 DMG 생성 → release/
 ```
+
+### 단일 앱 원칙 (중요 — 앱을 여러 개 만들지 말 것)
+
+로컬에서 앱을 설치/갱신할 때는 **반드시 `npm run install:local` 하나만** 사용한다. 이 스크립트는 빌드 후 `/Applications/Notepad AI.app` **하나만** 설치하고 빌드 스테이징(`release/`)을 자동 삭제하므로, 시스템에 **항상 정확히 1개의 Notepad AI 앱**만 남는다.
+
+- `release/`·`dist/`는 빌드 산출물이며 **앱이 아니다**. `release/mac-arm64/Notepad AI.app`가 남아 있으면 Spotlight/Launchpad가 이를 **두 번째 앱**으로 인식한다 — 절대 방치하지 말 것(`.gitignore`에 이미 제외됨).
+- 앱은 **단일 인스턴스 락**(`app.requestSingleInstanceLock`, `src/main/main.ts`)을 강제하므로 두 번 실행해도 새 인스턴스가 뜨지 않고 기존 창이 앞으로 온다.
+- 정리 명령: 떠도는 빌드 번들 제거 → `rm -rf release dist` 후 `npm run install:local` 재실행.
 
 ## 구조
 

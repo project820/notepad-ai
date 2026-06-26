@@ -51,6 +51,10 @@ const W = 640;
 const H = 360;
 const M = { top: 28, right: 20, bottom: 44, left: 48 };
 
+// Size caps so a malformed/hostile spec can't generate a multi-MB SVG (G006).
+const MAX_LABELS = 200;
+const MAX_SERIES = 24;
+
 // Only these colour shapes are accepted from caller-supplied palettes.
 const SAFE_COLOR_RE =
   /^(?:#[0-9a-fA-F]{3,8}|rgba?\([\d.,\s%/]+\)|hsla?\([\d.,\s%/deg]+\)|var\(\s*--[a-z0-9-]+\s*(?:,\s*#[0-9a-fA-F]{3,8}\s*)?\))$/i;
@@ -117,13 +121,21 @@ function validateSpec(spec: unknown): { ok: true; spec: ChartSpec } | { ok: fals
   if (!Array.isArray(c.labels) || !c.labels.every((l) => typeof l === 'string')) {
     return { ok: false, reason: 'labels must be strings' };
   }
+  if (c.labels.length === 0) return { ok: false, reason: 'labels required' };
+  if (c.labels.length > MAX_LABELS) return { ok: false, reason: 'too many labels' };
   if (!Array.isArray(c.series) || c.series.length === 0) return { ok: false, reason: 'series required' };
+  if (c.series.length > MAX_SERIES) return { ok: false, reason: 'too many series' };
   for (const s of c.series) {
     if (typeof s !== 'object' || s === null) return { ok: false, reason: 'series entry invalid' };
     const sr = s as Record<string, unknown>;
     if (sr.name !== undefined && typeof sr.name !== 'string') return { ok: false, reason: 'series name invalid' };
     if (!Array.isArray(sr.values) || !sr.values.every((v) => typeof v === 'number' && Number.isFinite(v))) {
       return { ok: false, reason: 'series values must be finite numbers' };
+    }
+    // Every series must supply exactly one value per label — a mismatch means
+    // missing/extra data that would misalign axes or leak NaN coordinates (G006).
+    if (sr.values.length !== c.labels.length) {
+      return { ok: false, reason: 'series/labels length mismatch' };
     }
   }
   if (c.title !== undefined && typeof c.title !== 'string') return { ok: false, reason: 'title invalid' };

@@ -2,6 +2,7 @@ node_modules/
 dist/
 release/
 .gjc/
+.insane-review/
 .superpowers/
 docs/superpowers/
 docs/redteam-*.png

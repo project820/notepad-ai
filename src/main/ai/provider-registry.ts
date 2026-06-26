@@ -11,7 +11,9 @@
  */
 
 import { ApiKeyStore, type KeyStoreBackend } from './api-key-store';
-import { ClaudeProvider } from './claude-provider';
+import { ComposedClaudeProvider } from './claude-composed';
+import { GrokCliProvider } from './grok-cli-provider';
+import { nodeCliSpawn } from './cli-runner';
 import { OpenRouterProvider } from './openrouter-provider';
 import { getCuratedModels } from './model-catalog';
 import { LmStudioProvider } from './lmstudio-provider';
@@ -118,6 +120,12 @@ export class ProviderRegistry {
         'Local providers run on your machine and do not use an API key. Set the server URL in AI settings.',
       );
     }
+    if (provider === 'grok') {
+      throw new AiProviderError(
+        'provider',
+        'Grok runs through its local CLI and does not use an API key. Install grok and run `grok login`.',
+      );
+    }
     return this.keys.setApiKey(provider, key);
   }
 
@@ -177,7 +185,9 @@ export class ProviderRegistry {
       if (!status.connected) {
         onEvent({
           kind: 'error',
-          message: `${status.label} is not connected. Open AI settings to sign in or add a key.`,
+          // CLI providers carry actionable install/login guidance in status.error;
+          // prefer it over the generic sign-in/key message (G006).
+          message: status.error ?? `${status.label} is not connected. Open AI settings to sign in or add a key.`,
           errorKind: 'auth',
         });
         return;
@@ -251,12 +261,16 @@ export function buildDefaultProviders(keys: ApiKeyStore, localConfig?: LocalConf
   const { ChatGptProvider } = require('./chatgpt-provider') as typeof import('./chatgpt-provider');
   const getOllamaBaseUrl = async () => (await localConfig?.get())?.ollama ?? DEFAULT_OLLAMA_BASE_URL;
   const getLmStudioBaseUrl = async () => (await localConfig?.get())?.lmstudio ?? DEFAULT_LMSTUDIO_BASE_URL;
+  const cliSpawn = nodeCliSpawn();
   return {
     chatgpt: new ChatGptProvider(),
-    claude: new ClaudeProvider(keys),
+    // Claude routes CLI-first (claude -p) with Anthropic API fallback (G006).
+    claude: new ComposedClaudeProvider(keys, cliSpawn),
     openrouter: new OpenRouterProvider(keys),
     ollama: new OllamaProvider(getOllamaBaseUrl),
     lmstudio: new LmStudioProvider(getLmStudioBaseUrl),
+    // Grok: local subscription CLI only (no API key, no paid fallback).
+    grok: new GrokCliProvider({ spawn: cliSpawn }),
   };
 }
 

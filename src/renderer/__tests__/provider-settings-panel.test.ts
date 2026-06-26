@@ -158,3 +158,32 @@ describe('renderProviderSettingsPanel — local providers (G003)', () => {
     expect(html).not.toContain('data-prov-custom="ollama"');
   });
 });
+
+describe('renderProviderSettingsPanel — CLI providers (G006)', () => {
+  const grokConnected: ProviderStatusView[] = [
+    { provider: 'grok', label: 'Grok (CLI)', authKind: 'cli', connected: true },
+  ];
+  const grokOffline: ProviderStatusView[] = [
+    { provider: 'grok', label: 'Grok (CLI)', authKind: 'cli', connected: false, error: 'Grok CLI not found. Install grok and run `grok login`.' },
+  ];
+
+  it('renders a cli row with NO API-key or URL controls and NO custom-model input', () => {
+    const html = renderProviderSettingsPanel({ statuses: grokConnected });
+    expect(html).toContain('data-prov-row="grok"');
+    expect(html).not.toContain('data-prov-key="grok"'); // no API key input
+    expect(html).not.toContain('data-prov-url="grok"'); // no server URL input
+    expect(html).not.toContain('data-prov-custom="grok"'); // no custom-model input
+    expect(html).toContain('Connected · CLI');
+  });
+
+  it('surfaces the install/login guidance error when the CLI is absent', () => {
+    const html = renderProviderSettingsPanel({ statuses: grokOffline });
+    expect(html).toContain('Not connected');
+    expect(html).toMatch(/grok login|Install/);
+  });
+
+  it('a connected cli provider satisfies the zero-auth notice (counts as usable)', () => {
+    const html = renderProviderSettingsPanel({ statuses: grokConnected });
+    expect(html).not.toContain('No AI provider connected');
+  });
+});

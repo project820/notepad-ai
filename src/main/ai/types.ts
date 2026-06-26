@@ -6,15 +6,15 @@
  * live only in the main process; status objects expose `keyLast4` at most.
  */
 
-export type AiProviderId = 'chatgpt' | 'claude' | 'openrouter' | 'ollama' | 'lmstudio';
+export type AiProviderId = 'chatgpt' | 'claude' | 'openrouter' | 'ollama' | 'lmstudio' | 'grok';
 
-export const AI_PROVIDER_IDS: readonly AiProviderId[] = ['chatgpt', 'claude', 'openrouter', 'ollama', 'lmstudio'];
+export const AI_PROVIDER_IDS: readonly AiProviderId[] = ['chatgpt', 'claude', 'openrouter', 'ollama', 'lmstudio', 'grok'];
 
 export function isAiProviderId(value: unknown): value is AiProviderId {
   return typeof value === 'string' && (AI_PROVIDER_IDS as readonly string[]).includes(value);
 }
 
-export type AuthKind = 'oauth' | 'api_key' | 'local';
+export type AuthKind = 'oauth' | 'api_key' | 'local' | 'cli';
 
 /**
  * A selectable model. `provider` + `id` uniquely identify it. `humanizeEngineId`
@@ -75,6 +75,49 @@ export const MAX_IMAGE_ATTACHMENTS = 4;
 /** Max decoded bytes per image (8 MiB). */
 export const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
+const IMAGE_MAGIC: Record<AiImageAttachment['mime'], (b: Uint8Array) => boolean> = {
+  'image/png': (b) =>
+    b.length >= 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47 &&
+    b[4] === 0x0d && b[5] === 0x0a && b[6] === 0x1a && b[7] === 0x0a,
+  'image/jpeg': (b) => b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
+  'image/webp': (b) =>
+    b.length >= 12 &&
+    b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 && // "RIFF"
+    b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50, // "WEBP"
+};
+
+/**
+ * Verify a base64 image's leading bytes match its declared mime, decoding only
+ * the prefix (no full decode). Stops a renderer from labelling arbitrary content
+ * as image/png to smuggle it to a vision provider (G006 IPC image-magic).
+ */
+const B64_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+/** Decode the first `maxBytes` of a base64 string without any platform API. */
+function decodeBase64Prefix(base64: string, maxBytes: number): Uint8Array {
+  const out: number[] = [];
+  let buffer = 0;
+  let bits = 0;
+  for (const ch of base64) {
+    if (ch === '=') break;
+    const v = B64_ALPHABET.indexOf(ch);
+    if (v < 0) continue; // skip whitespace / stray chars
+    buffer = (buffer << 6) | v;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      out.push((buffer >> bits) & 0xff);
+      if (out.length >= maxBytes) break;
+    }
+  }
+  return Uint8Array.from(out);
+}
+
+function imageMagicMatches(base64: string, mime: AiImageAttachment['mime']): boolean {
+  const prefix = decodeBase64Prefix(base64.slice(0, 32), 12);
+  return IMAGE_MAGIC[mime](prefix);
+}
+
 /** Validate renderer-supplied image attachments at the IPC boundary. Pure. */
 export function validateImageAttachments(
   input: unknown,
@@ -100,6 +143,9 @@ export function validateImageAttachments(
     if (rec.bytes > MAX_IMAGE_BYTES) {
       return { ok: false, error: `image too large (max ${Math.floor(MAX_IMAGE_BYTES / (1024 * 1024))} MiB)` };
     }
+    if (!imageMagicMatches(rec.base64, rec.mime as AiImageAttachment['mime'])) {
+      return { ok: false, error: 'image content does not match its declared type' };
+    }
     images.push({
       mime: rec.mime as AiImageAttachment['mime'],
       base64: rec.base64,
@@ -108,6 +154,64 @@ export function validateImageAttachments(
     });
   }
   return { ok: true, images };
+}
+
+/** Byte/shape caps for the ai:chat IPC payload (Phase 3 input validation). */
+export const CHAT_LIMITS = {
+  idMax: 256,
+  modelIdMax: 256,
+  /** instructions carry the document context, so this is generous but bounded. */
+  instructionsMax: 16 * 1024 * 1024,
+  userTextMax: 4 * 1024 * 1024,
+  historyMax: 2000,
+  historyTotalMax: 16 * 1024 * 1024,
+} as const;
+
+/**
+ * Validate the text portion of an ai:chat IPC payload (id, instructions, userText,
+ * history, model.id) for type and byte bounds. TypeScript types do not survive the
+ * IPC boundary, so a compromised/buggy renderer must not be able to crash the main
+ * handler or force a multi-GB provider request. Pure + unit-testable.
+ */
+export function validateChatTextPayload(input: unknown): { ok: true } | { ok: false; error: string } {
+  if (!input || typeof input !== 'object') return { ok: false, error: 'payload must be an object' };
+  const p = input as {
+    id?: unknown;
+    instructions?: unknown;
+    userText?: unknown;
+    history?: unknown;
+    model?: unknown;
+  };
+  if (typeof p.id !== 'string' || p.id.length === 0 || p.id.length > CHAT_LIMITS.idMax) {
+    return { ok: false, error: 'invalid chat id' };
+  }
+  if (typeof p.instructions !== 'string' || p.instructions.length > CHAT_LIMITS.instructionsMax) {
+    return { ok: false, error: 'invalid or oversized instructions' };
+  }
+  if (typeof p.userText !== 'string' || p.userText.length > CHAT_LIMITS.userTextMax) {
+    return { ok: false, error: 'invalid or oversized message' };
+  }
+  if (!Array.isArray(p.history)) return { ok: false, error: 'history must be an array' };
+  if (p.history.length > CHAT_LIMITS.historyMax) return { ok: false, error: 'history too long' };
+  let total = 0;
+  for (const turn of p.history) {
+    if (!turn || typeof turn !== 'object') return { ok: false, error: 'invalid history turn' };
+    const t = turn as { role?: unknown; text?: unknown };
+    if (t.role !== 'user' && t.role !== 'assistant') return { ok: false, error: 'invalid history role' };
+    if (typeof t.text !== 'string') return { ok: false, error: 'invalid history text' };
+    total += t.text.length;
+    if (total > CHAT_LIMITS.historyTotalMax) return { ok: false, error: 'history too large' };
+  }
+  // model may be a bare string id or { provider, id } — only bound the id length here.
+  if (typeof p.model === 'string') {
+    if (p.model.length > CHAT_LIMITS.modelIdMax) return { ok: false, error: 'invalid model id' };
+  } else if (p.model && typeof p.model === 'object') {
+    const id = (p.model as { id?: unknown }).id;
+    if (id !== undefined && (typeof id !== 'string' || id.length > CHAT_LIMITS.modelIdMax)) {
+      return { ok: false, error: 'invalid model id' };
+    }
+  }
+  return { ok: true };
 }
 
 export type AiChatRequest = {

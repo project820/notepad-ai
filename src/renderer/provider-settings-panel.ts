@@ -80,7 +80,9 @@ function statusLine(s: ProviderStatusView): string {
   }
   if (!s.connected) return '<span class="prov-status prov-status-off">Not connected</span>';
   const detail =
-    s.authKind === 'oauth'
+    s.authKind === 'cli'
+      ? 'CLI'
+      : s.authKind === 'oauth'
       ? s.accountLabel
         ? escapeHTML(s.accountLabel)
         : 'Signed in'
@@ -105,6 +107,11 @@ function providerControls(s: ProviderStatusView): string {
       ? `<button class="prov-btn" data-prov-action="signout" type="button">Sign out</button>`
       : `<button class="prov-btn prov-btn-primary" data-prov-action="signin" type="button">Sign in</button>`;
   }
+  if (s.authKind === 'cli') {
+    // CLI providers (grok) have no key/URL to configure — they use the local
+    // subscription CLI. Guidance is shown via the error line + cliHint footer.
+    return '';
+  }
   // API-key providers (claude, openrouter)
   return `
     <input class="prov-key-input" data-prov-key="${s.provider}" type="password"
@@ -116,6 +123,14 @@ function providerControls(s: ProviderStatusView): string {
 /** Local provider footer: a friendly, non-auth hint (offline → run-server guidance). */
 function localHint(s: ProviderStatusView): string {
   const msg = (s.localModelCount ?? 0) > 0 ? t('settings.local.hint') : t('settings.local.noModels');
+  return `<div class="prov-local-note">${escapeHTML(msg)}</div>`;
+}
+
+/** CLI provider footer: a no-key/no-URL hint pointing at the local subscription CLI. */
+function cliHint(s: ProviderStatusView): string {
+  const msg = s.connected
+    ? 'Using your local CLI — no API key, no per-request billing.'
+    : 'Install the CLI and sign in (e.g. `grok login`) to use this provider — no API key needed.';
   return `<div class="prov-local-note">${escapeHTML(msg)}</div>`;
 }
 
@@ -144,6 +159,7 @@ export function renderProviderSettingsPanel(opts: ProviderSettingsRenderOptions)
   const rows = statuses
     .map((s) => {
       const isLocal = s.authKind === 'local';
+      const footer = isLocal ? localHint(s) : s.authKind === 'cli' ? cliHint(s) : customModelControl(s);
       return `<section class="prov-row" data-prov-row="${s.provider}">
     <div class="prov-row-head">
       <span class="prov-label">${escapeHTML(s.label)}</span>
@@ -151,7 +167,7 @@ export function renderProviderSettingsPanel(opts: ProviderSettingsRenderOptions)
     </div>
     ${s.error ? `<div class="prov-error" role="alert">${escapeHTML(s.error)}</div>` : ''}
     <div class="prov-controls">${providerControls(s)}</div>
-    ${isLocal ? localHint(s) : customModelControl(s)}
+    ${footer}
   </section>`;
     })
     .join('\n');

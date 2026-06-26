@@ -88,16 +88,22 @@ export interface LocalConfigBackend {
  * `normalizeLocalBaseUrl` on write, so a remote / `file:` URL never reaches disk.
  */
 export class LocalConfigStore {
-  private loaded = false;
+  private loadPromise: Promise<void> | null = null;
   private config: LocalProviderConfig = defaultLocalConfig();
+  /** Serializes set() so concurrent writes never clobber each other (H-26). */
+  private mutationChain: Promise<unknown> = Promise.resolve();
 
   constructor(private backend: LocalConfigBackend) {}
 
-  private async load(): Promise<void> {
-    if (this.loaded) return;
-    this.loaded = true;
-    const raw = await this.backend.readFile();
-    if (raw) this.config = parseLocalConfig(raw);
+  /** Single-flight load: concurrent callers share one read (no init race). */
+  private load(): Promise<void> {
+    if (!this.loadPromise) {
+      this.loadPromise = (async () => {
+        const raw = await this.backend.readFile();
+        if (raw) this.config = parseLocalConfig(raw);
+      })();
+    }
+    return this.loadPromise;
   }
 
   async get(): Promise<LocalProviderConfig> {
@@ -108,23 +114,29 @@ export class LocalConfigStore {
   /**
    * Update one or both base URLs. Each provided URL must normalize to a valid
    * localhost http(s) origin; otherwise this throws and nothing is persisted.
+   * Mutations are serialized and the runtime config is committed ONLY after the
+   * durable write succeeds (a write failure never activates a half-applied URL).
    */
-  async set(partial: Partial<LocalProviderConfig>): Promise<LocalProviderConfig> {
-    await this.load();
-    const next: LocalProviderConfig = { ...this.config };
-    if (partial.ollama !== undefined) {
-      const normalized = normalizeLocalBaseUrl(partial.ollama);
-      if (!normalized) throw new Error('Ollama URL must be a localhost http(s) URL.');
-      next.ollama = normalized;
-    }
-    if (partial.lmstudio !== undefined) {
-      const normalized = normalizeLocalBaseUrl(partial.lmstudio);
-      if (!normalized) throw new Error('LM Studio URL must be a localhost http(s) URL.');
-      next.lmstudio = normalized;
-    }
-    this.config = next;
-    await this.backend.writeFile(JSON.stringify(next));
-    return { ...next };
+  set(partial: Partial<LocalProviderConfig>): Promise<LocalProviderConfig> {
+    const run = this.mutationChain.then(async () => {
+      await this.load();
+      const next: LocalProviderConfig = { ...this.config };
+      if (partial.ollama !== undefined) {
+        const normalized = normalizeLocalBaseUrl(partial.ollama);
+        if (!normalized) throw new Error('Ollama URL must be a localhost http(s) URL.');
+        next.ollama = normalized;
+      }
+      if (partial.lmstudio !== undefined) {
+        const normalized = normalizeLocalBaseUrl(partial.lmstudio);
+        if (!normalized) throw new Error('LM Studio URL must be a localhost http(s) URL.');
+        next.lmstudio = normalized;
+      }
+      await this.backend.writeFile(JSON.stringify(next));
+      this.config = next;
+      return { ...next };
+    });
+    this.mutationChain = run.catch(() => {});
+    return run;
   }
 }
 
@@ -175,6 +187,9 @@ export async function getLocalJson<T = unknown>(
   const resp = await fetch(url, {
     ...init,
     signal,
+    // Discovery talks to a user-configured localhost server; never follow a
+    // redirect off that host (SSRF guard, mirrors the streaming fetches).
+    redirect: 'error',
     headers: {
       Accept: 'application/json',
       'Content-Type': 'application/json',

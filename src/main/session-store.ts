@@ -6,6 +6,8 @@ import {
   type LegacySessionSnapshot,
   type SessionSnapshotV2,
 } from './session-schema';
+import { SessionQueue } from './session-queue';
+import { atomicWrite as atomicWriteFile, nodeAtomicBackend } from './atomic-write';
 
 /**
  * Session store — persists the crash/quit restore snapshot to
@@ -94,4 +96,43 @@ export async function writeSessionV2(state: SessionSnapshotV2): Promise<void> {
   } catch {
     /* ignore */
   }
+}
+
+// --- Serialized authoritative aggregate (Phase 0 safety net) --------------
+// Every v2 session mutation routes through one in-memory authoritative
+// aggregate plus a serialized mutation queue, so concurrent multi-window
+// writes never drop a snapshot (lost update) and the before-quit cleanExit
+// transaction is never clobbered by a late renderer write. Persistence uses the
+// hardened atomic-write primitive (unique temp, 0o600, fsync, rename).
+const sessionBackend = nodeAtomicBackend();
+const sessionQueue = new SessionQueue({
+  load: () => readSessionV2(),
+  persist: (state) =>
+    atomicWriteFile(sessionPath(), JSON.stringify(state, null, 2), { backend: sessionBackend }),
+});
+
+/** Read the authoritative aggregate (loads once from disk, then in-memory). */
+export function getSessionAggregate(): Promise<SessionSnapshotV2> {
+  return sessionQueue.read();
+}
+
+/** Serialized read-modify-write of the aggregate, persisted atomically. */
+export function mutateSessionAggregate(
+  mutator: (current: SessionSnapshotV2) => SessionSnapshotV2,
+): Promise<SessionSnapshotV2> {
+  return sessionQueue.mutate(mutator);
+}
+
+/**
+ * Begin the quit transaction and persist `cleanExit: true`. After this, late
+ * renderer `session:write` mutations are dropped so the clean-exit marker wins.
+ */
+export async function markCleanExitQueued(): Promise<void> {
+  sessionQueue.beginQuit();
+  await sessionQueue.mutate((s) => ({ ...s, cleanExit: true }), { allowDuringQuit: true });
+}
+
+/** Reset the aggregate to a clean empty state (after a clean-exit restore check). */
+export function resetSessionAggregate(): Promise<SessionSnapshotV2> {
+  return sessionQueue.mutate(() => ({ version: 2, windows: [], cleanExit: false }));
 }

@@ -6,8 +6,10 @@ import {
   insertColumn,
   insertRow,
   replaceCell,
+  resolveTableCellAtLine,
   rowHasData,
 } from './table-md';
+import { SRC_START_ATTR } from './source-preview-map';
 
 /**
  * Wire contenteditable cells in the rendered preview, syncing back to the MD
@@ -72,6 +74,28 @@ function closeCellMenu() {
   openMenuEl = null;
 }
 
+/**
+ * Prefer addressing a table edit by the row's markdown-it source line (tagged
+ * on the <tr> as data-src-start) over its fragile DOM ordinal. Falls back to the
+ * ordinal pair when the row carries no source tag (G006 source-range editing).
+ */
+function resolveRowAddress(
+  cell: HTMLElement,
+  fallbackTableIdx: number,
+  fallbackRowIdx: number,
+  doc: string,
+): { tableIdx: number; rowIdx: number } {
+  const start = cell.closest('tr')?.getAttribute(SRC_START_ATTR);
+  if (start) {
+    const n = Number(start);
+    if (Number.isFinite(n)) {
+      const resolved = resolveTableCellAtLine(doc, n - 1); // attr is 1-based
+      if (resolved) return resolved;
+    }
+  }
+  return { tableIdx: fallbackTableIdx, rowIdx: fallbackRowIdx };
+}
+
 export function wirePreviewTables(root: HTMLElement, getDoc: GetDoc, setDoc: SetDoc) {
   function apply(res: PatchResult) {
     if (res.changed && res.doc !== getDoc()) setDoc(res.doc);
@@ -116,7 +140,9 @@ export function wirePreviewTables(root: HTMLElement, getDoc: GetDoc, setDoc: Set
         });
         cell.addEventListener('blur', () => {
           // AC4: persist inline formatting (bold/italic/code), not just text.
-          apply(replaceCell(getDoc(), tableIdx, rIdx, cIdx, cellHtmlToInlineMarkdown(cell)));
+          const doc = getDoc();
+          const addr = resolveRowAddress(cell, tableIdx, rIdx, doc);
+          apply(replaceCell(doc, addr.tableIdx, addr.rowIdx, cIdx, cellHtmlToInlineMarkdown(cell)));
         });
       });
     });
@@ -147,7 +173,8 @@ export function wirePreviewTables(root: HTMLElement, getDoc: GetDoc, setDoc: Set
       if (!td) return;
       e.preventDefault();
       selectCell(td);
-      openCellMenu(e.clientX, e.clientY, tableIdx, lastFocused.r, lastFocused.c, getDoc, apply);
+      const addr = resolveRowAddress(td, tableIdx, lastFocused.r, getDoc());
+      openCellMenu(e.clientX, e.clientY, addr.tableIdx, addr.rowIdx, lastFocused.c, getDoc, apply);
     });
   });
 }

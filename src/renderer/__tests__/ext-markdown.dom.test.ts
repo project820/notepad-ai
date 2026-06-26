@@ -73,6 +73,24 @@ describe('extended markdown — turndown round-trip (htmlToMarkdown)', () => {
     expect(htmlToMarkdown('<h3>Plain</h3>').trim()).toBe('### Plain');
   });
 
+  it('sanitizes a heading id that would corrupt the {#id} token', () => {
+    // A space/brace-bearing id must not emit `{#my heading}` (unparseable) or
+    // smuggle `onclick=…` into the attr token; it is reduced to a safe slug.
+    expect(htmlToMarkdown('<h2 id="my heading">Bar</h2>').trim()).toBe('## Bar {#my-heading}');
+    const out = htmlToMarkdown('<h2 id="id onclick=alert(1)">Bar</h2>').trim();
+    expect(out).toBe('## Bar {#id-onclick-alert-1}');
+    expect(out).not.toContain('onclick=alert');
+    expect(out).not.toContain(' {#id ');
+  });
+
+  it('strips embed/media/form elements that have no markdown representation', () => {
+    expect(htmlToMarkdown('<iframe src="data:text/html,x"></iframe>').trim()).toBe('');
+    expect(htmlToMarkdown('<svg><path d="M0 0"/></svg>').trim()).toBe('');
+    expect(htmlToMarkdown('<p>keep</p><form><button>x</button></form>').trim()).toBe('keep');
+    // <img> is intentionally preserved (gfm emits markdown image syntax).
+    expect(htmlToMarkdown('<img src="data:image/png;base64,AAAA" alt="a">').trim()).toContain('![a]');
+  });
+
   it('<dl><dt>Term</dt><dd>Def</dd></dl> → term line + ": Def"', () => {
     const out = htmlToMarkdown('<dl><dt>Term</dt><dd>Def</dd></dl>');
     expect(out).toContain('Term');

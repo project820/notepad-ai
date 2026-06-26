@@ -209,7 +209,7 @@ export function createToolbar(parent: HTMLElement, h: ToolbarHandlers) {
       // appear on the next open; the menu below renders the current snapshot.
       void h.loadModels(true).then((m) => { cachedModels = m; });
       const PROVIDER_LABELS: Record<string, string> = {
-        chatgpt: 'ChatGPT', claude: 'Claude', openrouter: 'OpenRouter', ollama: 'Ollama', lmstudio: 'LM Studio',
+        chatgpt: 'ChatGPT', claude: 'Claude', openrouter: 'OpenRouter', ollama: 'Ollama', lmstudio: 'LM Studio', grok: 'Grok',
       };
       const cur = h.getModel();
       const currentKey =

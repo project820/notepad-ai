@@ -18,6 +18,7 @@ import type { ChecklistResult, DesignTheme } from './html-export-theme';
 import { stableHash, themeComponentClasses, toCssVariables } from './html-export-theme';
 import { renderContent } from './html-export-renderer';
 import type { PlannedSlide } from './html-export-layout';
+import { sha256Base64 } from './sha256';
 
 /** Bump when the embedded manifest shape changes. */
 export const EXPORT_MANIFEST_SCHEMA_VERSION = 1;
@@ -43,10 +44,6 @@ export type ExportManifest = {
 export type BundleArgs = {
   model: ContentModel;
   theme: DesignTheme;
-  /** Precomputed `toCssVariables(theme)`. Recomputed from `theme` when omitted. */
-  themeCss?: string;
-  /** Precomputed `themeComponentClasses(theme)`. Recomputed from `theme` when omitted. */
-  componentCss?: string;
   orientation: Orientation;
   layout: LayoutKind;
   summaryChartMode: SummaryChartMode;
@@ -196,6 +193,26 @@ const RUNTIME_JS = [
   '})();',
 ].join('');
 
+// Content-Security-Policy for the exported file (G006 defense-in-depth atop the
+// structural allowlist validator). Only the inline runtime — pinned by its
+// SHA-256 — may execute; default-src 'none' blocks every network fetch, and
+// img/font are limited to inline data: URIs. `style-src 'unsafe-inline'` is kept
+// because the document legitimately carries inline style attributes (and the
+// allowlist validator already forbids remote url() in styles).
+const RUNTIME_JS_SHA256 = sha256Base64(RUNTIME_JS);
+const EXPORT_CSP =
+  [
+    "default-src 'none'",
+    'img-src data:',
+    "style-src 'unsafe-inline'",
+    `script-src 'sha256-${RUNTIME_JS_SHA256}'`,
+    'font-src data:',
+    "base-uri 'none'",
+    "form-action 'none'",
+    "frame-ancestors 'none'",
+  ].join('; ') + ';';
+const CSP_META = `<meta http-equiv="Content-Security-Policy" content="${EXPORT_CSP}">`;
+
 /** Embed the manifest as inline JSON, escaping `<` so it can never break out of the script. */
 function embedManifest(manifest: ExportManifest): string {
   const json = JSON.stringify(manifest).replace(/</g, '\\u003c');
@@ -208,8 +225,10 @@ function embedManifest(manifest: ExportManifest): string {
  * embedded manifest object (they mirror each other).
  */
 export function bundleHtml(args: BundleArgs): BundleResult {
-  const themeCss = args.themeCss ?? toCssVariables(args.theme);
-  const componentCss = args.componentCss ?? themeComponentClasses(args.theme);
+  // Theme CSS is ALWAYS derived from the trusted, deterministic theme — callers
+  // can no longer inject arbitrary themeCss/componentCss into the export (G006).
+  const themeCss = toCssVariables(args.theme);
+  const componentCss = themeComponentClasses(args.theme);
 
   const minScale =
     args.plan && args.plan.length
@@ -242,6 +261,7 @@ export function bundleHtml(args: BundleArgs): BundleResult {
 
   const head = [
     '<meta charset="utf-8">',
+    CSP_META,
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     rendered.headHtml,
     `<style>${style}</style>`,

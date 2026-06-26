@@ -21,8 +21,11 @@ const FENCE_RE = /(```[\s\S]*?```|~~~[\s\S]*?~~~)/g;
 const INLINE_CODE_RE = /`[^`\n]+`/g;
 // Straight and typographic double/single quotes, ASCII + CJK.
 const QUOTE_RE = /["“”„][^"“”„\n]{1,400}["“”„]|['‘’][^'‘’\n]{1,400}['‘’]/g;
-// Numbers with optional separators / decimals / percent / currency.
-const NUMBER_RE = /\d[\d.,]*\d%?|\d%?/g;
+// Numbers, with sign + currency symbol bound to the value so a meaning-changing
+// edit (-5 → 5, $100 → 100, 5% → 5) is detected rather than masked by bare-digit
+// multiset matching (entity-value binding).
+const CURRENCY = '[$€£¥₩]';
+const NUMBER_RE = new RegExp(`[-+]?${CURRENCY}?\\d[\\d.,]*\\d%?|[-+]?${CURRENCY}?\\d%?`, 'g');
 // Conservative proper-noun heuristic: TitleCase words (optionally multi-word),
 // excluding sentence-initial single words is out of scope — we keep it simple.
 const PROPER_NOUN_RE = /\b[A-Z][a-zA-Z0-9]+(?:\s+[A-Z][a-zA-Z0-9]+)*\b/g;

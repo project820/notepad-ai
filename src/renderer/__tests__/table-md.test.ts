@@ -11,6 +11,7 @@ import {
   joinTableRow,
   parseTables,
   replaceCell,
+  resolveTableCellAtLine,
   rowHasData,
   splitTableRow,
 } from '../table-md';
@@ -167,5 +168,28 @@ describe('round-trip safety', () => {
     expect(lines[0]).toBe('| h\\|1 | h2 |'); // header escaped pipe intact
     expect(lines[1]).toBe('| :--- | ---: |'); // alignment markers intact
     expect(lines[2]).toBe('| a | B |');
+  });
+});
+
+describe('resolveTableCellAtLine (G006 source-range)', () => {
+  // lines: 0 intro · 1 blank · 2 header · 3 separator · 4 body1 · 5 body2
+  const doc = ['intro', '', '| h1 | h2 |', '| --- | --- |', '| a | b |', '| c | d |'].join('\n');
+
+  it('maps the header source line to (tableIdx 0, rowIdx 0)', () => {
+    expect(resolveTableCellAtLine(doc, 2)).toEqual({ tableIdx: 0, rowIdx: 0 });
+  });
+  it('maps body source lines to their rowIdx (separator excluded)', () => {
+    expect(resolveTableCellAtLine(doc, 4)).toEqual({ tableIdx: 0, rowIdx: 1 });
+    expect(resolveTableCellAtLine(doc, 5)).toEqual({ tableIdx: 0, rowIdx: 2 });
+  });
+  it('returns null for the separator and non-table lines', () => {
+    expect(resolveTableCellAtLine(doc, 3)).toBeNull();
+    expect(resolveTableCellAtLine(doc, 0)).toBeNull();
+    expect(resolveTableCellAtLine(doc, 99)).toBeNull();
+  });
+  it('addresses the correct table when several tables exist', () => {
+    const two = ['| a | b |', '| - | - |', '| 1 | 2 |', '', '| c | d |', '| - | - |', '| 3 | 4 |'].join('\n');
+    expect(resolveTableCellAtLine(two, 0)).toEqual({ tableIdx: 0, rowIdx: 0 });
+    expect(resolveTableCellAtLine(two, 6)).toEqual({ tableIdx: 1, rowIdx: 1 });
   });
 });

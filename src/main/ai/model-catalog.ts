@@ -25,6 +25,9 @@ export function humanizeEngineIdForProvider(provider: AiProviderId): string {
     case 'lmstudio':
       // Local OpenAI-compatible servers reuse the OpenAI humanize engine for now.
       return 'openai';
+    case 'grok':
+      // Grok CLI provider reuses the OpenAI humanize engine for now (G005).
+      return 'openai';
   }
 }
 
@@ -42,6 +45,8 @@ const CURATED: ReadonlyArray<Omit<ModelRef, 'humanizeEngineId'>> = [
   { provider: 'openrouter', id: 'google/gemini-2.5-pro', label: 'Gemini 2.5 Pro (OpenRouter)', requiresAuth: true },
   { provider: 'openrouter', id: 'x-ai/grok-4', label: 'Grok 4 (OpenRouter)', requiresAuth: true },
   { provider: 'openrouter', id: 'openai/gpt-5.1', label: 'GPT-5.1 (OpenRouter)', requiresAuth: true },
+  // Grok (local subscription CLI — no API key; CLI-only). Default model.
+  { provider: 'grok', id: 'grok', label: 'Grok (CLI)', requiresAuth: true },
 ];
 
 /** The curated catalog with humanize engine ids attached. */

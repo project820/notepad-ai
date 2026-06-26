@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, dialog, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, Menu, dialog, shell } from 'electron';
 import { existsSync, promises as fs } from 'node:fs';
 import { execFile } from 'node:child_process';
 import path from 'node:path';
@@ -7,9 +7,27 @@ import { startLogin, cancelLogin, getStatus, logout, type LoginUpdate } from './
 import type { ChatTurn } from './codex-client';
 import { getRegistry } from './ai/provider-registry';
 import { htmlExportMaxTokens, isHtmlExportInstructions } from './ai/output-budget';
-import { isAiProviderId, validateImageAttachments, type AiProviderId } from './ai/types';
+import { isAiProviderId, validateImageAttachments, validateChatTextPayload, type AiProviderId } from './ai/types';
 import { resolveOcrAssetPaths, configureOcr } from './ai/ocr';
-import { readSessionV2, writeSessionV2 } from './session-store';
+import {
+  MAX_CONVERT_BYTES,
+  checkBase64SizePrecap,
+  checkMagicBytes,
+  withWallClockTimeout,
+} from './converter-bounds';
+import { isTrustedAppUrl, SECURITY_REASON } from './security';
+import { handleTrusted, onTrusted } from './ipc-guard';
+import { FileGrants } from './file-grants';
+import { KeyedMutex } from './keyed-mutex';
+import { canonicalNewTarget, isRealpathWithinRoot, type IdentityFs } from './path-identity';
+import { ConverterHost, type WorkerTransport } from './converter-host';
+import {
+  getSessionAggregate,
+  mutateSessionAggregate,
+  markCleanExitQueued,
+  resetSessionAggregate,
+} from './session-store';
+
 import {
   upsertWindowSnapshot,
   removeWindowSnapshot,
@@ -55,10 +73,98 @@ const APP_DISPLAY_NAME = 'Notepad AI';
 const APP_STORAGE_NAME = 'notepad-ai';
 const isDev = process.env.NODE_ENV === 'development';
 
+/** Wall-clock deadline for a single kordoc document conversion (Phase 0 bound). */
+const CONVERT_TIMEOUT_MS = 30_000;
+
+// ---------- Single-instance lock (consolidate to ONE app) ----------
+// Without this, launching a second copy — the installed .app plus a dev/`electron .`
+// instance, or a double launch — spawns an independent process, so macOS shows two
+// Notepad AI apps in the Dock. The first instance keeps the lock; any later launch
+// forwards its file argument to the running app and quits, so only ONE ever runs.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', (_event, argv) => {
+    // Windows/Linux pass document paths as CLI args (macOS uses `open-file`).
+    const fileArg = argv.slice(1).find((a) => typeof a === 'string' && !a.startsWith('-') && existsSync(a));
+    if (fileArg && appIsReady) {
+      void openFileInWindow(fileArg, { reuseBlank: true });
+    } else {
+      focusExistingWindow();
+    }
+  });
+}
+
 // ---------- Multi-window runtime (G002) ----------
 // `main` owns the registry of live windows, IPC routing, file-path ownership,
 // and the session aggregate; each window's renderer owns its own document state.
 const registry = createWindowRegistry();
+/** Per-window filesystem capability grants (renderer paths are not authority). */
+const fileGrants = new FileGrants();
+/** Serializes save reserve→write→commit per canonical file identity (TOCTOU guard). */
+const saveMutex = new KeyedMutex();
+/** node:fs-backed identity surface for realpath/dev:ino canonicalization. */
+const nodeIdentityFs: IdentityFs = {
+  realpath: (p) => fs.realpath(p),
+  stat: async (p) => {
+    const s = await fs.stat(p);
+    return { dev: s.dev, ino: s.ino };
+  },
+};
+
+/** Run kordoc conversion in an isolated utilityProcess (Phase 3 fault isolation). */
+const converterHost = new ConverterHost((): WorkerTransport => {
+  const { utilityProcess } = require('electron') as typeof import('electron');
+  const child = utilityProcess.fork(path.join(__dirname, 'converter-worker.js'));
+  return {
+    post: (msg) => child.postMessage(msg),
+    onMessage: (cb) => child.on('message', (m) => cb(m)),
+    onExit: (cb) => child.on('exit', () => cb()),
+    kill: () => {
+      child.kill();
+    },
+  };
+}, { timeoutMs: CONVERT_TIMEOUT_MS });
+
+/**
+ * Convert a document to markdown/html. Primary path is the isolated worker; if the
+ * worker is unavailable/crashes/times out, fall back to a bounded in-main parse so
+ * the feature never hard-breaks. Callers apply the Phase 0 size/precap first.
+ */
+async function convertDocument(
+  ext: string,
+  buf: Buffer,
+): Promise<{ ok: boolean; markdown?: string; html?: string; error?: string }> {
+  try {
+    const r = await converterHost.runConvert(ext, buf);
+    return r.ok ? { ok: true, markdown: r.markdown, html: r.html } : { ok: false, error: r.error };
+  } catch (workerErr) {
+    console.warn('[converter] isolated worker failed; falling back to in-main parse:', workerErr);
+    try {
+      const nativeImport: (s: string) => Promise<any> = new Function('s', 'return import(s)') as any;
+      const kordoc = await nativeImport('kordoc');
+      const parseFn = kordoc.parse ?? kordoc.default?.parse;
+      const renderHtml = kordoc.renderHtml ?? kordoc.default?.renderHtml;
+      if (typeof parseFn !== 'function') return { ok: false, error: 'Document converter unavailable.' };
+      const r = await withWallClockTimeout<any>(() => parseFn(buf, { removeHeaderFooter: true }), CONVERT_TIMEOUT_MS);
+      if (r?.success && typeof r.markdown === 'string') {
+        let html: string | undefined;
+        if (typeof renderHtml === 'function') {
+          try {
+            html = renderHtml(r.markdown, { preset: 'gov-formal' });
+          } catch {
+            /* raw markdown fallback */
+          }
+        }
+        return { ok: true, markdown: r.markdown, html };
+      }
+      const msg = ('error' in (r ?? {}) && (r as any).error?.message) || 'unknown error';
+      return { ok: false, error: `Could not convert ${ext.toUpperCase()}: ${msg}` };
+    } catch (e: any) {
+      return { ok: false, error: `Failed to convert ${ext.toUpperCase()}: ${e?.message ?? e}` };
+    }
+  }
+}
 let appIsReady = false;
 /** The blank window created on a normal launch; the first macOS open-file may reuse it. */
 let launchWindowId: number | null = null;
@@ -130,6 +236,14 @@ function flushPendingOpenFiles() {
   }
 }
 
+/** Bring an existing window to the front (used when a second launch is rejected). */
+function focusExistingWindow(): void {
+  const win = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed());
+  if (!win) return;
+  if (win.isMinimized()) win.restore();
+  win.focus();
+}
+
 /** A blank launch window the first OS open-file may reuse (avoids an extra empty window). */
 function findReusableBlankWindow(): BrowserWindow | null {
   if (launchWindowId == null) return null;
@@ -164,6 +278,32 @@ async function openFileInWindow(filePath: string, opts: { reuseBlank: boolean })
   await createWindow({ openFilePath: filePath });
 }
 
+/**
+ * Deny any attempt to navigate a window's main frame or a subframe away from the
+ * app's own origin (S-crit: a navigated renderer would expose the full preload
+ * `window.api` to a remote page). External links are opened in the OS browser via
+ * the explicit `setWindowOpenHandler` / `shell:open-external` path, never by
+ * replacing the app document.
+ */
+function installNavigationGuards(win: BrowserWindow): void {
+  const wc = win.webContents;
+  const denyIfUntrusted = (event: Electron.Event, url: string) => {
+    if (!isTrustedAppUrl(url, { isDev })) {
+      event.preventDefault();
+      console.warn(`[nav-guard] ${SECURITY_REASON.NAV_UNTRUSTED_ORIGIN} win=${win.id} blocked`);
+    }
+  };
+  wc.on('will-navigate', denyIfUntrusted);
+  wc.on('will-redirect', denyIfUntrusted);
+  // Subframe navigations (iframes injected via converted HTML, etc.).
+  wc.on('will-frame-navigate', (event) => {
+    if (!isTrustedAppUrl(event.url, { isDev })) {
+      event.preventDefault();
+      console.warn(`[nav-guard] ${SECURITY_REASON.NAV_UNTRUSTED_ORIGIN} win=${win.id} subframe blocked`);
+    }
+  });
+}
+
 async function createWindow(
   opts: { restore?: SessionWindowSnapshot; openFilePath?: string } = {},
 ): Promise<BrowserWindow> {
@@ -180,7 +320,7 @@ async function createWindow(
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
     },
   };
 
@@ -200,7 +340,11 @@ async function createWindow(
     restoreSnapshot: restore,
   };
   registry.register(record);
-  if (restore?.path) registry.claimPath(win.id, restore.path);
+  if (restore?.path) {
+    registry.claimPath(win.id, restore.path);
+    // A restored path was a previously user-opened file → re-grant it so Save works.
+    fileGrants.grantFile(win.webContents.id, restore.path);
+  }
 
   win.on('focus', () => registry.touchFocus(win.id, Date.now()));
   win.on('closed', () => {
@@ -214,6 +358,7 @@ async function createWindow(
       }
     }
     registry.unregister(win.id);
+    fileGrants.release(record.webContentsId);
     if (launchWindowId === win.id) launchWindowId = null;
     console.log(`[window] closed id=${win.id}`);
   });
@@ -222,6 +367,8 @@ async function createWindow(
     if (isAllowedExternalUrl(url)) void shell.openExternal(url);
     return { action: 'deny' };
   });
+
+  installNavigationGuards(win);
 
   console.log(`[window] created id=${win.id} key=${record.windowKey}${restore ? ' restore=1' : ''}`);
 
@@ -473,6 +620,11 @@ async function handleOpen() {
 
 async function openFilePath(filePath: string, win: BrowserWindow): Promise<void> {
   if (win.isDestroyed()) return;
+  // Reaching openFilePath means a user-driven open (dialog / OS open-with / restore /
+  // a workspace entry already authorized by the IPC handler): grant the path so a
+  // later Save to it is authorized, and the renderer path string is never the sole
+  // authority for arbitrary reads/writes.
+  fileGrants.grantFile(win.webContents.id, filePath);
   const rec = registry.getByWebContents(win.webContents.id);
   const sink = sinkFor(win);
   // Gate every payload on renderer readiness so a freshly created window never
@@ -492,58 +644,40 @@ async function openFilePath(filePath: string, win: BrowserWindow): Promise<void>
       progress: `Converting ${ext.toUpperCase()}…`,
     });
     try {
-      const buf = await fs.readFile(filePath);
-      console.log(`[kordoc] read ${buf.length} bytes from ${filePath}`);
-      // CRITICAL: kordoc's CJS build is broken (uses import.meta.url which is
-      // ESM-only), so require() throws SyntaxError. We must use a NATIVE
-      // dynamic import() so Node resolves the package's ESM entry.
-      // TypeScript with `module: CommonJS` would transpile `import('kordoc')`
-      // into `require('kordoc')` — we sidestep that by hiding the call inside
-      // `new Function`, which TS cannot rewrite.
-      const nativeImport: (s: string) => Promise<any> =
-        new Function('s', 'return import(s)') as any;
-      const kordoc = await nativeImport('kordoc');
-      const parseFn = kordoc.parse ?? kordoc.default?.parse;
-      const renderHtml = kordoc.renderHtml ?? kordoc.default?.renderHtml;
-      console.log(
-        `[kordoc] module loaded, parse=${typeof parseFn}, renderHtml=${typeof renderHtml}`,
-      );
-      if (typeof parseFn !== 'function') {
-        throw new Error('kordoc.parse not found in module exports');
-      }
-      const r = await parseFn(buf, { removeHeaderFooter: true });
-      console.log(`[kordoc] result success=${r.success} fileType=${r.fileType} mdLen=${r.success ? r.markdown.length : 0}`);
-      if (r.success) {
-        // Pipeline (per kordoc maintainers' best practice for visual fidelity):
-        //   parse → renderHtml('gov-formal') → send HTML to renderer
-        //   Renderer runs Turndown on that HTML to derive cleaner MD source.
-        // Fall back to raw markdown if renderHtml isn't available.
-        let html: string | undefined;
-        if (typeof renderHtml === 'function') {
-          try {
-            html = renderHtml(r.markdown, { preset: 'gov-formal' });
-          } catch (e: any) {
-            console.warn('[kordoc] renderHtml failed, falling back:', e?.message);
-          }
-        }
-        const baseName = filePath.replace(/\.[^/.]+$/, '.md');
-        send('file:opened', {
-          filePath: baseName,
-          content: r.markdown,           // fallback raw markdown
-          html,                          // preferred — renderer will turndown this
-          converted: { from: ext.toUpperCase(), originalPath: filePath },
-        });
-        if (rec) registry.claimPath(rec.windowId, baseName);
-      } else {
-        const msg = ('error' in r && (r as any).error?.message) ?? 'unknown error';
+      // Cap document size BEFORE reading the whole file into memory so a huge or
+      // malformed convertible file cannot exhaust the main process.
+      const stat = await fs.stat(filePath);
+      if (stat.size > MAX_CONVERT_BYTES) {
         send('file:opened', {
           filePath: null,
           content: '',
-          error: `Could not convert ${ext.toUpperCase()}: ${msg}`,
+          error: `Could not convert ${ext.toUpperCase()}: file is too large (max 25 MB).`,
+        });
+        return;
+      }
+      const buf = await fs.readFile(filePath);
+      // Convert in an isolated worker (bounded in-main fallback). renderHtml is the
+      // preferred source for the renderer's Turndown pass; raw markdown is the floor.
+      const conv = await convertDocument(ext, buf);
+      if (conv.ok && typeof conv.markdown === 'string') {
+        const baseName = filePath.replace(/\.[^/.]+$/, '.md');
+        send('file:opened', {
+          filePath: baseName,
+          content: conv.markdown,
+          html: conv.html,
+          converted: { from: ext.toUpperCase(), originalPath: filePath },
+        });
+        if (rec) registry.claimPath(rec.windowId, baseName);
+        // The suggested .md sibling is a main-derived save target → grant it.
+        fileGrants.grantFile(win.webContents.id, baseName);
+      } else {
+        send('file:opened', {
+          filePath: null,
+          content: '',
+          error: conv.error ?? `Could not convert ${ext.toUpperCase()}.`,
         });
       }
     } catch (e: any) {
-      console.error('[kordoc] threw:', e);
       send('file:opened', {
         filePath: null,
         content: '',
@@ -557,7 +691,7 @@ async function openFilePath(filePath: string, win: BrowserWindow): Promise<void>
   if (rec) registry.claimPath(rec.windowId, filePath);
 }
 
-ipcMain.handle('file:save', async (event, args: { filePath: string | null; content: string }) => {
+handleTrusted('file:save', async (event, args: { filePath: string | null; content: string }) => {
   const rec = registry.getByWebContents(event.sender.id);
   const win = windowFromRecord(rec);
   let target = args.filePath;
@@ -574,33 +708,52 @@ ipcMain.handle('file:save', async (event, args: { filePath: string | null; conte
     });
     if (result.canceled || !result.filePath) return { saved: false as const };
     target = result.filePath;
+    // The user picked this path in the save dialog → grant it as a write target.
+    fileGrants.grantFile(event.sender.id, target);
   }
-  // Duplicate-path guard: another live window owns this path → block + focus the
-  // owner, never silently overwrite (the requesting window stays dirty).
-  if (rec) {
-    const decision = registry.resolvePathClaim(rec.windowId, target);
-    if (decision.kind === 'focus-owner') {
-      windowFromRecord(registry.get(decision.ownerWindowId))?.focus();
-      console.log(
-        `[file] duplicate-path blocked path=${target} owner=${decision.ownerWindowId} requester=${rec.windowId} focusOwner=true`,
-      );
-      return { saved: false as const, error: 'already-open' as const, ownerWindowId: decision.ownerWindowId };
+  // Capability gate: the target must be an owned/granted file or live inside a
+  // granted workspace — never an arbitrary renderer-supplied absolute path.
+  if (!fileGrants.isFileAllowed(event.sender.id, target)) {
+    return { saved: false as const, error: 'not-authorized' as const };
+  }
+  const finalTarget = target;
+  // Serialize reserve→write→commit per canonical file identity so two windows
+  // racing the same path cannot both pass the duplicate guard and both write
+  // (TOCTOU). Key by realpath(parent)+basename; fall back to the resolved path.
+  const saveKey = (await canonicalNewTarget(finalTarget, nodeIdentityFs)) ?? path.resolve(finalTarget);
+  return saveMutex.run(saveKey, async () => {
+    // Duplicate-path guard: another live window owns this path → block + focus the
+    // owner, never silently overwrite (the requesting window stays dirty).
+    if (rec) {
+      const decision = registry.resolvePathClaim(rec.windowId, finalTarget);
+      if (decision.kind === 'focus-owner') {
+        windowFromRecord(registry.get(decision.ownerWindowId))?.focus();
+        console.log(
+          `[file] duplicate-path blocked path=${finalTarget} owner=${decision.ownerWindowId} requester=${rec.windowId} focusOwner=true`,
+        );
+        return { saved: false as const, error: 'already-open' as const, ownerWindowId: decision.ownerWindowId };
+      }
+      // Reserve ownership BEFORE the write so a concurrent save serialized behind
+      // this one sees the claim and is redirected to focus-owner.
+      registry.claimPath(rec.windowId, finalTarget);
     }
-  }
-  try {
-    await fs.writeFile(target, args.content, 'utf-8');
-  } catch (e) {
-    return { saved: false as const, error: e instanceof Error ? e.message : 'write-failed' };
-  }
-  if (rec) registry.claimPath(rec.windowId, target);
-  return { saved: true as const, filePath: target };
+    try {
+      await fs.writeFile(finalTarget, args.content, 'utf-8');
+    } catch (e) {
+      return { saved: false as const, error: e instanceof Error ? e.message : 'write-failed' };
+    }
+    return { saved: true as const, filePath: finalTarget };
+  });
 });
 
-ipcMain.handle('file:open-path', async (_event, filePath: unknown) => {
-  // Renderer-supplied path: validate before reading so a compromised renderer
-  // cannot exfiltrate arbitrary files (path traversal / arbitrary read guard).
+handleTrusted('file:open-path', async (event, filePath: unknown) => {
+  // Renderer-supplied path: validate format AND require a grant before reading so
+  // a compromised renderer cannot exfiltrate arbitrary files.
   if (!isSafeLocalAbsolutePath(filePath)) {
     return { error: 'invalid-path' as const };
+  }
+  if (!fileGrants.isFileAllowed(event.sender.id, filePath)) {
+    return { error: 'not-authorized' as const };
   }
   try {
     const content = await fs.readFile(filePath, 'utf-8');
@@ -612,7 +765,7 @@ ipcMain.handle('file:open-path', async (_event, filePath: unknown) => {
 
 // ---------- Workspace / file-tree IPC (G004 — left-panel file tree) ----------
 
-ipcMain.handle('workspace:open-folder', async (event) => {
+handleTrusted('workspace:open-folder', async (event) => {
   const parent =
     windowFromRecord(registry.getByWebContents(event.sender.id)) ??
     windowFromRecord(registry.focusedOrLast());
@@ -623,28 +776,39 @@ ipcMain.handle('workspace:open-folder', async (event) => {
     ? await dialog.showOpenDialog(parent, opts)
     : await dialog.showOpenDialog(opts);
   if (result.canceled || result.filePaths.length === 0) return null;
+  // Record the chosen workspace root so subsequent listDir/open calls are scoped.
+  fileGrants.grantWorkspace(event.sender.id, result.filePaths[0]);
   return result.filePaths[0];
 });
 
-ipcMain.handle(
-  'workspace:list-dir',
-  async (_event, args: { rootPath: string; dirPath: string }) => {
-    try {
-      const entries = await listDirectory({ rootPath: args.rootPath, dirPath: args.dirPath });
-      return { ok: true as const, entries };
-    } catch (e: any) {
-      return { ok: false as const, entries: [] as FileTreeEntry[], error: String(e?.message ?? e) };
-    }
-  },
-);
+handleTrusted('workspace:list-dir',
+async (event, args: { rootPath: string; dirPath: string }) => {
+  if (!fileGrants.isWorkspaceGranted(event.sender.id, args?.rootPath ?? '')) {
+    return { ok: false as const, entries: [] as FileTreeEntry[], error: 'workspace-not-authorized' };
+  }
+  // Symlink-escape guard: the requested dir must realpath-resolve inside the
+  // granted root, so a symlink planted in the workspace cannot list outside it.
+  if (!(await isRealpathWithinRoot(args.rootPath, args.dirPath, nodeIdentityFs))) {
+    return { ok: false as const, entries: [] as FileTreeEntry[], error: 'path-escapes-root' };
+  }
+  try {
+    const entries = await listDirectory({ rootPath: args.rootPath, dirPath: args.dirPath });
+    return { ok: true as const, entries };
+  } catch (e: any) {
+    return { ok: false as const, entries: [] as FileTreeEntry[], error: String(e?.message ?? e) };
+  }
+},);
 
-ipcMain.handle('file:open-in-current', async (event, target: unknown) => {
+handleTrusted('file:open-in-current', async (event, target: unknown) => {
   const rec = registry.getByWebContents(event.sender.id);
   const win = windowFromRecord(rec);
   if (!rec || !win) return { opened: false as const, error: 'no-window' as const };
   // The duplicate-path guard lives in `openFileInCurrentWindow`: when another
   // live window owns the target it focuses that owner and never opens a second
   // writer (`openFilePath` is not called).
+  if (typeof target !== 'string' || !fileGrants.isFileAllowed(event.sender.id, target)) {
+    return { opened: false as const, error: 'not-authorized' as const };
+  }
   return openFileInCurrentWindow(rec.windowId, target, {
     ownerOfPath: (p) => registry.ownerOfPath(p),
     focusOwner: (ownerWindowId) => {
@@ -654,9 +818,12 @@ ipcMain.handle('file:open-in-current', async (event, target: unknown) => {
   });
 });
 
-ipcMain.handle('shell:open-path', async (_event, filePath: unknown) => {
+handleTrusted('shell:open-path', async (event, filePath: unknown) => {
   if (!isSafeLocalAbsolutePath(filePath)) {
     return { ok: false as const, error: 'invalid-path' as const };
+  }
+  if (!fileGrants.isFileAllowed(event.sender.id, filePath)) {
+    return { ok: false as const, error: 'not-authorized' as const };
   }
   // shell.openPath resolves to '' on success or an error message string.
   const result = await shell.openPath(path.resolve(filePath as string));
@@ -665,9 +832,9 @@ ipcMain.handle('shell:open-path', async (_event, filePath: unknown) => {
 
 // ---------- Codex OAuth IPC ----------
 
-ipcMain.handle('auth:status', async () => getStatus());
+handleTrusted('auth:status', async () => getStatus());
 
-ipcMain.handle('auth:login', async (event) => {
+handleTrusted('auth:login', async (event) => {
   const sender = event.sender;
   return new Promise<void>((resolve) => {
     void startLogin((update: LoginUpdate) => {
@@ -677,24 +844,24 @@ ipcMain.handle('auth:login', async (event) => {
   });
 });
 
-ipcMain.handle('auth:cancel-login', async () => {
+handleTrusted('auth:cancel-login', async () => {
   cancelLogin();
 });
 
-ipcMain.handle('auth:logout', async () => {
+handleTrusted('auth:logout', async () => {
   await logout();
 });
 
-ipcMain.handle('auth:providers-status', async () => getRegistry().getAuthStatuses());
+handleTrusted('auth:providers-status', async () => getRegistry().getAuthStatuses());
 
-ipcMain.handle('auth:has-any', async () => getRegistry().hasAnyAuth());
+handleTrusted('auth:has-any', async () => getRegistry().hasAnyAuth());
 
-ipcMain.handle('auth:set-api-key', async (_e, args: { provider: AiProviderId; key: string }) => {
+handleTrusted('auth:set-api-key', async (_e, args: { provider: AiProviderId; key: string }) => {
   if (!isAiProviderId(args?.provider)) throw new Error('Unknown provider');
   return getRegistry().setApiKey(args.provider, args.key);
 });
 
-ipcMain.handle('auth:delete-provider-key', async (_e, provider: AiProviderId) => {
+handleTrusted('auth:delete-provider-key', async (_e, provider: AiProviderId) => {
   if (!isAiProviderId(provider)) throw new Error('Unknown provider');
   await getRegistry().deleteApiKey(provider);
 });
@@ -707,81 +874,91 @@ function chatKey(webContentsId: number, id: string): string {
   return `${webContentsId}:${id}`;
 }
 
-ipcMain.handle(
-  'ai:chat',
-  async (
-    event,
-    payload: {
-      id: string;
-      instructions: string;
-      history: ChatTurn[];
-      userText: string;
-      model?: string | { provider: AiProviderId; id: string };
-      surfaceMode?: string;
-      images?: unknown;
-    },
-  ) => {
-    const controller = new AbortController();
-    const sender = event.sender;
-    const key = chatKey(sender.id, payload.id);
-    activeChats.set(key, controller);
-    const model =
-      typeof payload.model === 'string'
-        ? { provider: 'chatgpt' as AiProviderId, id: payload.model }
-        : payload.model && isAiProviderId(payload.model.provider)
-          ? payload.model
-          : { provider: 'chatgpt' as AiProviderId, id: 'gpt-5.4-mini' };
-    const imgCheck = validateImageAttachments(payload.images);
-    if (!imgCheck.ok) {
-      sender.send(`ai:chat:${payload.id}`, { kind: 'error', message: imgCheck.error, errorKind: 'provider' });
-      activeChats.delete(key);
-      return;
-    }
-    try {
-      await getRegistry().streamProviderChat(
-        {
-          instructions: payload.instructions,
-          history: payload.history,
-          userText: payload.userText,
-          model,
-          surfaceMode:
-            payload.surfaceMode === 'write' ||
-            payload.surfaceMode === 'advise' ||
-            payload.surfaceMode === 'html' ||
-            payload.surfaceMode === 'block'
-              ? payload.surfaceMode
-              : undefined,
-          images: imgCheck.images.length ? imgCheck.images : undefined,
-          signal: controller.signal,
-          maxOutputTokens: isHtmlExportInstructions(payload.instructions)
-            ? htmlExportMaxTokens(model.provider, model.id)
-            : undefined,
-        },
-        (e) => sender.send(`ai:chat:${payload.id}`, e),
-      );
-    } finally {
-      activeChats.delete(key);
-    }
+handleTrusted('ai:chat',
+async (
+  event,
+  payload: {
+    id: string;
+    instructions: string;
+    history: ChatTurn[];
+    userText: string;
+    model?: string | { provider: AiProviderId; id: string };
+    surfaceMode?: string;
+    images?: unknown;
   },
-);
+) => {
+  // Validate the renderer-supplied payload at the IPC boundary (types do not
+  // survive IPC): reject malformed/oversized requests before allocating a
+  // provider stream, and surface the error on the chat's event channel.
+  const shapeCheck = validateChatTextPayload(payload);
+  if (!shapeCheck.ok) {
+    const id = typeof payload?.id === 'string' ? payload.id : 'unknown';
+    event.sender.send(`ai:chat:${id}`, { kind: 'error', message: shapeCheck.error, errorKind: 'provider' });
+    return;
+  }
+  const controller = new AbortController();
+  const sender = event.sender;
+  const key = chatKey(sender.id, payload.id);
+  // Duplicate-id guard (H-19): abort any prior stream on the same key before
+  // replacing it, so the old controller can't run untracked after we overwrite it.
+  activeChats.get(key)?.abort();
+  activeChats.set(key, controller);
+  const model =
+    typeof payload.model === 'string'
+      ? { provider: 'chatgpt' as AiProviderId, id: payload.model }
+      : payload.model && isAiProviderId(payload.model.provider)
+        ? payload.model
+        : { provider: 'chatgpt' as AiProviderId, id: 'gpt-5.4-mini' };
+  const imgCheck = validateImageAttachments(payload.images);
+  if (!imgCheck.ok) {
+    sender.send(`ai:chat:${payload.id}`, { kind: 'error', message: imgCheck.error, errorKind: 'provider' });
+    activeChats.delete(key);
+    return;
+  }
+  try {
+    await getRegistry().streamProviderChat(
+      {
+        instructions: payload.instructions,
+        history: payload.history,
+        userText: payload.userText,
+        model,
+        surfaceMode:
+          payload.surfaceMode === 'write' ||
+          payload.surfaceMode === 'advise' ||
+          payload.surfaceMode === 'html' ||
+          payload.surfaceMode === 'block'
+            ? payload.surfaceMode
+            : undefined,
+        images: imgCheck.images.length ? imgCheck.images : undefined,
+        signal: controller.signal,
+        maxOutputTokens: isHtmlExportInstructions(payload.instructions)
+          ? htmlExportMaxTokens(model.provider, model.id)
+          : undefined,
+      },
+      (e) => sender.send(`ai:chat:${payload.id}`, e),
+    );
+  } finally {
+    // Only clear the entry if it still points at THIS controller — a newer
+    // request for the same id may have replaced it (H-19).
+    if (activeChats.get(key) === controller) activeChats.delete(key);
+  }
+},);
 
-ipcMain.handle('ai:cancel', async (event, id: string) => {
+handleTrusted('ai:cancel', async (event, id: string) => {
   const key = chatKey(event.sender.id, id);
   activeChats.get(key)?.abort();
   activeChats.delete(key);
 });
 
-ipcMain.handle('ai:models', async (_e, force?: boolean) => getRegistry().getAvailableModels(force === true));
+handleTrusted('ai:models', async (_e, force?: boolean) => getRegistry().getAvailableModels(force === true));
 
 // ---------- Local AI provider config IPC (Ollama / LM Studio) ----------
 
-ipcMain.handle('local-ai:get-config', async () => getRegistry().getLocalConfig());
+handleTrusted('local-ai:get-config', async () => getRegistry().getLocalConfig());
 
-ipcMain.handle(
-  'local-ai:set-config',
-  async (_e, partial: { ollama?: string; lmstudio?: string }) =>
-    getRegistry().setLocalConfig(partial ?? {}),
-);
+handleTrusted('local-ai:set-config',
+async (_e, partial: { ollama?: string; lmstudio?: string }) =>
+  getRegistry().setLocalConfig(partial ?? {}),);
 
 // ---------- Prompt-assembly context IPC (v1.1 Phase 1) ----------
 
@@ -795,11 +972,10 @@ function makeProjectWizardService() {
   });
 }
 
-ipcMain.handle('project-wizard:start', async (_e, projectFolder: string) =>
-  makeProjectWizardService().start(await requireProjectFolder(projectFolder)),
-);
+handleTrusted('project-wizard:start', async (_e, projectFolder: string) =>
+  makeProjectWizardService().start(await requireProjectFolder(projectFolder)),);
 
-ipcMain.handle('project-wizard:save-approved-draft', async (_e, input) => {
+handleTrusted('project-wizard:save-approved-draft', async (_e, input) => {
   if (!isProjectWizardSaveApprovedDraftInput(input)) {
     throw new Error('Invalid project wizard draft payload');
   }
@@ -832,7 +1008,7 @@ async function requireProjectFolder(projectFolder: unknown): Promise<string> {
  * propagating the error to the renderer.  The renderer treats this as "legacy
  * path" and proceeds without crashing.
  */
-ipcMain.handle('prompt:assembly-context', async () => {
+handleTrusted('prompt:assembly-context', async () => {
   const enabled = isPromptAssemblyEnabled();
   if (!enabled) {
     // Toggle off — skip filesystem reads; return minimal context.
@@ -880,30 +1056,33 @@ function toWindowSnapshot(id: string, raw: unknown): SessionWindowSnapshot {
 
 // Session IPC is sender-scoped: each window reads/writes/clears only its own
 // entry in the v2 aggregate. Main owns the per-window key (renderer never sees it).
-ipcMain.handle('session:get', async (event) => {
+handleTrusted('session:get', async (event) => {
   const rec = registry.getByWebContents(event.sender.id);
   return { snapshot: rec?.restoreSnapshot ?? null };
 });
 
-ipcMain.handle('session:write', async (event, snap: unknown) => {
+handleTrusted('session:write', async (event, snap: unknown) => {
   const rec = registry.getByWebContents(event.sender.id);
   if (!rec) return;
   const win = toWindowSnapshot(rec.windowKey, snap);
   rec.lastSnapshot = win; // track content/dirty so a blank launch window is reused safely
-  const next = upsertWindowSnapshot(await readSessionV2(), win);
-  await writeSessionV2({ ...next, cleanExit: false });
+  const next = await mutateSessionAggregate((cur) => ({
+    ...upsertWindowSnapshot(cur, win),
+    cleanExit: false,
+  }));
+
   console.log(`[session] write key=${rec.windowKey} windows=${next.windows.length}`);
 });
 
-ipcMain.handle('session:clear', async (event) => {
+handleTrusted('session:clear', async (event) => {
   const rec = registry.getByWebContents(event.sender.id);
   if (!rec) return;
-  await writeSessionV2(removeWindowSnapshot(await readSessionV2(), rec.windowKey));
+  await mutateSessionAggregate((cur) => removeWindowSnapshot(cur, rec.windowKey));
 });
 
 // New windows must not receive `file:opened` before the renderer is ready, or the
 // payload is dropped and the window renders blank. Flush the per-window queue here.
-ipcMain.on('window:ready', (event) => {
+onTrusted('window:ready', (event) => {
   const rec = registry.markReady(event.sender.id);
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!rec || !win) return;
@@ -911,18 +1090,22 @@ ipcMain.on('window:ready', (event) => {
   console.log(`[window] ready id=${rec.windowId} flushed=${flushed}`);
 });
 
-ipcMain.handle('update:check', async () => checkForUpdate(app.getVersion()));
-ipcMain.handle('app:version', () => app.getVersion());
+handleTrusted('update:check', async () => checkForUpdate(app.getVersion()));
+handleTrusted('app:version', () => app.getVersion());
 /**
  * Convert an attached document (PDF/DOCX/HWP/XLSX) buffer to Markdown text so it
  * can be fed to the AI as context. Reuses the same kordoc pipeline as file-open.
  * Bounded (25 MiB) and never throws — returns an actionable error instead.
  */
-ipcMain.handle('ai:convert-attachment', async (_e, payload: unknown) => {
+handleTrusted('ai:convert-attachment', async (_e, payload: unknown) => {
   const p = (payload ?? {}) as { base64?: unknown; ext?: unknown };
   const ext = typeof p.ext === 'string' ? p.ext.toLowerCase() : '';
   const base64 = typeof p.base64 === 'string' ? p.base64 : '';
   if (!CONVERTIBLE_EXTS.has(ext)) return { ok: false, error: `Unsupported attachment type: ${ext || 'unknown'}` };
+  // Reject oversized payloads BEFORE decoding the base64 (avoids materializing a
+  // huge Buffer just to reject it).
+  const precap = checkBase64SizePrecap(base64, MAX_CONVERT_BYTES);
+  if (!precap.ok) return { ok: false, error: precap.error };
   let buf: Buffer;
   try {
     buf = Buffer.from(base64, 'base64');
@@ -930,34 +1113,29 @@ ipcMain.handle('ai:convert-attachment', async (_e, payload: unknown) => {
     return { ok: false, error: 'Could not read the attached file.' };
   }
   if (buf.length === 0) return { ok: false, error: 'The attached file is empty.' };
-  if (buf.length > 25 * 1024 * 1024) return { ok: false, error: 'Attached file is too large (max 25 MB).' };
-  try {
-    const nativeImport: (s: string) => Promise<any> = new Function('s', 'return import(s)') as any;
-    const kordoc = await nativeImport('kordoc');
-    const parseFn = kordoc.parse ?? kordoc.default?.parse;
-    if (typeof parseFn !== 'function') return { ok: false, error: 'Document converter unavailable.' };
-    const r = await parseFn(buf, { removeHeaderFooter: true });
-    if (r?.success && typeof r.markdown === 'string') return { ok: true, markdown: r.markdown };
-    const msg = ('error' in (r ?? {}) && (r as any).error?.message) || 'unknown error';
-    return { ok: false, error: `Could not convert ${ext.toUpperCase()}: ${msg}` };
-  } catch (e: any) {
-    return { ok: false, error: `Failed to convert ${ext.toUpperCase()}: ${e?.message ?? e}` };
-  }
+  if (buf.length > MAX_CONVERT_BYTES) return { ok: false, error: 'Attached file is too large (max 25 MB).' };
+  // Cheap content sniff: reject an obvious extension/content mismatch.
+  const magic = checkMagicBytes(buf, ext);
+  if (!magic.ok) return { ok: false, error: `Attachment content does not match .${ext}` };
+  const conv = await convertDocument(ext, buf);
+  return conv.ok && typeof conv.markdown === 'string'
+    ? { ok: true, markdown: conv.markdown }
+    : { ok: false, error: conv.error ?? `Could not convert ${ext.toUpperCase()}.` };
 });
-ipcMain.handle('app:relaunch', () => {
+handleTrusted('app:relaunch', () => {
   // Full restart so every renderer surface re-renders in the newly selected
   // language. Renderers flush their session snapshot before invoking this, so
   // open documents and unsaved buffers are restored on the next launch.
   app.relaunch();
   app.exit(0);
 });
-ipcMain.handle('shell:open-external', async (_e, url: string) => {
+handleTrusted('shell:open-external', async (_e, url: string) => {
   if (isAllowedExternalUrl(url)) await shell.openExternal(url);
 });
 
 // ---------- OS integration IPC (⑥ os-integration, AC9 — default .md editor) ----------
 
-ipcMain.handle('os:md-handler-status', async () => {
+handleTrusted('os:md-handler-status', async () => {
   // Reports only whether *this* build can register. We never probe Launch
   // Services for the current default handler (fragile); the renderer reflects a
   // "registered" state only after a successful, user-initiated registration.
@@ -965,7 +1143,7 @@ ipcMain.handle('os:md-handler-status', async () => {
   return { supported };
 });
 
-ipcMain.handle('os:register-md-handler', async () => {
+handleTrusted('os:register-md-handler', async () => {
   // User-initiated ONLY (never on boot, never in a loop). Idempotent:
   // `lsregister -f` updates the existing registration in place. Gated to
   // packaged darwin so dev / non-darwin returns an explicit unsupported state.
@@ -1039,7 +1217,7 @@ function fetchTextLimited(url: string, opts: { timeoutMs: number; maxBytes: numb
   });
 }
 
-ipcMain.handle('design:fetch', async (_e, input: unknown) => {
+handleTrusted('design:fetch', async (_e, input: unknown) => {
   const rawUrl = normalizeDesignMdUrl(input);
   if (!rawUrl || !isAllowedDesignFetchUrl(rawUrl)) {
     return {
@@ -1058,7 +1236,7 @@ ipcMain.handle('design:fetch', async (_e, input: unknown) => {
 /** In-memory cache of the design index (slugs) for the session. */
 let designListCache: { slug: string; name: string; pageUrl: string }[] | null = null;
 
-ipcMain.handle('design:list', async () => {
+handleTrusted('design:list', async () => {
   if (designListCache) return { ok: true as const, designs: designListCache };
   const url = designListContentsUrl();
   if (!isAllowedDesignListFetchUrl(url)) {
@@ -1083,7 +1261,7 @@ function htmlSaveFileName(name: unknown): string {
   return /\.html?$/i.test(base) ? base : `${base}.html`;
 }
 
-ipcMain.handle('html:save', async (event, args: { html?: string; defaultName?: string }) => {
+handleTrusted('html:save', async (event, args: { html?: string; defaultName?: string }) => {
   const win = windowFromRecord(registry.getByWebContents(event.sender.id));
   if (!win || typeof args?.html !== 'string') return { saved: false as const };
   const result = await dialog.showSaveDialog(win, {
@@ -1101,7 +1279,7 @@ ipcMain.handle('html:save', async (event, args: { html?: string; defaultName?: s
   return { saved: true as const, filePath: target };
 });
 
-ipcMain.handle('html:open-saved', async (_e, filePath: unknown) => {
+handleTrusted('html:open-saved', async (_e, filePath: unknown) => {
   if (!isOpenableSavedPath(filePath)) {
     return { opened: false as const, error: 'Not an openable HTML file.' };
   }
@@ -1117,15 +1295,9 @@ ipcMain.handle('html:open-saved', async (_e, filePath: unknown) => {
 
 app.on('before-quit', () => {
   // Mark the aggregate as a clean exit so the next launch starts fresh (no restore).
-  void markCleanExitV2();
+  void markCleanExitQueued();
+
 });
-
-/** Mark the v2 aggregate as a clean exit so the next launch does not offer restore. */
-async function markCleanExitV2(): Promise<void> {
-  const agg = await readSessionV2();
-  await writeSessionV2({ ...agg, cleanExit: true });
-}
-
 app.whenReady().then(async () => {
   const iconPath = resolveAppIconPath();
   if (process.platform === 'darwin' && iconPath) {
@@ -1177,9 +1349,10 @@ app.whenReady().then(async () => {
  * Returns true when at least one window was recreated.
  */
 async function restorePreviousWindows(): Promise<boolean> {
-  const prev = await readSessionV2();
+  const prev = await getSessionAggregate();
+
   if (prev.cleanExit === true) {
-    await writeSessionV2({ version: 2, windows: [], cleanExit: false });
+    await resetSessionAggregate();
     return false;
   }
   const candidates = prev.windows.filter(

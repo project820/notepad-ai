@@ -12,7 +12,7 @@ import { formatContextWindow, modelContextWindowTokens } from '../main/ai/output
 
 /** Provider labels for the Block AI model menu. */
 const BLOCK_PROVIDER_LABELS: Record<string, string> = {
-  chatgpt: 'ChatGPT', claude: 'Claude', openrouter: 'OpenRouter', ollama: 'Ollama', lmstudio: 'LM Studio',
+  chatgpt: 'ChatGPT', claude: 'Claude', openrouter: 'OpenRouter', ollama: 'Ollama', lmstudio: 'LM Studio', grok: 'Grok',
 };
 
 /** Provider-aware menu label: ChatGPT uses the compact prettyModel naming; other

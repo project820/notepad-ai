@@ -2,6 +2,21 @@ import TurndownService from 'turndown';
 // @ts-expect-error — bundled JS, no types
 import { gfm } from 'turndown-plugin-gfm';
 
+/**
+ * A heading `id` is emitted as a trailing `{#id}` attribute token, which
+ * markdown-it-attrs parses only when the id is a single brace/whitespace-free
+ * token. Sanitize so a hostile/odd id (spaces, `}`, newlines, `onclick=…`)
+ * cannot corrupt the round-trip or smuggle extra attrs (G006 heading-id check).
+ */
+export function safeHeadingId(raw: string): string {
+  return (raw ?? '')
+    .trim()
+    .replace(/[^\w-]+/g, '-')
+    .replace(/-{2,}/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 128);
+}
+
 let cachedService: TurndownService | null = null;
 
 function buildService(): TurndownService {
@@ -52,7 +67,7 @@ function buildService(): TurndownService {
     filter: ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'],
     replacement: (content, node) => {
       const level = Number(node.nodeName.charAt(1));
-      const id = node.id;
+      const id = safeHeadingId(node.id);
       return '\n\n' + '#'.repeat(level) + ' ' + content + (id ? ` {#${id}}` : '') + '\n\n';
     },
   });
@@ -71,11 +86,32 @@ function buildService(): TurndownService {
     },
   });
 
-  // Hard-strip elements that should NEVER appear in the markdown output.
-  // kordoc.renderHtml() inlines <style> blocks (page CSS) which would
-  // otherwise leak verbatim as plain text. Same for <script>, <head>,
-  // <meta>, <link>.
-  td.remove(['style', 'script', 'head', 'meta', 'link', 'noscript']);
+  // Hard-strip elements that have NO markdown representation and would otherwise
+  // leak garbage text or unsafe content into the output (validated node-type
+  // restriction, G006). kordoc.renderHtml() inlines <style>/<script> etc.; the
+  // embed/form/media set never round-trips to markdown. (img is kept — gfm emits
+  // `![]()`.)
+  td.remove([
+    'style',
+    'script',
+    'head',
+    'meta',
+    'link',
+    'noscript',
+    'iframe',
+    'object',
+    'embed',
+    'svg',
+    'canvas',
+    'form',
+    'button',
+    'select',
+    'textarea',
+    'audio',
+    'video',
+    'base',
+    'applet',
+  ] as never[]); // tag list is broader than Turndown's DOM-typed Filter (svg/applet)
 
   return td;
 }

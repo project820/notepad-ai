@@ -45,6 +45,16 @@ function toView(s: ProviderAuthStatus, local: LocalViewContext): ProviderStatusV
       localModelCount: local.modelCount(s.provider),
     };
   }
+  if (s.authKind === 'cli') {
+    // CLI providers (grok): status + install/login guidance row, no key/URL input.
+    return {
+      provider: s.provider,
+      label: s.label,
+      authKind: 'cli',
+      connected: s.connected,
+      error: s.error,
+    };
+  }
   if (s.provider !== 'chatgpt' && s.provider !== 'claude' && s.provider !== 'openrouter') return null;
   if (s.authKind !== 'oauth' && s.authKind !== 'api_key') return null;
   return {

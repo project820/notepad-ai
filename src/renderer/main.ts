@@ -11,6 +11,9 @@ import { loadPrefs, savePrefs, applyTheme, applyFontSize, resolvedDark } from '.
 import { wirePreviewTables } from './preview-table-edit';
 import { applyToEditor, applyToPreview, type FormatAction } from './formatting';
 import { htmlToMarkdown } from './html-to-md';
+import { buildConvertedHtmlFrame } from './sanitize-html';
+import { buildRestoreBanner } from './restore-banner';
+import { classifyLinkHref } from './link-policy';
 import { openLoginModal } from './login-modal';
 import { mountUnifiedChat, type ChatMode, type ChatAttachment, type ChatTextAttachment } from './unified-chat';
 import { clampChatWidth } from './chat-layout';
@@ -330,6 +333,29 @@ wirePreviewLinks(preview.el, {
   backLabel: t('footnote.back'),
   scroller: previewHost,
 });
+// Document-level fail-closed backstop (Phase 1 security gate). Forms never submit
+// (no app feature posts a form; converted-doc forms are stripped by the sanitizer
+// anyway). Anchor clicks outside the preview (which wirePreviewLinks owns) are
+// classified: only normalized http/https open in the OS browser via IPC, every
+// other scheme/relative/malformed href is denied. Capture phase so it runs before
+// any native navigation.
+document.addEventListener('submit', (e) => e.preventDefault(), true);
+document.addEventListener(
+  'click',
+  (e) => {
+    const anchor = (e.target as Element | null)?.closest?.('a');
+    if (!anchor) return;
+    if (preview.el.contains(anchor)) return; // handled by wirePreviewLinks
+    const decision = classifyLinkHref(anchor.getAttribute('href'));
+    if (decision.action === 'external') {
+      e.preventDefault();
+      void window.api.openExternal(decision.url);
+    } else if (decision.action === 'deny') {
+      e.preventDefault();
+    }
+  },
+  true,
+);
 
 // ----- Left panel: tabs (Outline + footnotes / Files) (#7, v0.4) -----
 const leftPanelHost = document.getElementById('left-panel') as HTMLDivElement;
@@ -976,6 +1002,9 @@ window.api.onFileOpened((payload: any) => {
   syncWorkspaceRootToCurrent();
   pendingTitle = null;
   let docMd = content;
+  // Every open/new resets the HTML-view toggle so a converted doc never inherits
+  // the previous document's rich-HTML view state.
+  showingConvertedHtml = false;
   if (html && converted) {
     try {
       const md = htmlToMarkdown(html);
@@ -986,11 +1015,11 @@ window.api.onFileOpened((payload: any) => {
     convertedHtml = html;
   } else {
     convertedHtml = null;
-    showingConvertedHtml = false;
   }
   editor.setDoc(docMd);
   if (showingConvertedHtml && convertedHtml) {
-    preview.el.innerHTML = convertedHtml;
+    // Converted HTML is sanitized into an inert fragment (never raw innerHTML).
+    preview.el.replaceChildren(buildConvertedHtmlFrame(convertedHtml));
   } else {
     preview.setDoc(docMd);
   }
@@ -1021,7 +1050,7 @@ function updateHtmlViewToggle() {
       // Switching the preview source (rich HTML ↔ markdown) invalidates the map.
       selectionSync.clearAll();
       if (showingConvertedHtml && convertedHtml) {
-        preview.el.innerHTML = convertedHtml;
+        preview.el.replaceChildren(buildConvertedHtmlFrame(convertedHtml));
       } else {
         preview.setDoc(editor.getDoc());
       }
@@ -1714,19 +1743,12 @@ setInterval(() => {
 void snapshottingDocChange; // referenced to satisfy linter
 
 function showRestoreBanner(snap: any) {
-  const root = document.createElement('div');
-  root.className = 'restore-banner';
-  const docPreview = (snap.doc as string).slice(0, 80).replace(/\n+/g, ' • ').trim();
-  root.innerHTML = `
-    <div class="restore-banner-text">
-      <strong>${t('restore.title')}</strong>
-      <span>${docPreview || '(empty)'} · ${new Date(snap.savedAt).toLocaleString()}</span>
-    </div>
-    <div class="restore-banner-actions">
-      <button class="restore-yes">${t('restore.yes')}</button>
-      <button class="restore-no">${t('restore.no')}</button>
-    </div>
-  `;
+  // Built with createElement + textContent (never innerHTML): the persisted doc
+  // preview is attacker-influenceable and must never become active DOM.
+  const root = buildRestoreBanner(
+    { doc: snap.doc, savedAt: snap.savedAt },
+    { title: t('restore.title'), yes: t('restore.yes'), no: t('restore.no') },
+  );
   document.body.appendChild(root);
   root.querySelector('.restore-yes')?.addEventListener('click', () => {
     suppressEditorChange = true;
