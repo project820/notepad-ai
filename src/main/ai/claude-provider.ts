@@ -4,7 +4,7 @@
  */
 
 import type { ApiKeyStore } from './api-key-store';
-import { humanizeEngineIdForProvider } from './model-catalog';
+import { getCuratedModels } from './model-catalog';
 import { appendWriteReanchor, toAnthropicMessages } from './messages';
 import { supportsVision } from './vision-capabilities';
 import { claudeErrorMessage, extractClaudeTextDelta } from './sse';
@@ -14,12 +14,6 @@ import type { AiChatEvent, AiChatRequest, AiProvider, ModelRef, ProviderAuthStat
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
 const ANTHROPIC_VERSION = '2023-06-01';
 const MAX_TOKENS = 4096;
-
-const CLAUDE_MODELS: ReadonlyArray<{ id: string; label: string }> = [
-  { id: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5' },
-  { id: 'claude-opus-4-1', label: 'Claude Opus 4.1' },
-  { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5' },
-];
 
 export class ClaudeProvider implements AiProvider {
   readonly id = 'claude' as const;
@@ -46,13 +40,15 @@ export class ClaudeProvider implements AiProvider {
   }
 
   async listModels(): Promise<ModelRef[]> {
-    return CLAUDE_MODELS.map((m) => ({
-      provider: 'claude' as const,
-      id: m.id,
-      label: m.label,
-      humanizeEngineId: humanizeEngineIdForProvider('claude'),
-      requiresAuth: true,
-    }));
+    return getCuratedModels()
+      .filter((m) => m.provider === 'claude')
+      .map((m) => ({
+        provider: 'claude' as const,
+        id: m.id,
+        label: m.label,
+        humanizeEngineId: m.humanizeEngineId,
+        requiresAuth: true,
+      }));
   }
 
   async streamChat(req: AiChatRequest, onEvent: (e: AiChatEvent) => void): Promise<void> {

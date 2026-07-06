@@ -63,7 +63,7 @@ export class ClaudeCliProvider implements StreamSource {
       spawn: this.deps.spawn,
       command: this.cmd(),
       probeArgs: ['--version'],
-      env: buildMinimalEnv(),
+      env: await buildMinimalEnv(),
       cwd: os.tmpdir(),
     });
     return r.available;
@@ -87,7 +87,7 @@ export class ClaudeCliProvider implements StreamSource {
       args,
       prompt: buildCliPrompt(req),
       mapLine: mapClaudeStreamJson,
-      env: buildMinimalEnv(),
+      env: await buildMinimalEnv(),
       cwd: os.tmpdir(),
       signal: req.signal,
       onEvent,

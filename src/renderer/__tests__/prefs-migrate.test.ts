@@ -24,8 +24,8 @@ describe('migratePrefs', () => {
   });
 
   it('preserves an already-migrated selectedModel (no clobber)', () => {
-    const p = migratePrefs({ model: 'gpt-5.5', selectedModel: { provider: 'claude', id: 'claude-sonnet-4-5' } });
-    expect(p.selectedModel).toEqual({ provider: 'claude', id: 'claude-sonnet-4-5' });
+    const p = migratePrefs({ model: 'gpt-5.5', selectedModel: { provider: 'claude', id: 'claude-sonnet-4-6' } });
+    expect(p.selectedModel).toEqual({ provider: 'claude', id: 'claude-sonnet-4-6' });
   });
 
   it('preserves an already-migrated style (no clobber)', () => {
@@ -50,10 +50,10 @@ describe('migratePrefs', () => {
 
   it('preserves selectedModel and blockSelectedModel together', () => {
     const p = migratePrefs({
-      selectedModel: { provider: 'claude', id: 'claude-opus-4-1' },
+      selectedModel: { provider: 'claude', id: 'claude-opus-4-8' },
       blockSelectedModel: { provider: 'claude', id: 'claude-haiku-4-5' },
     });
-    expect(p.selectedModel).toEqual({ provider: 'claude', id: 'claude-opus-4-1' });
+    expect(p.selectedModel).toEqual({ provider: 'claude', id: 'claude-opus-4-8' });
     expect(p.blockSelectedModel).toEqual({ provider: 'claude', id: 'claude-haiku-4-5' });
   });
 
@@ -65,5 +65,60 @@ describe('migratePrefs', () => {
   it('preserves workspaceRoot and leaves it unset by default', () => {
     expect(migratePrefs(null).workspaceRoot).toBeUndefined();
     expect(migratePrefs({ workspaceRoot: '/home/u/notes' }).workspaceRoot).toBe('/home/u/notes');
+  });
+});
+
+describe('migratePrefs — stale Claude id remap (PR-1 Bug B)', () => {
+  it('remaps stale claude ids across selectedModel, blockSelectedModel, and htmlModel', () => {
+    const p = migratePrefs({
+      selectedModel: { provider: 'claude', id: 'claude-sonnet-4-5' },
+      blockSelectedModel: { provider: 'claude', id: 'claude-opus-4-1' },
+      htmlModel: { provider: 'claude', id: 'claude-sonnet-4-5' },
+    });
+    expect(p.selectedModel).toEqual({ provider: 'claude', id: 'claude-sonnet-4-6' });
+    expect(p.blockSelectedModel).toEqual({ provider: 'claude', id: 'claude-opus-4-8' });
+    expect(p.htmlModel).toEqual({ provider: 'claude', id: 'claude-sonnet-4-6' });
+  });
+
+  it('remaps claude-opus-4-1 -> claude-opus-4-8', () => {
+    expect(
+      migratePrefs({ selectedModel: { provider: 'claude', id: 'claude-opus-4-1' } }).selectedModel,
+    ).toEqual({ provider: 'claude', id: 'claude-opus-4-8' });
+  });
+
+  it('leaves verified/current claude ids unchanged', () => {
+    const p = migratePrefs({
+      selectedModel: { provider: 'claude', id: 'claude-opus-4-8' },
+      blockSelectedModel: { provider: 'claude', id: 'claude-haiku-4-5' },
+      htmlModel: { provider: 'claude', id: 'claude-sonnet-4-6' },
+    });
+    expect(p.selectedModel).toEqual({ provider: 'claude', id: 'claude-opus-4-8' });
+    expect(p.blockSelectedModel).toEqual({ provider: 'claude', id: 'claude-haiku-4-5' });
+    expect(p.htmlModel).toEqual({ provider: 'claude', id: 'claude-sonnet-4-6' });
+  });
+
+  it('preserves unknown / custom claude ids (no lockout)', () => {
+    const p = migratePrefs({ selectedModel: { provider: 'claude', id: 'claude-experimental-9' } });
+    expect(p.selectedModel).toEqual({ provider: 'claude', id: 'claude-experimental-9' });
+  });
+
+  it('never remaps OpenRouter selections (incl. the anthropic/claude-sonnet-4.5 slug)', () => {
+    const p = migratePrefs({
+      selectedModel: { provider: 'openrouter', id: 'anthropic/claude-sonnet-4.5' },
+      htmlModel: { provider: 'openrouter', id: 'anthropic/claude-sonnet-4.5' },
+    });
+    expect(p.selectedModel).toEqual({ provider: 'openrouter', id: 'anthropic/claude-sonnet-4.5' });
+    expect(p.htmlModel).toEqual({ provider: 'openrouter', id: 'anthropic/claude-sonnet-4.5' });
+  });
+
+  it('leaves non-claude (chatgpt) selections untouched', () => {
+    const p = migratePrefs({ selectedModel: { provider: 'chatgpt', id: 'gpt-5.5' } });
+    expect(p.selectedModel).toEqual({ provider: 'chatgpt', id: 'gpt-5.5' });
+  });
+
+  it('leaves htmlModel unset when absent', () => {
+    expect(
+      migratePrefs({ selectedModel: { provider: 'claude', id: 'claude-opus-4-8' } }).htmlModel,
+    ).toBeUndefined();
   });
 });

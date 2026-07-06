@@ -1,9 +1,14 @@
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 
 import { ComposedClaudeProvider } from '../main/ai/claude-composed';
 import { ProviderRegistry, type ProviderMap } from '../main/ai/provider-registry';
 import type { ApiKeyStore } from '../main/ai/api-key-store';
-import type { CliProcess } from '../main/ai/cli-runner';
+import {
+  __resetCliSpawnPathForTests,
+  __setCliProbeForTests,
+  __setShellExecForTests,
+  type CliProcess,
+} from '../main/ai/cli-runner';
 import type { AiChatEvent, AiChatRequest, AiProvider } from '../main/ai/types';
 
 class FakeChild implements CliProcess {
@@ -33,6 +38,18 @@ const noKeyStore = { getApiKey: async () => null, getKeyStatus: async () => ({ c
 const req: AiChatRequest = { instructions: 's', history: [], userText: 'hi', model: { provider: 'claude', id: 'claude-sonnet-4-5' } };
 
 describe('ComposedClaudeProvider (CLI-first + API fallback)', () => {
+  // Hermetic CLI resolver: stub shell-exec (no real subprocess) and force the CLI
+  // probe true so PATH resolution is single-stage + filesystem-independent. Needed
+  // now that buildMinimalEnv() is async — the CLI spawn is deferred past getChild().
+  beforeEach(() => {
+    __resetCliSpawnPathForTests();
+    __setShellExecForTests(async () => 'GJC_PATH=/usr/bin:/bin');
+    __setCliProbeForTests(() => true);
+  });
+  afterEach(() => {
+    __resetCliSpawnPathForTests();
+  });
+
   function run(over: Partial<AiChatRequest> = {}) {
     let child: FakeChild | undefined;
     let spawnCalls = 0;
@@ -40,12 +57,19 @@ describe('ComposedClaudeProvider (CLI-first + API fallback)', () => {
     const provider = new ComposedClaudeProvider(noKeyStore, spawn);
     const events: AiChatEvent[] = [];
     const promise = provider.streamChat({ ...req, ...over }, (e) => events.push(e));
-    return { promise, getChild: () => child!, events, getSpawnCalls: () => spawnCalls };
+    // spawn is now deferred behind `await buildMinimalEnv()`; waitChild flushes the
+    // async resolver (macrotasks) until the child appears so tests can drive stdout.
+    const waitChild = async (): Promise<FakeChild> => {
+      for (let i = 0; i < 50 && !child; i++) await new Promise((r) => setTimeout(r, 0));
+      if (!child) throw new Error('CLI child was never spawned');
+      return child;
+    };
+    return { promise, getChild: () => child!, waitChild, events, getSpawnCalls: () => spawnCalls };
   }
 
   it('uses the CLI on success and does NOT fall back to the API (no auth error)', async () => {
     const h = run();
-    const child = h.getChild();
+    const child = await h.waitChild();
     child.emitOut('{"type":"assistant","message":{"content":[{"type":"text","text":"hello"}]}}\n');
     child.emitOut('{"type":"result","subtype":"success","is_error":false,"result":"hello"}\n');
     child.doClose(0);
@@ -57,7 +81,7 @@ describe('ComposedClaudeProvider (CLI-first + API fallback)', () => {
 
   it('falls back to the API path when the CLI fails before any output', async () => {
     const h = run();
-    const child = h.getChild();
+    const child = await h.waitChild();
     child.emitOut('{"type":"result","is_error":true,"result":"claude: not logged in"}\n');
     await h.promise;
     // Fallback reached the API provider, which (no key) emits an auth error.
@@ -69,6 +93,30 @@ describe('ComposedClaudeProvider (CLI-first + API fallback)', () => {
     await h.promise;
     expect(h.getSpawnCalls()).toBe(0); // CLI not spawned for image turns
     expect(h.events.some((e) => e.kind === 'error')).toBe(true); // API path (no key) → auth error
+  });
+
+  it('keeps a maxOutputTokens request on CLI-first even when an API key IS connected (subscription — no paid-API diversion)', async () => {
+    // A subscriber must NOT be pushed onto the paid Anthropic API just because a
+    // max-output budget is set. `claude -p` (CLI, subscription) is used even with a
+    // connected key; the CLI's own default output cap applies. Zero API touch.
+    const connectedKey = {
+      getApiKey: async () => 'sk-ant-live',
+      getKeyStatus: async () => ({ connected: true, keyLast4: 'live', persisted: true }),
+    } as unknown as ApiKeyStore;
+    let child: FakeChild | undefined;
+    let spawnCalls = 0;
+    const spawn = () => { spawnCalls++; child = new FakeChild(); return child; };
+    const provider = new ComposedClaudeProvider(connectedKey, spawn);
+    const events: AiChatEvent[] = [];
+    const promise = provider.streamChat({ ...req, maxOutputTokens: 64_000 }, (e) => events.push(e));
+    for (let i = 0; i < 50 && !child; i++) await new Promise((r) => setTimeout(r, 0));
+    if (!child) throw new Error('CLI child never spawned — request was wrongly diverted to the paid API');
+    child.emitOut('{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}\n');
+    child.emitOut('{"type":"result","subtype":"success","is_error":false,"result":"hi"}\n');
+    child.doClose(0);
+    await promise;
+    expect(spawnCalls).toBe(1); // CLI-first used (subscription) despite the connected key
+    expect(events.some((e) => e.kind === 'error')).toBe(false); // never touched the paid API path
   });
 });
 

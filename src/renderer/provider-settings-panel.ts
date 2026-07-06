@@ -37,6 +37,8 @@ export type ProviderStatusView = {
   localUrlDefault?: string;
   /** Local providers only: count of discovered models (drives the offline hint). */
   localModelCount?: number;
+  /** Optional persistent guidance note shown under the row (e.g. CLI-first usage). */
+  hint?: string;
 };
 
 export type ProviderSettingsRenderOptions = {
@@ -167,6 +169,7 @@ export function renderProviderSettingsPanel(opts: ProviderSettingsRenderOptions)
     </div>
     ${s.error ? `<div class="prov-error" role="alert">${escapeHTML(s.error)}</div>` : ''}
     <div class="prov-controls">${providerControls(s)}</div>
+    ${s.hint ? `<div class="prov-local-note">${escapeHTML(s.hint)}</div>` : ''}
     ${footer}
   </section>`;
     })

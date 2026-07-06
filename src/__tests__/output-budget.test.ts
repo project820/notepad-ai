@@ -4,7 +4,11 @@ import {
   isHtmlExportInstructions,
   modelContextWindowTokens,
   formatContextWindow,
+  MODEL_MAX_OUTPUT,
+  MODEL_CONTEXT_WINDOW,
 } from '../main/ai/output-budget';
+import { getCuratedModels } from '../main/ai/model-catalog';
+import { supportsVision } from '../main/ai/vision-capabilities';
 
 
 describe('htmlExportMaxTokens', () => {
@@ -16,11 +20,10 @@ describe('htmlExportMaxTokens', () => {
     expect(htmlExportMaxTokens('chatgpt', 'some-future-model')).toBeUndefined();
   });
 
-  it('sizes Claude to each model\'s documented max output (Opus caps lower than Sonnet)', () => {
-    expect(htmlExportMaxTokens('claude', 'claude-sonnet-4-5')).toBe(64_000);
+  it('sizes Claude to each model\'s documented max output', () => {
+    expect(htmlExportMaxTokens('claude', 'claude-opus-4-8')).toBe(64_000);
+    expect(htmlExportMaxTokens('claude', 'claude-sonnet-4-6')).toBe(64_000);
     expect(htmlExportMaxTokens('claude', 'claude-haiku-4-5')).toBe(64_000);
-    // Opus 4.1 caps at 32K — a flat 64K would 400, so per-model sizing matters.
-    expect(htmlExportMaxTokens('claude', 'claude-opus-4-1')).toBe(32_000);
   });
 
   it('sizes OpenRouter per curated model slug', () => {
@@ -35,7 +38,7 @@ describe('htmlExportMaxTokens', () => {
   });
 
   it('never requests a tiny default — capped models all exceed the old 4096', () => {
-    expect(htmlExportMaxTokens('claude', 'claude-sonnet-4-5')!).toBeGreaterThan(4096);
+    expect(htmlExportMaxTokens('claude', 'claude-sonnet-4-6')!).toBeGreaterThan(4096);
     expect(htmlExportMaxTokens('openrouter', 'google/gemini-2.5-pro')!).toBeGreaterThan(4096);
     expect(htmlExportMaxTokens('claude', 'unknown')!).toBeGreaterThan(4096);
   });
@@ -51,7 +54,7 @@ describe('modelContextWindowTokens', () => {
   it('returns each model\'s context window, with a per-provider fallback', () => {
     expect(modelContextWindowTokens('chatgpt', 'gpt-5.4')).toBe(1_000_000);
     expect(modelContextWindowTokens('openrouter', 'google/gemini-2.5-pro')).toBe(1_000_000);
-    expect(modelContextWindowTokens('claude', 'claude-sonnet-4-5')).toBe(200_000);
+    expect(modelContextWindowTokens('claude', 'claude-sonnet-4-6')).toBe(200_000);
     expect(modelContextWindowTokens('openrouter', 'x-ai/grok-4')).toBe(256_000);
     // Unknown/custom → provider default.
     expect(modelContextWindowTokens('claude', 'claude-future')).toBe(200_000);
@@ -67,10 +70,10 @@ describe('modelContextWindowTokens', () => {
     // A live Ollama /api/show value wins over the per-provider default…
     expect(modelContextWindowTokens('ollama', 'llama3:8b', 131_072)).toBe(131_072);
     // …and a live value even overrides a curated cloud entry.
-    expect(modelContextWindowTokens('claude', 'claude-sonnet-4-5', 500_000)).toBe(500_000);
+    expect(modelContextWindowTokens('claude', 'claude-sonnet-4-6', 500_000)).toBe(500_000);
     // Non-positive / missing live values are ignored (fall back to the table).
     expect(modelContextWindowTokens('ollama', 'llama3:8b', 0)).toBe(32_768);
-    expect(modelContextWindowTokens('claude', 'claude-sonnet-4-5', undefined)).toBe(200_000);
+    expect(modelContextWindowTokens('claude', 'claude-sonnet-4-6', undefined)).toBe(200_000);
   });
 });
 
@@ -102,5 +105,49 @@ describe('isHtmlExportInstructions', () => {
     expect(isHtmlExportInstructions('')).toBe(false);
     expect(isHtmlExportInstructions(undefined)).toBe(false);
     expect(isHtmlExportInstructions(null)).toBe(false);
+  });
+});
+
+describe('budget retention (HARD GATE — conservative verified floor, no raise)', () => {
+  it('retains 64K output for the verified Claude ids', () => {
+    expect(htmlExportMaxTokens('claude', 'claude-opus-4-8')).toBe(64_000);
+    expect(htmlExportMaxTokens('claude', 'claude-sonnet-4-6')).toBe(64_000);
+    expect(htmlExportMaxTokens('claude', 'claude-haiku-4-5')).toBe(64_000);
+  });
+
+  it('retains the 200K context window for the verified Claude ids', () => {
+    expect(modelContextWindowTokens('claude', 'claude-opus-4-8')).toBe(200_000);
+    expect(modelContextWindowTokens('claude', 'claude-sonnet-4-6')).toBe(200_000);
+    expect(modelContextWindowTokens('claude', 'claude-haiku-4-5')).toBe(200_000);
+  });
+
+  it('does NOT raise Claude budgets to 128K output or 1M context', () => {
+    for (const id of ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5']) {
+      expect(htmlExportMaxTokens('claude', id)).toBeLessThanOrEqual(64_000);
+      expect(modelContextWindowTokens('claude', id)).toBeLessThanOrEqual(200_000);
+    }
+  });
+});
+
+describe('catalog <-> budget sync guard', () => {
+  it('every curated claude:/openrouter: id has a MODEL_MAX_OUTPUT + MODEL_CONTEXT_WINDOW entry', () => {
+    const keys = getCuratedModels()
+      .filter((m) => m.provider === 'claude' || m.provider === 'openrouter')
+      .map((m) => `${m.provider}:${m.id}`);
+    expect(keys.length).toBeGreaterThan(0);
+    for (const key of keys) {
+      expect(key in MODEL_MAX_OUTPUT, `MODEL_MAX_OUTPUT missing ${key}`).toBe(true);
+      expect(key in MODEL_CONTEXT_WINDOW, `MODEL_CONTEXT_WINDOW missing ${key}`).toBe(true);
+    }
+  });
+});
+
+describe('catalog <-> supportsVision sync guard', () => {
+  it('every curated claude:* id is vision-capable', () => {
+    const claudeIds = getCuratedModels().filter((m) => m.provider === 'claude');
+    expect(claudeIds.length).toBeGreaterThan(0);
+    for (const m of claudeIds) {
+      expect(supportsVision('claude', m.id), `supportsVision failed for ${m.id}`).toBe(true);
+    }
   });
 });

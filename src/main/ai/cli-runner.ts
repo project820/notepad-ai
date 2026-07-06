@@ -44,11 +44,166 @@ export const CLI_LIMITS = {
 } as const;
 
 /**
+ * A GUI-launched macOS app inherits a minimal PATH (e.g. /usr/bin:/bin) that does
+ * NOT include where user CLIs live (Homebrew, npm-global, nvm, or cmux shims), so
+ * `claude`/`grok` are not found and the providers look "Not connected". Resolve the
+ * user's real PATH via their login shell and merge it with common bin dirs. The
+ * resolution is ASYNC (never a sync main-thread `execFileSync`) and darwin-only.
+ *
+ * Secret containment (G003, adjudication 1.2): the resolver shell is spawned with a
+ * MINIMAL allowlist env (HOME/USER/LOGNAME/SHELL/LANG/TMPDIR/PATH) — NEVER the full
+ * process.env, which would leak ANTHROPIC_API_KEY/OPENAI_API_KEY/etc. into the login
+ * shell and everything its rc files source.
+ *
+ * Two-stage resolution (adjudication 1.3): try a non-interactive `-lc` first (fast,
+ * sources .zprofile/.zshenv); ONLY when `claude`/`grok` do not resolve on that PATH,
+ * retry ONCE with an interactive `-ilc` (sources .zshrc, where nvm init conventionally
+ * lives). Whichever yields a usable PATH wins.
+ *
+ * Caching: a single shared in-flight promise coalesces concurrent callers, and ONLY a
+ * successfully resolved non-empty PATH string is cached. A pending, timed-out, or
+ * failed resolution NEVER caches null (no negative-cache poisoning) — the next caller
+ * re-resolves, so a transient shell failure self-heals. PATH is not a secret, so none
+ * of this weakens the minimal-env guarantee.
+ */
+const PATH_PROBE_CMD = 'echo "GJC_PATH=$PATH"';
+const PATH_SENTINEL = 'GJC_PATH=';
+const RESOLVER_ENV_KEYS = ['HOME', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'TMPDIR', 'PATH'] as const;
+const COMMON_BIN_DIRS = ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin'];
+
+/** Injectable async shell exec (default over node:child_process); overridable in tests. */
+export type ShellExecFn = (
+  shell: string,
+  args: string[],
+  opts: { env: Record<string, string>; timeoutMs: number },
+) => Promise<string>;
+
+const defaultShellExec: ShellExecFn = (shell, args, opts) =>
+  new Promise<string>((resolve, reject) => {
+    const { execFile } = require('node:child_process') as typeof import('node:child_process');
+    execFile(shell, args, { encoding: 'utf-8', timeout: opts.timeoutMs, env: opts.env }, (err, stdout) => {
+      if (err) reject(err);
+      else resolve(String(stdout));
+    });
+  });
+
+/**
+ * Does `pathStr` resolve BOTH `claude` AND `grok`? Requiring both (not either) means
+ * a `-lc` PATH that finds only one CLI still triggers the `-ilc` fallback, so the
+ * other CLI (e.g. grok installed via a `.zshrc`-only shim) is not left unreachable.
+ * (real filesystem in prod).
+ */
+function defaultCliProbe(pathStr: string): boolean {
+  const { existsSync } = require('node:fs') as typeof import('node:fs');
+  const nodePath = require('node:path') as typeof import('node:path');
+  let hasClaude = false;
+  let hasGrok = false;
+  for (const dir of pathStr.split(':')) {
+    if (!dir) continue;
+    if (!hasClaude && existsSync(nodePath.join(dir, 'claude'))) hasClaude = true;
+    if (!hasGrok && existsSync(nodePath.join(dir, 'grok'))) hasGrok = true;
+    if (hasClaude && hasGrok) return true;
+  }
+  return false;
+}
+
+let _execImpl: ShellExecFn = defaultShellExec;
+let _cliProbeImpl: (pathStr: string) => boolean = defaultCliProbe;
+
+let cachedShellPath: string | undefined;
+let inflight: Promise<string | null> | null = null;
+
+/** Minimal allowlist env for the resolver shell — never the full (secret-bearing) env. */
+function resolverEnv(): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const key of RESOLVER_ENV_KEYS) {
+    const v = process.env[key];
+    if (typeof v === 'string') env[key] = v;
+  }
+  return env;
+}
+
+/** Extract the `GJC_PATH=` sentinel value, tolerating rc-file chatter on stdout. */
+function parseSentinelPath(out: string): string | null {
+  const line = out
+    .split('\n')
+    .map((l) => l.trim())
+    .find((l) => l.startsWith(PATH_SENTINEL));
+  const p = line ? line.slice(PATH_SENTINEL.length).trim() : '';
+  return p || null;
+}
+
+/** Run one shell mode with the minimal env + hard 5s timeout; null on any failure. */
+async function runShellForPath(shell: string, flag: '-lc' | '-ilc'): Promise<string | null> {
+  try {
+    const out = await _execImpl(shell, [flag, PATH_PROBE_CMD], { env: resolverEnv(), timeoutMs: 5_000 });
+    return parseSentinelPath(out);
+  } catch {
+    return null;
+  }
+}
+
+/** Two-stage resolution; returns the chosen PATH or null when the shell can't be read. */
+async function doResolveLoginShellPath(): Promise<string | null> {
+  const shell = process.env.SHELL || '/bin/zsh';
+  // Stage 1: non-interactive login shell (sources .zprofile/.zshenv).
+  const lc = await runShellForPath(shell, '-lc');
+  if (lc && _cliProbeImpl(lc)) return lc;
+  // Stage 2 (only when the CLIs are unresolved): interactive shell (sources .zshrc/nvm).
+  const ilc = await runShellForPath(shell, '-ilc');
+  if (ilc && _cliProbeImpl(ilc)) return ilc;
+  // Neither stage resolves BOTH CLIs on its own: return the UNION of whatever the
+  // two stages found (dedup, order-preserving, `-lc` first) so a CLI present in
+  // only one stage's PATH is never dropped by preferring the other stage. If both
+  // stages failed, null. enrichedSpawnPath() then merges process.env.PATH + common.
+  const merged = [...(lc?.split(':') ?? []), ...(ilc?.split(':') ?? [])].filter(Boolean);
+  return merged.length ? [...new Set(merged)].join(':') : null;
+}
+
+/**
+ * Resolve the login-shell PATH once (darwin-only), coalescing concurrent callers on a
+ * shared in-flight promise. Caches only a non-empty success; never caches null.
+ */
+async function resolveLoginShellPath(): Promise<string | null> {
+  if (typeof cachedShellPath === 'string') return cachedShellPath;
+  if (process.platform !== 'darwin') return null;
+  if (inflight) return inflight;
+  inflight = (async () => {
+    try {
+      const resolved = await doResolveLoginShellPath();
+      if (resolved) cachedShellPath = resolved; // cache ONLY a non-empty success
+      return resolved;
+    } finally {
+      inflight = null; // pending/failed resolutions leave the cache untouched (no null poison)
+    }
+  })();
+  return inflight;
+}
+
+/** Warm the login-shell PATH resolver in the background (fire-and-forget at startup). */
+export async function prewarmCliSpawnPath(): Promise<void> {
+  await resolveLoginShellPath();
+}
+
+/** Merge login-shell PATH + current PATH + common bin dirs, de-duplicated (order-preserving). */
+async function enrichedSpawnPath(): Promise<string> {
+  const resolved = await resolveLoginShellPath();
+  const parts = [
+    ...(resolved?.split(':') ?? []),
+    ...(process.env.PATH ?? '').split(':'),
+    ...COMMON_BIN_DIRS,
+  ].filter(Boolean);
+  return [...new Set(parts)].join(':');
+}
+
+/**
  * Build a minimal allowlisted environment for spawn. Only the named keys are
  * forwarded from the parent; everything else (including ANTHROPIC_API_KEY,
- * OPENAI_API_KEY, OPENROUTER_API_KEY, and any other secret) is dropped.
+ * OPENAI_API_KEY, OPENROUTER_API_KEY, and any other secret) is dropped. PATH is
+ * awaited from the async resolver — a first call racing prewarm awaits the shared
+ * in-flight promise rather than falling back to a stripped PATH.
  */
-export function buildMinimalEnv(extraAllow: string[] = []): Record<string, string> {
+export async function buildMinimalEnv(extraAllow: string[] = []): Promise<Record<string, string>> {
   const base = ['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'TMPDIR'];
   const allow = new Set([...base, ...extraAllow]);
   const out: Record<string, string> = {};
@@ -56,7 +211,27 @@ export function buildMinimalEnv(extraAllow: string[] = []): Record<string, strin
     const v = process.env[key];
     if (typeof v === 'string') out[key] = v;
   }
+  // Always hand the child a PATH that can actually locate user CLIs (login-shell
+  // PATH + common bin dirs), not the stripped GUI-app PATH.
+  out.PATH = await enrichedSpawnPath();
   return out;
+}
+
+// --- test seams (not part of the production API; used only by unit tests) ---
+/** Override the shell-exec used by the PATH resolver (hermetic tests). */
+export function __setShellExecForTests(fn: ShellExecFn): void {
+  _execImpl = fn;
+}
+/** Override the CLI-existence probe used by the two-stage resolver (hermetic tests). */
+export function __setCliProbeForTests(fn: (pathStr: string) => boolean): void {
+  _cliProbeImpl = fn;
+}
+/** Reset resolver cache, in-flight promise, and seams to defaults between tests. */
+export function __resetCliSpawnPathForTests(): void {
+  cachedShellPath = undefined;
+  inflight = null;
+  _execImpl = defaultShellExec;
+  _cliProbeImpl = defaultCliProbe;
 }
 
 /**
@@ -210,7 +385,6 @@ export function runCliCompletion(opts: {
     child.stdout?.on('data', (chunk) => {
       if (settled) return;
       const { records, error } = parser.push(asString(chunk));
-      if (records.length > 0) sawOutput = sawOutput || records.length > 0;
       if (!handleRecords(records)) return;
       if (error) fail(error);
     });
@@ -237,7 +411,15 @@ export function runCliCompletion(opts: {
         finish({ ok: true, sawOutput });
       } else {
         const detail = stderrText.trim().slice(0, 500);
-        fail(detail || `CLI exited with code ${code}`, 'provider');
+        // Adjudication 1.4: a non-zero exit whose stderr looks like an auth/login
+        // failure is classified errorKind:'auth' with actionable login guidance (the
+        // CLI is installed but not logged in); anything else stays 'provider'.
+        if (/\bunauthori[sz]ed\b|\bnot (?:logged|signed) ?in\b|\bplease (?:log|sign) ?in\b|\b(?:log|sign) ?in (?:required|failed|again)\b|\bauthentication (?:failed|required|expired|error)\b|\b(?:invalid|expired|missing) (?:api[ _-]?key|credentials?|tokens?)\b/i.test(stderrText)) {
+          const guidance = 'Run `claude login` (or `grok`) then reopen the app.';
+          fail(detail ? `${detail}\n${guidance}` : guidance, 'auth');
+        } else {
+          fail(detail || `CLI exited with code ${code}`, 'provider');
+        }
       }
     });
 

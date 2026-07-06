@@ -7,7 +7,7 @@
  */
 
 import type { ApiKeyStore } from './api-key-store';
-import { humanizeEngineIdForProvider } from './model-catalog';
+import { getCuratedModels } from './model-catalog';
 import { toOpenAiMessages } from './messages';
 import { supportsVision } from './vision-capabilities';
 import { extractOpenAiTextDelta, isOpenAiDone } from './sse';
@@ -15,13 +15,6 @@ import { streamSseChat, missingKeyError } from './stream-http';
 import type { AiChatEvent, AiChatRequest, AiProvider, ModelRef, ProviderAuthStatus } from './types';
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
-
-const OPENROUTER_MODELS: ReadonlyArray<{ id: string; label: string }> = [
-  { id: 'anthropic/claude-sonnet-4.5', label: 'Claude Sonnet 4.5 (OpenRouter)' },
-  { id: 'google/gemini-2.5-pro', label: 'Gemini 2.5 Pro (OpenRouter)' },
-  { id: 'x-ai/grok-4', label: 'Grok 4 (OpenRouter)' },
-  { id: 'openai/gpt-5.1', label: 'GPT-5.1 (OpenRouter)' },
-];
 
 export class OpenRouterProvider implements AiProvider {
   readonly id = 'openrouter' as const;
@@ -42,13 +35,15 @@ export class OpenRouterProvider implements AiProvider {
   }
 
   async listModels(): Promise<ModelRef[]> {
-    return OPENROUTER_MODELS.map((m) => ({
-      provider: 'openrouter' as const,
-      id: m.id,
-      label: m.label,
-      humanizeEngineId: humanizeEngineIdForProvider('openrouter'),
-      requiresAuth: true,
-    }));
+    return getCuratedModels()
+      .filter((m) => m.provider === 'openrouter')
+      .map((m) => ({
+        provider: 'openrouter' as const,
+        id: m.id,
+        label: m.label,
+        humanizeEngineId: m.humanizeEngineId,
+        requiresAuth: true,
+      }));
   }
 
   async streamChat(req: AiChatRequest, onEvent: (e: AiChatEvent) => void): Promise<void> {

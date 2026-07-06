@@ -29,17 +29,23 @@ export class ComposedClaudeProvider implements AiProvider {
 
   async getAuthStatus(): Promise<ProviderAuthStatus> {
     const apiStatus = await this.api.getAuthStatus();
-    if (apiStatus.connected) return apiStatus; // API key present
+    if (apiStatus.connected) {
+      // API key present — but the CLI is still preferred when available.
+      return { ...apiStatus, label: 'Claude (CLI-first · API key)' };
+    }
     // No API key: still usable (cost-free) when the claude CLI is installed.
     if (await this.cli.isAvailable()) {
-      return {
-        provider: 'claude',
-        authKind: 'api_key',
-        connected: true,
-        label: 'Claude (CLI)',
-      };
+      return { provider: 'claude', authKind: 'api_key', connected: true, label: 'Claude (CLI)' };
     }
-    return { ...apiStatus, connected: false };
+    // Neither path available — guide the (free) CLI login first, key as fallback.
+    return {
+      provider: 'claude',
+      authKind: 'api_key',
+      connected: false,
+      label: 'Claude',
+      error:
+        'Run `claude login` in a terminal to use the free local CLI (then reopen the app), or paste an Anthropic API key below.',
+    };
   }
 
   async listModels(): Promise<ModelRef[]> {
@@ -52,6 +58,12 @@ export class ComposedClaudeProvider implements AiProvider {
       await this.api.streamChat(req, onEvent);
       return;
     }
+    // Everything else (incl. HTML export with a max-output budget) stays CLI-first:
+    // `claude -p` runs on the user's SUBSCRIPTION (no per-token billing), and it
+    // handles model-id remapping itself. We deliberately do NOT divert to the paid
+    // Anthropic API just to pass a maxOutputTokens budget — a subscriber must not be
+    // silently pushed onto per-request billing. The CLI's own default output cap
+    // applies; the API path remains ONLY the automatic fallback when the CLI fails.
     await this.fallback.streamChat(req, onEvent);
   }
 }
