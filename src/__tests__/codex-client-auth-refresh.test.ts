@@ -251,6 +251,25 @@ describe('codex-client classified errors + streaming guards (Bug A)', () => {
     assertAllErrorsClassified(events);
   });
 
+  it('maps an AUTH-shaped SSE failure to errorKind:auth (surfaces the sign-in affordance)', async () => {
+    auth.getAccessToken.mockResolvedValue('TOKEN');
+    global.fetch = vi.fn(async () =>
+      sseResponse([
+        sseFrame({ type: 'response.failed', response: { error: { code: 'token_invalidated', message: 'session ended' } } }),
+      ]),
+    ) as unknown as typeof fetch;
+
+    const { streamChat } = await import('../main/codex-client');
+    const events: ChatEvt[] = [];
+    await streamChat(baseReq(), (e) => events.push(e));
+
+    const errs = events.filter((e) => e.kind === 'error');
+    expect(errs).toHaveLength(1);
+    expect(errs[0].errorKind).toBe('auth'); // auth-shaped stream failure → affordance path
+    expect(errs[0].message).not.toContain('session ended'); // raw body never surfaced for auth
+    assertAllErrorsClassified(events);
+  });
+
   it("uses redirect:'error' on the Codex fetch (SSRF parity)", async () => {
     auth.getAccessToken.mockResolvedValue('TOKEN');
     let seenInit: { redirect?: string } | undefined;

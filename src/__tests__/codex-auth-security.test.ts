@@ -148,8 +148,8 @@ describe('codex-auth token refresh lifecycle (H-21/H-22)', () => {
     release(null);
     const token = await p;
 
-    expect(token).toBe('NEW_ACCESS'); // best-effort token still returned to the caller
-    expect(h.writeFile).not.toHaveBeenCalled(); // but it is NOT persisted back to disk
+    expect(token).toBeNull(); // logout raced the refresh → signed out, no bearer handed back
+    expect(h.writeFile).not.toHaveBeenCalled(); // and nothing persisted back to disk (H-22)
   });
 
   it('emits a terminal cancel update when login is cancelled mid-flight (P1)', async () => {

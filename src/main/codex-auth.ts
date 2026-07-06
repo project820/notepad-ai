@@ -444,9 +444,10 @@ export async function getAccessToken(): Promise<string | null> {
     case 'ok':
       return outcome.accessToken;
     case 'stale_generation':
-      // A logout/login raced this refresh; hand back the freshly fetched token
-      // best-effort, but it was never persisted (H-22).
-      return outcome.accessToken;
+      // A logout/login raced this refresh: the token was intentionally NOT
+      // persisted (H-22). Do NOT hand it back — a caller must not continue as the
+      // signed-out / previous account. Treat as signed out.
+      return null;
     default:
       // transient_failure / invalidated → best-effort stale token (unchanged).
       return s.access_token;

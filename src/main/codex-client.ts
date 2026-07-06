@@ -244,6 +244,12 @@ export async function streamChat(req: ChatRequest, onEvent: (e: ChatEvent) => vo
             }
           } else if (type === 'response.failed' || type === 'error' || type === 'response.error') {
             // Post-stream provider failure — classified, capped, and NEVER retried.
+            // An auth-shaped streamed failure must surface the sign-in affordance
+            // (fixed copy, no raw body), not a generic provider error.
+            if (sseErrorIsAuth(evt)) {
+              onEvent({ kind: 'error', message: AUTH_SIGN_IN_MESSAGE, errorKind: 'auth' });
+              return;
+            }
             const detail = sseErrorDetail(evt);
             onEvent({
               kind: 'error',
@@ -290,4 +296,23 @@ function sseErrorDetail(evt: any): string {
   const err = evt?.response?.error ?? evt?.error ?? evt;
   const raw = err?.message ?? err?.code ?? '';
   return String(raw).slice(0, 200);
+}
+
+/**
+ * True when an SSE `error` / `response.failed` event carries an auth / token-
+ * invalidation signal, so the renderer shows the re-login affordance rather than a
+ * generic provider error. Inspects the structured code/type/status only.
+ */
+function sseErrorIsAuth(evt: any): boolean {
+  const err = evt?.response?.error ?? evt?.error ?? evt;
+  const status = Number(err?.status ?? evt?.status ?? evt?.response?.status ?? 0);
+  if (status === 401 || status === 403) return true;
+  const code = String(err?.code ?? err?.type ?? '').toLowerCase();
+  if (
+    ['invalid_grant', 'token_invalidated', 'unauthorized', 'invalid_api_key', 'authentication_error'].includes(code)
+  )
+    return true;
+  return /\b(invalid_grant|token_invalidated|unauthori[sz]ed|not (?:logged|signed) ?in|authentication (?:failed|required|error))\b/.test(
+    String(err?.message ?? '').toLowerCase(),
+  );
 }
