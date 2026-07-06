@@ -9,9 +9,26 @@
 
 import { mountProviderSettingsPanel, type ProviderSettingsHandle, type ProviderStatusView } from './provider-settings-panel';
 import { openLoginModal } from './login-modal';
-import { t } from './i18n';
+import { t, getLocale } from './i18n';
 import type { AiProviderId, ModelRef, ProviderAuthStatus } from '../main/ai/types';
 import { trapModalFocus } from './modal-a11y';
+
+/**
+ * Localized Claude CLI-first hint (AC22): Claude prefers the free local `claude`
+ * CLI; the API key is an optional fallback. Localized for all 5 supported locales
+ * (falls back to English), so non-Korean users don't get untranslated guidance.
+ */
+const CLAUDE_CLI_HINT: Record<string, string> = {
+  en: 'Uses your local `claude` CLI first (free, subscription-backed). Run `claude login` in a terminal (it is auto-detected; reopen the app if it is not). The API key below is an optional fallback.',
+  ko: '로컬 `claude` CLI를 우선 사용합니다(무료·구독). 터미널에서 `claude login` 하세요(자동 감지되며, 감지되지 않으면 앱을 다시 여세요). 아래 API 키는 선택적 폴백입니다.',
+  'zh-Hans': '优先使用本地 `claude` CLI（免费，随订阅）。在终端运行 `claude login`（会自动检测；若未检测到请重新打开应用）。下面的 API 密钥为可选后备。',
+  'zh-Hant': '優先使用本機 `claude` CLI（免費，隨訂閱）。在終端機執行 `claude login`（會自動偵測；若未偵測到請重新開啟應用程式）。下方的 API 金鑰為選用後備。',
+  ja: 'ローカルの `claude` CLI を優先して使用します（無料・サブスク）。ターミナルで `claude login` を実行してください（自動検出されます。検出されない場合はアプリを開き直してください）。下の API キーは任意のフォールバックです。',
+};
+
+function claudeCliHint(): string {
+  return CLAUDE_CLI_HINT[getLocale()] ?? CLAUDE_CLI_HINT.en;
+}
 
 // Default local server URLs. Mirrors src/main/ai/local-config.ts but defined
 // here so the renderer never imports the Electron-bound local-config module
@@ -66,10 +83,7 @@ function toView(s: ProviderAuthStatus, local: LocalViewContext): ProviderStatusV
     keyLast4: s.keyLast4,
     error: s.error,
     // Claude uses the local `claude` CLI first (free); the API key is an optional fallback.
-    hint:
-      s.provider === 'claude'
-        ? '로컬 `claude` CLI를 우선 사용합니다(무료·구독). 터미널에서 `claude login` 하세요(자동 감지되며, 감지되지 않으면 앱을 다시 여세요). 아래 API 키는 선택적 폴백입니다.'
-        : undefined,
+    hint: s.provider === 'claude' ? claudeCliHint() : undefined,
   };
 }
 

@@ -87,13 +87,22 @@ const defaultShellExec: ShellExecFn = (shell, args, opts) =>
     });
   });
 
-/** Does any dir on `pathStr` contain a `claude`/`grok` binary? (real filesystem in prod). */
+/**
+ * Does `pathStr` resolve BOTH `claude` AND `grok`? Requiring both (not either) means
+ * a `-lc` PATH that finds only one CLI still triggers the `-ilc` fallback, so the
+ * other CLI (e.g. grok installed via a `.zshrc`-only shim) is not left unreachable.
+ * (real filesystem in prod).
+ */
 function defaultCliProbe(pathStr: string): boolean {
   const { existsSync } = require('node:fs') as typeof import('node:fs');
   const nodePath = require('node:path') as typeof import('node:path');
+  let hasClaude = false;
+  let hasGrok = false;
   for (const dir of pathStr.split(':')) {
     if (!dir) continue;
-    if (existsSync(nodePath.join(dir, 'claude')) || existsSync(nodePath.join(dir, 'grok'))) return true;
+    if (!hasClaude && existsSync(nodePath.join(dir, 'claude'))) hasClaude = true;
+    if (!hasGrok && existsSync(nodePath.join(dir, 'grok'))) hasGrok = true;
+    if (hasClaude && hasGrok) return true;
   }
   return false;
 }
@@ -401,7 +410,7 @@ export function runCliCompletion(opts: {
         // Adjudication 1.4: a non-zero exit whose stderr looks like an auth/login
         // failure is classified errorKind:'auth' with actionable login guidance (the
         // CLI is installed but not logged in); anything else stays 'provider'.
-        if (/log ?in|auth|unauthori|credential|not logged in/i.test(stderrText)) {
+        if (/\bunauthori[sz]ed\b|\bnot (?:logged|signed) ?in\b|\bplease (?:log|sign) ?in\b|\b(?:log|sign) ?in (?:required|failed|again)\b|\bauthentication (?:failed|required|expired|error)\b|\b(?:invalid|expired|missing) (?:api[ _-]?key|credentials?|tokens?)\b/i.test(stderrText)) {
           const guidance = 'Run `claude login` (or `grok`) then reopen the app.';
           fail(detail ? `${detail}\n${guidance}` : guidance, 'auth');
         } else {

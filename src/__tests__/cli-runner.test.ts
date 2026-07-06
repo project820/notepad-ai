@@ -343,6 +343,22 @@ describe('runCliCompletion (stdin-only, streaming, lifecycle)', () => {
     expect(h.events.some((e) => e.kind === 'error' && (e as { errorKind?: string }).errorKind === 'network')).toBe(true);
   });
 
+  it('a real assistant delta sets sawOutput and disarms the no-output watchdog', async () => {
+    const h = harness({ limits: { noOutputMs: 10 } });
+    const child = h.getChild();
+    // A genuine user-visible delta must arm sawOutput so the liveness watchdog
+    // does NOT kill a legitimately-streaming CLI (regression guard for the
+    // records-length -> delta-only sawOutput fix).
+    child.emitOut('{"type":"content_block_delta","delta":{"text":"streaming"}}\n');
+    child.emitOut('{"type":"message_stop"}\n');
+    child.doClose(0);
+    const res = await h.promise;
+    expect(res.ok).toBe(true);
+    expect(res.sawOutput).toBe(true);
+    expect(child.killed).toBe(false);
+    expect(h.events.filter((e) => e.kind === 'delta').map((e) => (e as { text: string }).text)).toEqual(['streaming']);
+  });
+
   it('classifies auth-looking stderr on a non-zero exit as errorKind:auth with login guidance', async () => {
     const h = harness();
     const child = h.getChild();

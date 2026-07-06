@@ -407,7 +407,9 @@ describe('BYO-key listModels derives from the curated catalog', () => {
     // Derived, not a hand-maintained dup: ids/labels/order match the catalog.
     expect(models.map((m) => m.id)).toEqual(curated.map((m) => m.id));
     expect(models.map((m) => m.label)).toEqual(curated.map((m) => m.label));
-    // The verified ids are present (HARD GATE — kept as-is).
+    // Current Claude ids, smoke-verified via `claude -p --model <id>` (opus-4-8 /
+    // sonnet-4-6 accepted directly; the prior opus-4-1 is a legacy alias the CLI
+    // auto-remaps to opus-4-8). See the PR body for the recorded smoke transcript.
     expect(models.map((m) => m.id)).toEqual([
       'claude-opus-4-8',
       'claude-sonnet-4-6',
