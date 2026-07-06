@@ -14,6 +14,7 @@ Run locally to reproduce:
 
 ```
 claude -p --output-format stream-json --model claude-opus-4-8   "say OK"   # → OK   (accepted directly)
+claude -p --output-format stream-json --model claude-sonnet-5   "say OK"   # → OK   (accepted directly; assistant record reports "model":"claude-sonnet-5"; verified 2026-07-06 app-style stdin+--verbose)
 claude -p --output-format stream-json --model claude-sonnet-4-6 "say OK"   # → OK   (accepted directly)
 claude -p --output-format stream-json --model claude-haiku-4-5  "say OK"   # → OK
 claude -p --model claude-opus-4-1   "say OK"   # → OK, warns: "claude-opus-4-1 is automatically remapped to Opus 4.8 (the latest Opus)"

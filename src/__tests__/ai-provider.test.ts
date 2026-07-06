@@ -412,6 +412,7 @@ describe('BYO-key listModels derives from the curated catalog', () => {
     // auto-remaps to opus-4-8). See the PR body for the recorded smoke transcript.
     expect(models.map((m) => m.id)).toEqual([
       'claude-opus-4-8',
+      'claude-sonnet-5',
       'claude-sonnet-4-6',
       'claude-haiku-4-5',
     ]);

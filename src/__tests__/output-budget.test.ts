@@ -22,6 +22,7 @@ describe('htmlExportMaxTokens', () => {
 
   it('sizes Claude to each model\'s documented max output', () => {
     expect(htmlExportMaxTokens('claude', 'claude-opus-4-8')).toBe(64_000);
+    expect(htmlExportMaxTokens('claude', 'claude-sonnet-5')).toBe(64_000);
     expect(htmlExportMaxTokens('claude', 'claude-sonnet-4-6')).toBe(64_000);
     expect(htmlExportMaxTokens('claude', 'claude-haiku-4-5')).toBe(64_000);
   });
@@ -111,18 +112,20 @@ describe('isHtmlExportInstructions', () => {
 describe('budget retention (HARD GATE — conservative verified floor, no raise)', () => {
   it('retains 64K output for the verified Claude ids', () => {
     expect(htmlExportMaxTokens('claude', 'claude-opus-4-8')).toBe(64_000);
+    expect(htmlExportMaxTokens('claude', 'claude-sonnet-5')).toBe(64_000);
     expect(htmlExportMaxTokens('claude', 'claude-sonnet-4-6')).toBe(64_000);
     expect(htmlExportMaxTokens('claude', 'claude-haiku-4-5')).toBe(64_000);
   });
 
   it('retains the 200K context window for the verified Claude ids', () => {
     expect(modelContextWindowTokens('claude', 'claude-opus-4-8')).toBe(200_000);
+    expect(modelContextWindowTokens('claude', 'claude-sonnet-5')).toBe(200_000);
     expect(modelContextWindowTokens('claude', 'claude-sonnet-4-6')).toBe(200_000);
     expect(modelContextWindowTokens('claude', 'claude-haiku-4-5')).toBe(200_000);
   });
 
   it('does NOT raise Claude budgets to 128K output or 1M context', () => {
-    for (const id of ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5']) {
+    for (const id of ['claude-opus-4-8', 'claude-sonnet-5', 'claude-sonnet-4-6', 'claude-haiku-4-5']) {
       expect(htmlExportMaxTokens('claude', id)).toBeLessThanOrEqual(64_000);
       expect(modelContextWindowTokens('claude', id)).toBeLessThanOrEqual(200_000);
     }
