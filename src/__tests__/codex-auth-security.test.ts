@@ -217,6 +217,29 @@ describe('codex-auth forced refresh (Bug A: 401 hard refresh)', () => {
     expect(h.unlink).toHaveBeenCalled();
   });
 
+  it('RETAINS tokens on a transient body that only MENTIONS a marker in error_description', async () => {
+    // The canonical `error` code is non-terminal; the marker string appears only in
+    // the human-readable description. This must NOT sign the user out (destroy-on-
+    // transient anti-goal): only the exact OAuth `error`/`error_code` counts.
+    primeStoredWithRefresh();
+    global.fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            error: 'server_error',
+            error_description: 'retry later; previous invalid_grant / token_invalidated diagnostics unavailable',
+          }),
+          { status: 400 },
+        ),
+    ) as unknown as typeof fetch;
+
+    const { forceRefreshAccessToken } = await import('../main/codex-auth');
+    const res = await forceRefreshAccessToken();
+
+    expect(res).toEqual({ kind: 'transient_failure', status: 400 });
+    expect(h.unlink).not.toHaveBeenCalled(); // tokens retained despite the description text
+  });
+
   it('RETAINS tokens on a generic 400 with no marker (transient)', async () => {
     primeStoredWithRefresh();
     global.fetch = vi.fn(async () => new Response('bad request', { status: 400 })) as unknown as typeof fetch;

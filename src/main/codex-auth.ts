@@ -393,13 +393,14 @@ function detectInvalidationMarker(body: string): 'invalid_grant' | 'token_invali
     return null; // non-JSON / truncated body → transient, retain tokens
   }
   if (!parsed || typeof parsed !== 'object') return null;
-  const j = parsed as { error?: unknown; error_code?: unknown; error_description?: unknown };
-  const fields = [j.error, j.error_code, j.error_description].filter(
-    (v): v is string => typeof v === 'string',
-  );
-  const joined = fields.join(' ');
-  if (fields.includes('invalid_grant') || /\binvalid_grant\b/.test(joined)) return 'invalid_grant';
-  if (fields.includes('token_invalidated') || /\btoken_invalidated\b/.test(joined)) return 'token_invalidated';
+  const j = parsed as { error?: unknown; error_code?: unknown };
+  // Only the canonical OAuth `error` code (or an explicit `error_code`) counts as a
+  // terminal invalidation. Deliberately NOT `error_description` — a transient error
+  // whose human-readable description merely mentions "invalid_grant" must NOT delete
+  // the user's tokens (destroy-on-transient anti-goal).
+  const code = typeof j.error === 'string' ? j.error : typeof j.error_code === 'string' ? j.error_code : '';
+  if (code === 'invalid_grant') return 'invalid_grant';
+  if (code === 'token_invalidated') return 'token_invalidated';
   return null;
 }
 
