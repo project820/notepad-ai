@@ -160,9 +160,11 @@ export async function streamChat(req: ChatRequest, onEvent: (e: ChatEvent) => vo
           onEvent({ kind: 'error', message: 'Cancelled.', errorKind: 'cancelled' });
           return;
         case 'transient_failure': {
-          const detail = await readCappedText(resp, STREAM_LIMITS.errorBodyMax);
-          const err = classifyHttpError('ChatGPT', resp.status, detail);
-          onEvent({ kind: 'error', message: err.message, errorKind: err.errorKind });
+          // A 401 whose forced refresh could not be confirmed: the bearer was
+          // rejected, so treat it as sign-in-needed and show FIXED copy — never
+          // echo the (capped) provider body, which is the raw dump this PR removes.
+          void resp.body?.cancel().catch(() => {});
+          onEvent({ kind: 'error', message: AUTH_SIGN_IN_MESSAGE, errorKind: 'auth' });
           return;
         }
       }

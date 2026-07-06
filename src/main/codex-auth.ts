@@ -379,10 +379,27 @@ function abortableWait<T>(
   });
 }
 
-/** Detect an explicit refresh-token invalidation marker in an OAuth error body. */
+/**
+ * Detect an explicit refresh-token invalidation marker in an OAuth error body.
+ * Parses the (capped) JSON and inspects only STRUCTURED error fields — a raw
+ * whole-body substring match would delete a user's tokens for a transient error
+ * whose description merely mentions these strings (destroy-on-transient anti-goal).
+ */
 function detectInvalidationMarker(body: string): 'invalid_grant' | 'token_invalidated' | null {
-  if (body.includes('invalid_grant')) return 'invalid_grant';
-  if (body.includes('token_invalidated')) return 'token_invalidated';
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return null; // non-JSON / truncated body → transient, retain tokens
+  }
+  if (!parsed || typeof parsed !== 'object') return null;
+  const j = parsed as { error?: unknown; error_code?: unknown; error_description?: unknown };
+  const fields = [j.error, j.error_code, j.error_description].filter(
+    (v): v is string => typeof v === 'string',
+  );
+  const joined = fields.join(' ');
+  if (fields.includes('invalid_grant') || /\binvalid_grant\b/.test(joined)) return 'invalid_grant';
+  if (fields.includes('token_invalidated') || /\btoken_invalidated\b/.test(joined)) return 'token_invalidated';
   return null;
 }
 
@@ -493,18 +510,26 @@ async function refreshAccessToken(s: StoredAuth): Promise<RefreshOutcome> {
       id_token?: string;
       expires_in?: number;
     } = {};
+    let parsed = false;
     try {
       j = JSON.parse(bodyText);
+      parsed = true;
     } catch {
-      /* tolerate a malformed 200 body — fall back to the stale token below */
+      /* malformed / truncated 200 body */
     }
-    const access = j.access_token ?? s.access_token;
+    // A 2xx with no usable access_token is NOT a successful refresh. NEVER hand back
+    // (or persist) the stale token as 'ok' — the forced path would then retry the
+    // already-rejected bearer and mark a dead token fresh on disk. Treat as transient
+    // so the caller retains tokens (no timestamp bump) and surfaces a re-auth prompt.
+    if (!parsed || typeof j.access_token !== 'string' || j.access_token.trim() === '') {
+      return { kind: 'transient_failure', status: r.status, staleToken: s.access_token };
+    }
     // If a logout/login happened while this refresh was in flight, do NOT
     // persist — that would resurrect tokens for a signed-out user (H-22).
-    if (gen !== authGeneration) return { kind: 'stale_generation', accessToken: access };
+    if (gen !== authGeneration) return { kind: 'stale_generation', accessToken: j.access_token };
     const next: StoredAuth = {
       ...s,
-      access_token: access,
+      access_token: j.access_token,
       refresh_token: j.refresh_token ?? s.refresh_token,
       id_token: j.id_token ?? s.id_token,
       expires_in: j.expires_in ?? s.expires_in,
