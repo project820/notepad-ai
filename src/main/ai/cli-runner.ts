@@ -152,8 +152,12 @@ async function doResolveLoginShellPath(): Promise<string | null> {
   // Stage 2 (only when the CLIs are unresolved): interactive shell (sources .zshrc/nvm).
   const ilc = await runShellForPath(shell, '-ilc');
   if (ilc && _cliProbeImpl(ilc)) return ilc;
-  // Neither resolves a CLI: prefer the (superset) interactive PATH, else the -lc PATH.
-  return ilc || lc || null;
+  // Neither stage resolves BOTH CLIs on its own: return the UNION of whatever the
+  // two stages found (dedup, order-preserving, `-lc` first) so a CLI present in
+  // only one stage's PATH is never dropped by preferring the other stage. If both
+  // stages failed, null. enrichedSpawnPath() then merges process.env.PATH + common.
+  const merged = [...(lc?.split(':') ?? []), ...(ilc?.split(':') ?? [])].filter(Boolean);
+  return merged.length ? [...new Set(merged)].join(':') : null;
 }
 
 /**

@@ -202,6 +202,24 @@ describe('async login-shell PATH resolver (darwin-only, secret-safe, two-stage)'
     expect(env.PATH.split(':')).toContain('/ilc/nvm/bin');
   });
 
+  it('(h) when neither stage resolves BOTH CLIs, merges the -lc and -ilc PATHs (no CLI dropped)', async () => {
+    // claude is only on the -lc PATH, grok is only on the -ilc PATH: neither stage
+    // finds BOTH, so the resolver must return the UNION so neither CLI is dropped.
+    const { fn } = fakeShellExec((mode) =>
+      mode === '-lc' ? 'GJC_PATH=/lc/claude/bin\n' : 'GJC_PATH=/ilc/grok/bin\n',
+    );
+    __setShellExecForTests(fn);
+    // Probe requires BOTH claude and grok; neither single-stage PATH has both.
+    __setCliProbeForTests(
+      (p) => p.split(':').includes('/lc/claude/bin') && p.split(':').includes('/ilc/grok/bin'),
+    );
+    process.env.PATH = '/usr/bin';
+    const env = await buildMinimalEnv();
+    const parts = env.PATH.split(':');
+    expect(parts).toContain('/lc/claude/bin'); // -lc discovery retained
+    expect(parts).toContain('/ilc/grok/bin'); // -ilc discovery retained
+  });
+
   it('(f) the resolver shell is spawned with a MINIMAL env — never provider API keys', async () => {
     process.env.ANTHROPIC_API_KEY = 'sk-anthropic-leak';
     process.env.OPENAI_API_KEY = 'sk-openai-leak';
