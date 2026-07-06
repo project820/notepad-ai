@@ -5,7 +5,14 @@ import { EditorView } from '@codemirror/view';
 import { history } from '@codemirror/commands';
 import { applyToEditor } from '../formatting';
 
+const openViews: EditorView[] = [];
+
 afterEach(() => {
+  // Destroy every mounted view so CodeMirror cancels its deferred requestMeasure
+  // timer. Otherwise the timer fires after happy-dom tears the window down and
+  // throws "this.win.requestAnimationFrame is not a function", which surfaces as
+  // an unhandled error and makes the whole `npm test` run exit non-zero.
+  for (const v of openViews.splice(0)) v.destroy();
   document.body.innerHTML = '';
 });
 
@@ -17,7 +24,9 @@ function mount(doc: string, from: number, to: number): EditorView {
     selection: EditorSelection.single(from, to),
     extensions: [history()],
   });
-  return new EditorView({ state, parent });
+  const view = new EditorView({ state, parent });
+  openViews.push(view);
+  return view;
 }
 
 describe('format wrap is a toggle (highlight cancel / re-apply fix)', () => {
