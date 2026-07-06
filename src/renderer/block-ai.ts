@@ -1,7 +1,7 @@
 import { EditorView, ViewUpdate } from '@codemirror/view';
 import { StateEffect } from '@codemirror/state';
 import MarkdownIt from 'markdown-it';
-import { t } from './i18n';
+import { t, getLocale } from './i18n';
 import { type Quality } from './quality';
 import { openMenu } from './dropdown';
 import { buildBlockAiInstructions } from './block-ai-prompt-handler';
@@ -100,6 +100,9 @@ export type BlockAiDeps = {
    * Add this dep to enable the new 7-layer assembly when the toggle is on.
    */
   getPromptAssemblyContext?: () => Promise<PromptAssemblyContext>;
+  /** Optional — open the AI settings / login modal so the user can re-authenticate
+   *  after an `errorKind:'auth'` chat failure (e.g. an expired ChatGPT session). */
+  openAiSettings?: () => void;
 };
 
 const md = new MarkdownIt({ html: false, linkify: true, breaks: true });
@@ -431,7 +434,13 @@ export function installBlockAi(deps: BlockAiDeps) {
         inflightCleanup = null;
         inflightId = null;
       } else if (e.kind === 'error') {
-        optionsEl.innerHTML = `<div class="ba-error">${escapeHtml(e.message ?? 'Error')}</div>`;
+        if (e.errorKind === 'auth') {
+          // Classified auth failure (e.g. expired ChatGPT session): show a fixed,
+          // DOM-constructed sign-in affordance. Never surface the raw provider body.
+          renderAuthAffordance(optionsEl, deps.openAiSettings);
+        } else {
+          optionsEl.innerHTML = `<div class="ba-error">${escapeHtml(e.message ?? 'Error')}</div>`;
+        }
         generateBtn.disabled = false;
         generateBtn.textContent = t('block.generate');
         cleanup();
@@ -443,7 +452,7 @@ export function installBlockAi(deps: BlockAiDeps) {
 
     try {
       // Use the block-AI-specific model (default gpt-5.4-mini), not the global one.
-      await window.api.aiChat(id, instructions, [], userMessage, deps.getBlockModel());
+      await window.api.aiChat(id, instructions, [], userMessage, deps.getBlockModel(), 'block');
     } catch (err: any) {
       optionsEl.innerHTML = `<div class="ba-error">${escapeHtml(err?.message ?? String(err))}</div>`;
       generateBtn.disabled = false;
@@ -523,4 +532,36 @@ function escapeHtml(s: string): string {
 function truncate(s: string, n: number): string {
   if (s.length <= n) return s;
   return s.slice(0, n) + '…';
+}
+
+/** Locale-aware fixed copy for the `errorKind:'auth'` sign-in affordance.
+ *  ko/en only; other locales fall back to English (mirrors t()'s en fallback).
+ *  Kept in-module because i18n.ts is out of scope for this slice. */
+const AUTH_AFFORDANCE_COPY: Record<'ko' | 'en', { message: string; button: string }> = {
+  ko: { message: 'ChatGPT 세션이 만료되었습니다. 다시 로그인하세요.', button: '다시 로그인' },
+  en: { message: 'Your ChatGPT session expired. Sign in again.', button: 'Sign in again' },
+};
+
+/**
+ * Render a DOM-constructed sign-in affordance for a classified `errorKind:'auth'`
+ * chat error. Built with `textContent` only — the raw provider body is never
+ * surfaced (no innerHTML / interpolation), so a hostile error body cannot inject
+ * markup. The button routes to the AI settings / login modal via `onSignIn`.
+ */
+function renderAuthAffordance(optionsEl: HTMLElement, onSignIn?: () => void): void {
+  const copy = AUTH_AFFORDANCE_COPY[getLocale() === 'ko' ? 'ko' : 'en'];
+  const wrap = document.createElement('div');
+  wrap.className = 'ba-error ba-auth-error';
+  const msg = document.createElement('div');
+  msg.className = 'ba-auth-msg';
+  msg.textContent = copy.message;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'ba-primary ba-signin';
+  btn.textContent = copy.button;
+  btn.addEventListener('click', () => onSignIn?.());
+  wrap.appendChild(msg);
+  wrap.appendChild(btn);
+  optionsEl.textContent = '';
+  optionsEl.appendChild(wrap);
 }

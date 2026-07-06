@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { AiProviderId, ModelRef, ProviderAuthStatus } from './ai/types';
+import type { AiProviderErrorKind, AiProviderId, ModelRef, ProviderAuthStatus } from './ai/types';
 import type { FileTreeEntry } from '../shared/file-types';
 
 type OpenedFile = {
@@ -120,7 +120,7 @@ const api = {
   aiCancel: (id: string): Promise<void> => ipcRenderer.invoke('ai:cancel', id),
   onAiChatEvent: (
     id: string,
-    cb: (e: { kind: 'delta' | 'done' | 'error'; text?: string; message?: string }) => void,
+    cb: (e: { kind: 'delta' | 'done' | 'error'; text?: string; message?: string; errorKind?: AiProviderErrorKind }) => void,
   ) => {
     const channel = `ai:chat:${id}`;
     const listener = (_e: any, evt: any) => cb(evt);

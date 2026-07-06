@@ -63,3 +63,96 @@ describe('block-ai model menu (G003 local providers)', () => {
     expect(onBlockModelChange).toHaveBeenCalledWith('ollama:llama3:latest');
   });
 });
+
+// PR-2 (Bug A): mount block-ai with an injected openAiSettings + a stubbed
+// window.api so we can drive the ai:chat error stream.
+function mountAuth(openAiSettings: () => void) {
+  const parent = document.createElement('div');
+  document.body.appendChild(parent);
+  const view = new EditorView({ state: EditorState.create({ doc: 'hello world' }), parent });
+  openViews.push(view);
+  const previewEl = document.createElement('div');
+  document.body.appendChild(previewEl);
+  const aiChat = vi.fn(async (..._args: unknown[]) => {});
+  let evCb: ((e: unknown) => void) | undefined;
+  const onAiChatEvent = vi.fn((_id: string, cb: (e: unknown) => void) => {
+    evCb = cb;
+    return () => {};
+  });
+  (window as unknown as { api: unknown }).api = { aiChat, onAiChatEvent, aiCancel: vi.fn(async () => {}) };
+  installBlockAi({
+    view,
+    previewEl,
+    getModel: () => 'gpt-5.4-mini',
+    getBlockModel: () => ({ provider: 'chatgpt', id: 'gpt-5.4-mini' }),
+    onBlockModelChange: vi.fn(),
+    loadModels: async () => [],
+    getQuality: () => 'college',
+    openAiSettings,
+  });
+  return { view, aiChat, emit: (e: unknown) => evCb?.(e) };
+}
+
+// Open the Block AI popup over a selection and click Generate. Resolves after the
+// async generate() has registered its onAiChatEvent handler and called aiChat.
+async function openAndGenerate(view: EditorView) {
+  view.dispatch({ selection: { anchor: 0, head: 5 } });
+  // Trigger THIS instance's popup via its own pill. A global ⌘⇧A keydown would also
+  // fire stale document listeners left by earlier mounts in this file, opening a rival
+  // popup whose deps lack openAiSettings.
+  const pills = document.querySelectorAll<HTMLButtonElement>('.ba-pill');
+  pills[pills.length - 1].click();
+  const genBtn = document.querySelector<HTMLButtonElement>('#ba-generate');
+  expect(genBtn).toBeTruthy();
+  genBtn!.click();
+  await flush();
+}
+
+describe('block-ai auth affordance (PR-2 Bug A)', () => {
+  it('sends surfaceMode "block" and renders a DOM-built sign-in affordance for errorKind:auth without leaking the raw body', async () => {
+    const openAiSettings = vi.fn();
+    const { view, aiChat, emit } = mountAuth(openAiSettings);
+    await openAndGenerate(view);
+
+    // aiChat carries the 6th surfaceMode arg = 'block' on a normal send.
+    expect(aiChat).toHaveBeenCalledTimes(1);
+    const call = aiChat.mock.calls[0];
+    expect(call[4]).toEqual({ provider: 'chatgpt', id: 'gpt-5.4-mini' }); // model
+    expect(call[5]).toBe('block'); // surfaceMode
+
+    // Auth error arrives carrying a hostile raw body that must never reach the DOM.
+    const RAW = '<img src=x onerror="alert(1)">RAW_AUTH_LEAK';
+    emit({ kind: 'error', errorKind: 'auth', message: RAW });
+
+    const optionsEl = document.querySelector<HTMLDivElement>('#ba-options')!;
+    // (a) a sign-in affordance/button is rendered.
+    const signInBtn = optionsEl.querySelector<HTMLButtonElement>('.ba-signin');
+    expect(signInBtn).toBeTruthy();
+    expect(optionsEl.querySelector('.ba-auth-error')).toBeTruthy();
+    // (d) built with textContent — fixed copy present, no markup parsed from the raw body.
+    expect(optionsEl.querySelector('.ba-auth-msg')?.textContent).toBe(
+      'Your ChatGPT session expired. Sign in again.',
+    );
+    expect(optionsEl.querySelector('img')).toBeNull();
+    expect(optionsEl.innerHTML).not.toContain('onerror');
+    // (b) the raw message text is NOT in the DOM.
+    expect(document.body.textContent).not.toContain('RAW_AUTH_LEAK');
+    // (c) clicking the button invokes the injected openAiSettings.
+    signInBtn!.click();
+    expect(openAiSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the escaped-innerHTML path for non-auth errors (no sign-in affordance)', async () => {
+    const openAiSettings = vi.fn();
+    const { view, emit } = mountAuth(openAiSettings);
+    await openAndGenerate(view);
+
+    emit({ kind: 'error', errorKind: 'network', message: 'boom-network' });
+
+    const optionsEl = document.querySelector<HTMLDivElement>('#ba-options')!;
+    expect(optionsEl.querySelector('.ba-signin')).toBeNull();
+    expect(optionsEl.querySelector('.ba-auth-error')).toBeNull();
+    expect(optionsEl.querySelector('.ba-error')?.textContent).toContain('boom-network');
+    expect(openAiSettings).not.toHaveBeenCalled();
+  });
+});
