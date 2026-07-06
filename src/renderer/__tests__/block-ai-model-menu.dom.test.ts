@@ -7,8 +7,13 @@ import { closeOpenMenu } from '../dropdown';
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
+const openViews: EditorView[] = [];
+
 afterEach(() => {
   closeOpenMenu();
+  // Destroy mounted views so CodeMirror cancels its deferred requestMeasure timer;
+  // otherwise it fires post-teardown and throws an unhandled error (exit 1).
+  for (const v of openViews.splice(0)) v.destroy();
   document.body.innerHTML = '';
   vi.restoreAllMocks();
 });
@@ -17,6 +22,7 @@ function mount() {
   const parent = document.createElement('div');
   document.body.appendChild(parent);
   const view = new EditorView({ state: EditorState.create({ doc: 'hello world' }), parent });
+  openViews.push(view);
   const previewEl = document.createElement('div');
   document.body.appendChild(previewEl);
   const onBlockModelChange = vi.fn();
