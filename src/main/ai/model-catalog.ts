@@ -36,8 +36,10 @@ const CURATED: ReadonlyArray<Omit<ModelRef, 'humanizeEngineId'>> = [
   { provider: 'chatgpt', id: 'gpt-5.4-mini', label: 'GPT-5.4 mini', requiresAuth: true },
   { provider: 'chatgpt', id: 'gpt-5.5', label: 'GPT-5.5', requiresAuth: true },
   { provider: 'chatgpt', id: 'gpt-5.4', label: 'GPT-5.4', requiresAuth: true },
-  // Claude — latest models. CLI-first (claude -p) with API-key fallback.
+  // Claude — CLI-first (claude -p) with API-key fallback. Every id below is
+  // smoke-verified against the local CLI (docs/model-id-verification.md).
   { provider: 'claude', id: 'claude-opus-4-8', label: 'Claude Opus 4.8', requiresAuth: true },
+  { provider: 'claude', id: 'claude-sonnet-5', label: 'Claude Sonnet 5', requiresAuth: true },
   { provider: 'claude', id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', requiresAuth: true },
   { provider: 'claude', id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', requiresAuth: true },
   // OpenRouter (API key) — provider/model slugs.

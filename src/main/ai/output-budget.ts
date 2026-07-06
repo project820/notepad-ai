@@ -34,6 +34,7 @@ import type { AiProviderId } from './types';
 export const MODEL_MAX_OUTPUT: Record<string, number> = {
   // Claude — conservative verified floor (raise only with Models-API + CLI smoke evidence).
   'claude:claude-opus-4-8': 64_000,
+  'claude:claude-sonnet-5': 64_000,
   'claude:claude-sonnet-4-6': 64_000,
   'claude:claude-haiku-4-5': 64_000,
   // OpenRouter — conservative verified floor per curated slug (same evidence bar).
@@ -85,6 +86,7 @@ export const MODEL_CONTEXT_WINDOW: Record<string, number> = {
   'chatgpt:gpt-5.4-mini': 400_000,
   // Claude 4.x.
   'claude:claude-opus-4-8': 200_000,
+  'claude:claude-sonnet-5': 200_000,
   'claude:claude-sonnet-4-6': 200_000,
   'claude:claude-haiku-4-5': 200_000,
   // OpenRouter slugs.
