@@ -95,35 +95,28 @@ describe('ComposedClaudeProvider (CLI-first + API fallback)', () => {
     expect(h.events.some((e) => e.kind === 'error')).toBe(true); // API path (no key) → auth error
   });
 
-  it('routes a maxOutputTokens request to the API directly when the key is connected (CLI never spawned)', async () => {
-    // getKeyStatus reports connected (so the diversion triggers) but getApiKey is
-    // null, so the API path short-circuits with an auth error WITHOUT a network
-    // call. Zero spawns + that auth error prove the DIRECT API route — not a
-    // CLI-first spawn that later fell back.
-    const connectedNoKey = {
-      getApiKey: async () => null,
-      getKeyStatus: async () => ({ connected: true, keyLast4: 'x', persisted: true }),
+  it('keeps a maxOutputTokens request on CLI-first even when an API key IS connected (subscription — no paid-API diversion)', async () => {
+    // A subscriber must NOT be pushed onto the paid Anthropic API just because a
+    // max-output budget is set. `claude -p` (CLI, subscription) is used even with a
+    // connected key; the CLI's own default output cap applies. Zero API touch.
+    const connectedKey = {
+      getApiKey: async () => 'sk-ant-live',
+      getKeyStatus: async () => ({ connected: true, keyLast4: 'live', persisted: true }),
     } as unknown as ApiKeyStore;
+    let child: FakeChild | undefined;
     let spawnCalls = 0;
-    const spawn = () => { spawnCalls++; return new FakeChild(); };
-    const provider = new ComposedClaudeProvider(connectedNoKey, spawn);
+    const spawn = () => { spawnCalls++; child = new FakeChild(); return child; };
+    const provider = new ComposedClaudeProvider(connectedKey, spawn);
     const events: AiChatEvent[] = [];
-    await provider.streamChat({ ...req, maxOutputTokens: 64_000 }, (e) => events.push(e));
-    expect(spawnCalls).toBe(0); // CLI-first bypassed → direct API route (budget honored)
-    expect(events.some((e) => e.kind === 'error')).toBe(true); // API path (no key) → auth error
-  });
-
-  it('keeps a maxOutputTokens request on CLI-first when no API key is connected', async () => {
-    // noKeyStore → getKeyStatus connected:false, so the diversion must NOT fire;
-    // CLI-first stands (CLI spawned + succeeds) even though maxOutputTokens is set.
-    const h = run({ maxOutputTokens: 64_000 });
-    const child = await h.waitChild();
+    const promise = provider.streamChat({ ...req, maxOutputTokens: 64_000 }, (e) => events.push(e));
+    for (let i = 0; i < 50 && !child; i++) await new Promise((r) => setTimeout(r, 0));
+    if (!child) throw new Error('CLI child never spawned — request was wrongly diverted to the paid API');
     child.emitOut('{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}\n');
     child.emitOut('{"type":"result","subtype":"success","is_error":false,"result":"hi"}\n');
     child.doClose(0);
-    await h.promise;
-    expect(h.getSpawnCalls()).toBe(1); // CLI-first preserved (no key to divert to)
-    expect(h.events.some((e) => e.kind === 'error')).toBe(false);
+    await promise;
+    expect(spawnCalls).toBe(1); // CLI-first used (subscription) despite the connected key
+    expect(events.some((e) => e.kind === 'error')).toBe(false); // never touched the paid API path
   });
 });
 

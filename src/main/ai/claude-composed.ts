@@ -58,14 +58,12 @@ export class ComposedClaudeProvider implements AiProvider {
       await this.api.streamChat(req, onEvent);
       return;
     }
-    // HTML export (and any caller) that sets a max-output budget must hit the API
-    // path: the CLI argv carries only --model and silently drops maxOutputTokens,
-    // so a CLI-first route would leave the budget dead. Only divert when the API
-    // key is actually connected; otherwise CLI-first stands (the free path).
-    if (req.maxOutputTokens != null && (await this.api.getAuthStatus()).connected) {
-      await this.api.streamChat(req, onEvent);
-      return;
-    }
+    // Everything else (incl. HTML export with a max-output budget) stays CLI-first:
+    // `claude -p` runs on the user's SUBSCRIPTION (no per-token billing), and it
+    // handles model-id remapping itself. We deliberately do NOT divert to the paid
+    // Anthropic API just to pass a maxOutputTokens budget — a subscriber must not be
+    // silently pushed onto per-request billing. The CLI's own default output cap
+    // applies; the API path remains ONLY the automatic fallback when the CLI fails.
     await this.fallback.streamChat(req, onEvent);
   }
 }
