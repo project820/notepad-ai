@@ -180,7 +180,13 @@ export async function streamChat(req: ChatRequest, onEvent: (e: ChatEvent) => vo
       }
       const detail = await readCappedText(resp, STREAM_LIMITS.errorBodyMax);
       const err = classifyHttpError('ChatGPT', resp.status, detail);
-      onEvent({ kind: 'error', message: err.message, errorKind: err.errorKind });
+      // Any auth-classified status (401/403) uses the fixed, body-free sign-in copy —
+      // never forward the classifier's interpolated raw provider detail for auth.
+      onEvent({
+        kind: 'error',
+        message: err.errorKind === 'auth' ? AUTH_SIGN_IN_MESSAGE : err.message,
+        errorKind: err.errorKind,
+      });
       return;
     }
 

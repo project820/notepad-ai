@@ -208,6 +208,24 @@ describe('codex-client classified errors + streaming guards (Bug A)', () => {
     assertAllErrorsClassified(events);
   });
 
+  it('a non-401 auth status (403) uses fixed sign-in copy, never the raw body', async () => {
+    auth.getAccessToken.mockResolvedValue('TOKEN');
+    global.fetch = vi.fn(
+      async () => new Response('{"error":{"message":"forbidden secret detail"}}', { status: 403 }),
+    ) as unknown as typeof fetch;
+
+    const { streamChat } = await import('../main/codex-client');
+    const events: ChatEvt[] = [];
+    await streamChat(baseReq(), (e) => events.push(e));
+
+    const errs = events.filter((e) => e.kind === 'error');
+    expect(errs).toHaveLength(1);
+    expect(errs[0].errorKind).toBe('auth'); // classifyHttpError(403) → auth
+    expect(errs[0].message).toBe(AUTH_SIGN_IN_MESSAGE); // fixed copy
+    expect(errs[0].message).not.toContain('forbidden secret detail'); // no raw body
+    assertAllErrorsClassified(events);
+  });
+
   it('does NOT retry after a delta has been emitted (mid-stream error is terminal)', async () => {
     auth.getAccessToken.mockResolvedValue('TOKEN');
     let call = 0;
