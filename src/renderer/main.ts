@@ -1139,6 +1139,9 @@ installBlockAi({
   // When toggle is off the IPC returns empty strings so the handler falls back
   // to the v1.0 legacy path — byte-identical to pre-v1.1 behaviour.
   getPromptAssemblyContext: () => window.api.getPromptAssemblyContext(),
+  // Re-auth entry for classified errorKind:'auth' chat errors — same AI settings /
+  // login modal opener the header uses (device-code flow lives inside it).
+  openAiSettings: () => openSettings(),
 });
 
 // ---------------- Selection right-click format menu (#5) -----------------

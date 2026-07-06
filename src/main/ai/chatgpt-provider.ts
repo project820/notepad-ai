@@ -31,7 +31,7 @@ export class ChatGptProvider implements AiProvider {
           : snap.email
         : undefined,
       expiresAt: snap.expiresAt,
-      persisted: true,
+      persisted: snap.persisted ?? false,
     };
   }
 

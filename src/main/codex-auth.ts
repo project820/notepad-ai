@@ -1,7 +1,7 @@
 import { app, safeStorage, shell } from 'electron';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { readCappedText } from './ai/stream-http';
+import { readCappedText, STREAM_LIMITS } from './ai/stream-http';
 
 /**
  * OpenAI Codex device-code OAuth — ported from Hermes (auth.py).
@@ -23,7 +23,6 @@ const OAUTH_TOKEN_URL = `${ISSUER}/oauth/token`;
 const REDIRECT_URI = `${ISSUER}/deviceauth/callback`;
 const REFRESH_SKEW_SECONDS = 120;
 const REFRESH_TIMEOUT_MS = 20_000;
-const REFRESH_BODY_CAP = 256 * 1024; // OAuth token responses are tiny; cap defensively (H-22).
 
 export type AuthSnapshot = {
   signedIn: boolean;
@@ -55,9 +54,10 @@ function storePath() {
 // the current session only and NEVER write plaintext to disk (S2).
 let memoryAuth: StoredAuth | null = null;
 let persistedToDisk = false;
-// Single-flight token refresh: concurrent getAccessToken callers share one
-// in-flight refresh instead of each racing their own writeStored (H-22).
-let refreshPromise: Promise<string | null> | null = null;
+// Single-flight token refresh: concurrent callers (best-effort getAccessToken AND
+// forced forceRefreshAccessToken) share ONE in-flight refresh instead of each
+// racing their own writeStored (H-22).
+let refreshPromise: Promise<RefreshOutcome> | null = null;
 // Auth generation epoch: bumped on logout/login-cancel so a refresh that began
 // before a logout cannot resurrect tokens by writing them back after sign-out.
 let authGeneration = 0;
@@ -319,6 +319,89 @@ export async function logout(): Promise<void> {
   await deleteStored();
 }
 
+/**
+ * Result of a hard/forced refresh (Bug A: 401 forced refresh). Unlike the
+ * best-effort getAccessToken path, the forced path NEVER hands back a stale
+ * access token — a 401 means the current token is already rejected, so the caller
+ * must get a genuinely fresh token or a classified failure it can surface
+ * (invalidated → sign-in required; transient → keep the tokens and retry later).
+ */
+export type RefreshAccessResult =
+  | { kind: 'ok'; accessToken: string }
+  | { kind: 'missing_refresh_token' }
+  | { kind: 'invalidated'; marker: 'invalid_grant' | 'token_invalidated' }
+  | { kind: 'transient_failure'; status?: number }
+  | { kind: 'cancelled' }
+  | { kind: 'stale_generation' };
+
+/**
+ * Internal outcome of the single shared refresh round-trip. Richer than the
+ * public RefreshAccessResult so BOTH the best-effort (getAccessToken) and forced
+ * (forceRefreshAccessToken) callers can share ONE in-flight refresh and each map
+ * it to their own contract. It carries the fetched/stale token for the
+ * best-effort path, which the forced path deliberately drops.
+ */
+type RefreshOutcome =
+  | { kind: 'ok'; accessToken: string }
+  | { kind: 'invalidated'; marker: 'invalid_grant' | 'token_invalidated' }
+  | { kind: 'transient_failure'; status?: number; staleToken: string }
+  | { kind: 'stale_generation'; accessToken: string };
+
+/** Sentinel for a per-caller abort that must NOT cancel the shared refresh. */
+const REFRESH_CANCELLED = Symbol('refresh-cancelled');
+
+/**
+ * Await `promise`, but if `signal` aborts first resolve to REFRESH_CANCELLED
+ * WITHOUT aborting the underlying promise — the shared network refresh keeps
+ * running so other (non-cancelled) callers still receive their token. The shared
+ * fetch is therefore never tied to any per-request signal.
+ */
+function abortableWait<T>(
+  promise: Promise<T>,
+  signal?: AbortSignal,
+): Promise<T | typeof REFRESH_CANCELLED> {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.resolve(REFRESH_CANCELLED);
+  return new Promise<T | typeof REFRESH_CANCELLED>((resolve) => {
+    const onAbort = () => resolve(REFRESH_CANCELLED);
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(
+      (v) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(v);
+      },
+      // refreshAccessToken never rejects (it catches internally); fail closed.
+      () => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(REFRESH_CANCELLED);
+      },
+    );
+  });
+}
+
+/** Detect an explicit refresh-token invalidation marker in an OAuth error body. */
+function detectInvalidationMarker(body: string): 'invalid_grant' | 'token_invalidated' | null {
+  if (body.includes('invalid_grant')) return 'invalid_grant';
+  if (body.includes('token_invalidated')) return 'token_invalidated';
+  return null;
+}
+
+/**
+ * Single-flight guard around refreshAccessToken. Concurrent callers share ONE
+ * in-flight refresh. The finalizer is identity-guarded so an OLD refresh
+ * completing cannot clear a NEWER in-flight refresh started after a logout +
+ * re-login (H-22): it only nulls `refreshPromise` when it is still the active one.
+ */
+function sharedRefresh(s: StoredAuth): Promise<RefreshOutcome> {
+  if (!refreshPromise) {
+    const local = refreshAccessToken(s).finally(() => {
+      if (refreshPromise === local) refreshPromise = null;
+    });
+    refreshPromise = local;
+  }
+  return refreshPromise;
+}
+
 export async function getAccessToken(): Promise<string | null> {
   const s = await readStored();
   if (!s) return null;
@@ -326,16 +409,60 @@ export async function getAccessToken(): Promise<string | null> {
   const now = Math.floor(Date.now() / 1000);
   if (expiry && now < expiry - REFRESH_SKEW_SECONDS) return s.access_token;
   if (!s.refresh_token) return s.access_token; // best effort
-  // Single-flight: concurrent callers share one refresh round-trip.
-  if (!refreshPromise) {
-    refreshPromise = refreshAccessToken(s).finally(() => {
-      refreshPromise = null;
-    });
+  // Best-effort local-expiry path: share the single-flight refresh, but on ANY
+  // failure fall back to the (possibly stale) access token rather than signing
+  // the user out — signing out on a 401 is the forced path's job, not this one.
+  const outcome = await sharedRefresh(s);
+  switch (outcome.kind) {
+    case 'ok':
+      return outcome.accessToken;
+    case 'stale_generation':
+      // A logout/login raced this refresh; hand back the freshly fetched token
+      // best-effort, but it was never persisted (H-22).
+      return outcome.accessToken;
+    default:
+      // transient_failure / invalidated → best-effort stale token (unchanged).
+      return s.access_token;
   }
-  return refreshPromise;
 }
 
-async function refreshAccessToken(s: StoredAuth): Promise<string | null> {
+/**
+ * Hard/forced refresh used when the API rejected the current token (401). Shares
+ * the single-flight refresh with getAccessToken but maps to a classified result
+ * and NEVER returns a stale token. On an explicit invalidation marker it deletes
+ * the stored tokens; on any other failure it RETAINS them (transient).
+ */
+export async function forceRefreshAccessToken(
+  opts?: { signal?: AbortSignal },
+): Promise<RefreshAccessResult> {
+  const s = await readStored();
+  // Forced path: do NOT fall back to a stale access token (that is the forced-path
+  // fix vs the best-effort getAccessToken behaviour).
+  if (!s || !s.refresh_token) return { kind: 'missing_refresh_token' };
+  const gen = authGeneration;
+  // Share the single in-flight refresh; the shared fetch is NOT tied to the
+  // per-request signal, so a cancelled caller never aborts other callers' refresh.
+  const outcome = await abortableWait(sharedRefresh(s), opts?.signal);
+  if (outcome === REFRESH_CANCELLED) return { kind: 'cancelled' };
+  // Post-round-trip generation guard: a logout during the refresh means this
+  // caller must NOT fire a request with a resurrected token (H-22). This is on top
+  // of the on-disk resurrection guard inside refreshAccessToken.
+  if (gen !== authGeneration) return { kind: 'stale_generation' };
+  switch (outcome.kind) {
+    case 'ok':
+      return { kind: 'ok', accessToken: outcome.accessToken };
+    case 'invalidated':
+      // The refresh token is dead — sign the user out locally.
+      await deleteStored();
+      return { kind: 'invalidated', marker: outcome.marker };
+    case 'stale_generation':
+      return { kind: 'stale_generation' };
+    case 'transient_failure':
+      return { kind: 'transient_failure', status: outcome.status };
+  }
+}
+
+async function refreshAccessToken(s: StoredAuth): Promise<RefreshOutcome> {
   const gen = authGeneration;
   try {
     const form = new URLSearchParams({
@@ -348,14 +475,33 @@ async function refreshAccessToken(s: StoredAuth): Promise<string | null> {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: form.toString(),
       redirect: 'error',
+      // Never tie the shared refresh to a per-request signal — its own timeout
+      // bounds it so a cancelled caller cannot kill an in-flight shared refresh.
       signal: AbortSignal.timeout(REFRESH_TIMEOUT_MS),
     });
-    if (!r.ok) return s.access_token;
-    const j = JSON.parse(await readCappedText(r, REFRESH_BODY_CAP));
+    const bodyText = await readCappedText(r, STREAM_LIMITS.errorBodyMax);
+    if (!r.ok) {
+      // Only an explicit invalidation marker kills the refresh token; every other
+      // non-ok (generic 400/401, 5xx) is transient and RETAINS the tokens.
+      const marker = detectInvalidationMarker(bodyText);
+      if (marker) return { kind: 'invalidated', marker };
+      return { kind: 'transient_failure', status: r.status, staleToken: s.access_token };
+    }
+    let j: {
+      access_token?: string;
+      refresh_token?: string;
+      id_token?: string;
+      expires_in?: number;
+    } = {};
+    try {
+      j = JSON.parse(bodyText);
+    } catch {
+      /* tolerate a malformed 200 body — fall back to the stale token below */
+    }
     const access = j.access_token ?? s.access_token;
     // If a logout/login happened while this refresh was in flight, do NOT
     // persist — that would resurrect tokens for a signed-out user (H-22).
-    if (gen !== authGeneration) return access;
+    if (gen !== authGeneration) return { kind: 'stale_generation', accessToken: access };
     const next: StoredAuth = {
       ...s,
       access_token: access,
@@ -365,8 +511,9 @@ async function refreshAccessToken(s: StoredAuth): Promise<string | null> {
       obtained_at: Math.floor(Date.now() / 1000),
     };
     await writeStored(next);
-    return next.access_token;
+    return { kind: 'ok', accessToken: next.access_token };
   } catch {
-    return s.access_token;
+    // Network error / timeout / redirect refusal → transient, retain tokens.
+    return { kind: 'transient_failure', staleToken: s.access_token };
   }
 }
