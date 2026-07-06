@@ -250,7 +250,7 @@ describe('model catalog', () => {
   });
   it('resolveModelRef falls back to a custom ref for unknown ids (no lockout)', () => {
     const catalog = getCuratedModels();
-    expect(isKnownModel(catalog, 'claude', 'claude-sonnet-4-5')).toBe(true);
+    expect(isKnownModel(catalog, 'claude', 'claude-sonnet-4-6')).toBe(true);
     const resolved = resolveModelRef(catalog, 'claude', 'claude-future-99');
     expect(resolved.custom).toBe(true);
     expect(resolved.id).toBe('claude-future-99');
@@ -393,6 +393,40 @@ describe('BYO-key providers without a key', () => {
     const events: AiChatEvent[] = [];
     await provider.streamChat(baseReq('openrouter'), (e) => events.push(e));
     expect(events[0]).toMatchObject({ kind: 'error', errorKind: 'auth' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// listModels derives from the curated catalog (no duplicate drift) — PR-1
+// ---------------------------------------------------------------------------
+describe('BYO-key listModels derives from the curated catalog', () => {
+  it('ClaudeProvider.listModels mirrors the curated claude rows exactly', async () => {
+    const provider = new ClaudeProvider(fakeKeyStore());
+    const models = await provider.listModels();
+    const curated = getCuratedModels().filter((m) => m.provider === 'claude');
+    // Derived, not a hand-maintained dup: ids/labels/order match the catalog.
+    expect(models.map((m) => m.id)).toEqual(curated.map((m) => m.id));
+    expect(models.map((m) => m.label)).toEqual(curated.map((m) => m.label));
+    // The verified ids are present (HARD GATE — kept as-is).
+    expect(models.map((m) => m.id)).toEqual([
+      'claude-opus-4-8',
+      'claude-sonnet-4-6',
+      'claude-haiku-4-5',
+    ]);
+    expect(models.every((m) => m.provider === 'claude' && m.requiresAuth === true)).toBe(true);
+    expect(models.every((m) => m.humanizeEngineId === 'claude')).toBe(true);
+  });
+
+  it('OpenRouterProvider.listModels mirrors the curated openrouter rows exactly', async () => {
+    const provider = new OpenRouterProvider(fakeKeyStore());
+    const models = await provider.listModels();
+    const curated = getCuratedModels().filter((m) => m.provider === 'openrouter');
+    expect(models.map((m) => m.id)).toEqual(curated.map((m) => m.id));
+    expect(models.map((m) => m.label)).toEqual(curated.map((m) => m.label));
+    // The OpenRouter Claude slug is kept UNCHANGED (no live smoke → no migration).
+    expect(models.map((m) => m.id)).toContain('anthropic/claude-sonnet-4.5');
+    expect(models.every((m) => m.provider === 'openrouter' && m.requiresAuth === true)).toBe(true);
+    expect(models.every((m) => m.humanizeEngineId === 'openrouter')).toBe(true);
   });
 });
 

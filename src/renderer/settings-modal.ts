@@ -65,6 +65,11 @@ function toView(s: ProviderAuthStatus, local: LocalViewContext): ProviderStatusV
     accountLabel: s.accountLabel,
     keyLast4: s.keyLast4,
     error: s.error,
+    // Claude uses the local `claude` CLI first (free); the API key is an optional fallback.
+    hint:
+      s.provider === 'claude'
+        ? '로컬 `claude` CLI를 우선 사용합니다(무료·구독). 터미널에서 `claude login` 하세요(자동 감지되며, 감지되지 않으면 앱을 다시 여세요). 아래 API 키는 선택적 폴백입니다.'
+        : undefined,
   };
 }
 

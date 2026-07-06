@@ -6,6 +6,7 @@ import https from 'node:https';
 import { startLogin, cancelLogin, getStatus, logout, type LoginUpdate } from './codex-auth';
 import type { ChatTurn } from './codex-client';
 import { getRegistry } from './ai/provider-registry';
+import { prewarmCliSpawnPath } from './ai/cli-runner';
 import { htmlExportMaxTokens, isHtmlExportInstructions } from './ai/output-budget';
 import { isAiProviderId, validateImageAttachments, validateChatTextPayload, type AiProviderId } from './ai/types';
 import { resolveOcrAssetPaths, configureOcr } from './ai/ocr';
@@ -1299,6 +1300,10 @@ app.on('before-quit', () => {
 
 });
 app.whenReady().then(async () => {
+  // Warm the login-shell PATH resolver off the hot path so the first claude/grok
+  // reachability probe doesn't pay the shell-exec latency. Non-blocking (fire-and-forget).
+  void prewarmCliSpawnPath();
+
   const iconPath = resolveAppIconPath();
   if (process.platform === 'darwin' && iconPath) {
     app.dock.setIcon(iconPath);

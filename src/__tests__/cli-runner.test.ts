@@ -1,13 +1,18 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 import {
   buildMinimalEnv,
+  prewarmCliSpawnPath,
   createJsonlParser,
   runCliCompletion,
   probeCliAvailability,
   CLI_LIMITS,
+  __setShellExecForTests,
+  __setCliProbeForTests,
+  __resetCliSpawnPathForTests,
   type CliProcess,
   type CliLineMapper,
+  type ShellExecFn,
 } from '../main/ai/cli-runner';
 import type { AiChatEvent } from '../main/ai/types';
 
@@ -69,15 +74,46 @@ function harness(over: Partial<Parameters<typeof runCliCompletion>[0]> = {}) {
   return { promise, getChild: () => child!, events, getArgs: () => capturedArgs, getEnv: () => capturedEnv };
 }
 
-afterEach(() => vi.useRealTimers());
+const REAL_PLATFORM = process.platform;
+const REAL_PATH = process.env.PATH;
+function setPlatform(p: NodeJS.Platform): void {
+  Object.defineProperty(process, 'platform', { value: p, configurable: true, writable: true });
+}
+
+// Hermetic shell-exec seam: records every call and replies per shell mode (-lc/-ilc).
+type ExecCall = { shell: string; args: string[]; env: Record<string, string>; timeoutMs: number };
+function fakeShellExec(reply: (mode: '-lc' | '-ilc') => string | Error): { fn: ShellExecFn; calls: ExecCall[] } {
+  const calls: ExecCall[] = [];
+  const fn: ShellExecFn = async (shell, args, opts) => {
+    calls.push({ shell, args, env: opts.env, timeoutMs: opts.timeoutMs });
+    const r = reply(args.includes('-ilc') ? '-ilc' : '-lc');
+    if (r instanceof Error) throw r;
+    return r;
+  };
+  return { fn, calls };
+}
+
+afterEach(() => {
+  vi.useRealTimers();
+  __resetCliSpawnPathForTests();
+  Object.defineProperty(process, 'platform', { value: REAL_PLATFORM, configurable: true, writable: true });
+  if (REAL_PATH === undefined) delete process.env.PATH;
+  else process.env.PATH = REAL_PATH;
+});
 
 describe('buildMinimalEnv (G003 secret containment)', () => {
-  it('forwards PATH/HOME but never leaks provider API keys or arbitrary secrets', () => {
+  beforeEach(() => {
+    // Hermetic: stub the resolver shell + CLI probe so tests never exec the real login shell.
+    setPlatform('darwin');
+    __setShellExecForTests(async () => 'GJC_PATH=/opt/homebrew/bin\n');
+    __setCliProbeForTests(() => true);
+  });
+  it('forwards PATH/HOME but never leaks provider API keys or arbitrary secrets', async () => {
     process.env.ANTHROPIC_API_KEY = 'sk-leak';
     process.env.OPENAI_API_KEY = 'sk-leak2';
     process.env.SECRET_XYZ = 'nope';
     process.env.PATH = process.env.PATH || '/usr/bin';
-    const env = buildMinimalEnv();
+    const env = await buildMinimalEnv();
     expect(env.PATH).toBeTruthy();
     expect(env.ANTHROPIC_API_KEY).toBeUndefined();
     expect(env.OPENAI_API_KEY).toBeUndefined();
@@ -86,11 +122,114 @@ describe('buildMinimalEnv (G003 secret containment)', () => {
     delete process.env.OPENAI_API_KEY;
     delete process.env.SECRET_XYZ;
   });
-  it('honors an explicit allowlist extension only', () => {
+  it('honors an explicit allowlist extension only', async () => {
     process.env.GROK_TOKEN_DIR = '/x';
-    expect(buildMinimalEnv(['GROK_TOKEN_DIR']).GROK_TOKEN_DIR).toBe('/x');
-    expect(buildMinimalEnv().GROK_TOKEN_DIR).toBeUndefined();
+    expect((await buildMinimalEnv(['GROK_TOKEN_DIR'])).GROK_TOKEN_DIR).toBe('/x');
+    expect((await buildMinimalEnv()).GROK_TOKEN_DIR).toBeUndefined();
     delete process.env.GROK_TOKEN_DIR;
+  });
+});
+
+describe('async login-shell PATH resolver (darwin-only, secret-safe, two-stage)', () => {
+  const ALLOWED_ENV_KEYS = ['HOME', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'TMPDIR', 'PATH'];
+  beforeEach(() => setPlatform('darwin'));
+
+  it('(a) a first buildMinimalEnv racing prewarm shares the in-flight resolver and uses the resolved PATH', async () => {
+    const { fn, calls } = fakeShellExec(() => 'GJC_PATH=/resolved/bin\n');
+    __setShellExecForTests(fn);
+    __setCliProbeForTests(() => true); // -lc PATH is usable → single stage
+    process.env.PATH = '/usr/bin';
+    const warm = prewarmCliSpawnPath(); // fire, do not await
+    const env = await buildMinimalEnv(); // races the pending resolution
+    await warm;
+    expect(env.PATH.split(':')).toContain('/resolved/bin');
+    expect(calls.length).toBe(1); // one shared resolution, not one per caller
+  });
+
+  it('(b) a pending resolution is shared and never observed as a cached null', async () => {
+    let release: () => void = () => {};
+    const calls: string[][] = [];
+    const fn: ShellExecFn = (_shell, args) => {
+      calls.push(args);
+      return new Promise<string>((res) => {
+        release = () => res('GJC_PATH=/late/bin\n');
+      });
+    };
+    __setShellExecForTests(fn);
+    __setCliProbeForTests(() => true);
+    process.env.PATH = '/usr/bin';
+    const warm = prewarmCliSpawnPath(); // exec is pending
+    const envP = buildMinimalEnv(); // races WHILE pending — must await the shared in-flight
+    release();
+    const env = await envP;
+    await warm;
+    expect(env.PATH.split(':')).toContain('/late/bin'); // resolved value, not a null fallback
+    expect(calls.length).toBe(1); // single shared in-flight resolution
+  });
+
+  it('(c) parses the GJC_PATH sentinel despite rc-file chatter on stdout', async () => {
+    const noisy = 'Welcome to zsh\nplugin: loaded\n  GJC_PATH=/opt/homebrew/bin:/usr/bin  \ntrailing noise\n';
+    const { fn } = fakeShellExec(() => noisy);
+    __setShellExecForTests(fn);
+    __setCliProbeForTests(() => true);
+    process.env.PATH = '/usr/bin';
+    const env = await buildMinimalEnv();
+    expect(env.PATH.split(':')).toContain('/opt/homebrew/bin');
+  });
+
+  it('(d) a timeout/terminal shell failure falls back to process.env.PATH + common dirs without poisoning the cache', async () => {
+    const { fn, calls } = fakeShellExec(() => new Error('shell timed out'));
+    __setShellExecForTests(fn);
+    __setCliProbeForTests(() => false);
+    process.env.PATH = '/custom/bin';
+    const env1 = await buildMinimalEnv();
+    expect(env1.PATH.split(':')).toContain('/custom/bin'); // process.env.PATH preserved
+    expect(env1.PATH.split(':')).toContain('/usr/bin'); // common dirs present
+    const afterFirst = calls.length; // both stages attempted (-lc then -ilc)
+    await buildMinimalEnv(); // must retry — a failed resolution is never cached as null
+    expect(calls.length).toBeGreaterThan(afterFirst);
+  });
+
+  it('(e) an unresolved -lc PATH triggers exactly one interactive -ilc retry and uses its PATH', async () => {
+    const { fn, calls } = fakeShellExec((mode) =>
+      mode === '-lc' ? 'GJC_PATH=/lc/only/bin\n' : 'GJC_PATH=/ilc/nvm/bin\n',
+    );
+    __setShellExecForTests(fn);
+    __setCliProbeForTests((p) => p.split(':').includes('/ilc/nvm/bin')); // CLI only on the -ilc PATH
+    process.env.PATH = '/usr/bin';
+    const env = await buildMinimalEnv();
+    expect(calls.map((c) => c.args[0])).toEqual(['-lc', '-ilc']);
+    expect(env.PATH.split(':')).toContain('/ilc/nvm/bin');
+  });
+
+  it('(f) the resolver shell is spawned with a MINIMAL env — never provider API keys', async () => {
+    process.env.ANTHROPIC_API_KEY = 'sk-anthropic-leak';
+    process.env.OPENAI_API_KEY = 'sk-openai-leak';
+    process.env.PATH = '/usr/bin';
+    const { fn, calls } = fakeShellExec(() => 'GJC_PATH=/opt/homebrew/bin\n');
+    __setShellExecForTests(fn);
+    __setCliProbeForTests(() => true);
+    await buildMinimalEnv();
+    expect(calls.length).toBeGreaterThan(0);
+    const env = calls[0].env;
+    expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(env.OPENAI_API_KEY).toBeUndefined();
+    for (const key of Object.keys(env)) expect(ALLOWED_ENV_KEYS).toContain(key);
+    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.OPENAI_API_KEY;
+  });
+
+  it('(g) on non-darwin the resolver returns null and never spawns a shell', async () => {
+    setPlatform('linux');
+    const { fn, calls } = fakeShellExec(() => 'GJC_PATH=/should/not/run\n');
+    __setShellExecForTests(fn);
+    __setCliProbeForTests(() => true);
+    process.env.PATH = '/usr/bin';
+    const env = await buildMinimalEnv();
+    expect(calls.length).toBe(0); // no shell exec off darwin
+    expect(env.PATH.split(':')).toContain('/usr/bin'); // falls back to process.env.PATH + common
+    expect(env.PATH.split(':')).toContain('/bin');
+    expect(env.PATH.split(':')).not.toContain('/should/not/run');
   });
 });
 
@@ -189,6 +328,47 @@ describe('runCliCompletion (stdin-only, streaming, lifecycle)', () => {
     const res = await h.promise;
     expect(res.ok).toBe(false);
     expect(h.getChild().killed).toBe(true);
+  });
+
+  it('ignored JSONL records (system/init/hook) do NOT disarm the no-output watchdog', async () => {
+    const h = harness({ limits: { noOutputMs: 10 } });
+    const child = h.getChild();
+    // These map to null (no user-visible delta), so they must NOT set sawOutput.
+    child.emitOut('{"type":"system","subtype":"init"}\n');
+    child.emitOut('{"type":"hook","event":"pre"}\n');
+    const res = await h.promise; // watchdog still fires despite the ignored records
+    expect(res.ok).toBe(false);
+    expect(res.sawOutput).toBe(false);
+    expect(child.killed).toBe(true);
+    expect(h.events.some((e) => e.kind === 'error' && (e as { errorKind?: string }).errorKind === 'network')).toBe(true);
+  });
+
+  it('classifies auth-looking stderr on a non-zero exit as errorKind:auth with login guidance', async () => {
+    const h = harness();
+    const child = h.getChild();
+    child.emitErr('Error: unauthorized — please authenticate');
+    child.doClose(1);
+    const res = await h.promise;
+    expect(res.ok).toBe(false);
+    expect(
+      h.events.some((e) => e.kind === 'error' && (e as { errorKind?: string }).errorKind === 'auth'),
+    ).toBe(true);
+    expect(
+      h.events.some(
+        (e) => e.kind === 'error' && (e as { message: string }).message.toLowerCase().includes('login'),
+      ),
+    ).toBe(true);
+  });
+
+  it('keeps errorKind:provider for a non-auth non-zero exit', async () => {
+    const h = harness();
+    const child = h.getChild();
+    child.emitErr('Error: internal model failure (500)');
+    child.doClose(1);
+    const res = await h.promise;
+    expect(
+      h.events.some((e) => e.kind === 'error' && (e as { errorKind?: string }).errorKind === 'provider'),
+    ).toBe(true);
   });
 });
 

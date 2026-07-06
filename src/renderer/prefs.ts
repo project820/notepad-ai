@@ -58,10 +58,30 @@ function detectLocale(): 'en' | 'ko' | 'zh-Hans' | 'zh-Hant' | 'ja' {
 const DEFAULTS: Prefs = { theme: 'system', fontSize: 'md', model: 'gpt-5.4-mini', blockModel: 'gpt-5.4-mini', locale: detectLocale(), quality: 'college', previewLineNumbers: false, rawLineAlign: false };
 
 /**
+ * Known-stale Claude model ids → their smoke-verified replacements. ONLY these
+ * exact ids are remapped; unknown / custom Claude ids and every non-Claude
+ * selection (including OpenRouter slugs like `anthropic/claude-sonnet-4.5`) are
+ * preserved untouched, so a user is never silently switched off their choice.
+ */
+const STALE_CLAUDE_MODEL_IDS: Record<string, string> = {
+  'claude-sonnet-4-5': 'claude-sonnet-4-6',
+  'claude-opus-4-1': 'claude-opus-4-8',
+};
+
+/** Remap a stale Claude selection to its verified target; pass everything else through. */
+function remapStaleClaudeModel(sel: SelectedModel | undefined): SelectedModel | undefined {
+  if (!sel || sel.provider !== 'claude') return sel;
+  const target = STALE_CLAUDE_MODEL_IDS[sel.id];
+  return target ? { provider: 'claude', id: target } : sel;
+}
+
+/**
  * Pure prefs migration: merges defaults + stored prefs, then back-fills the v1
  * structured fields (`selectedModel`, `blockSelectedModel`, `style`) from the
- * legacy flat fields (`model`, `blockModel`, `quality`) when absent. Additive
- * and back-compatible — legacy fields are preserved. Never throws.
+ * legacy flat fields (`model`, `blockModel`, `quality`) when absent, and remaps
+ * known-stale Claude ids across `selectedModel`, `blockSelectedModel`, and
+ * `htmlModel` to their verified targets. Additive and back-compatible — legacy
+ * fields are preserved. Never throws.
  */
 export function migratePrefs(parsed: Partial<Prefs> | null | undefined): Prefs {
   const merged: Prefs = { ...DEFAULTS, ...(parsed && typeof parsed === 'object' ? parsed : {}) };
@@ -74,6 +94,9 @@ export function migratePrefs(parsed: Partial<Prefs> | null | undefined): Prefs {
   if (!merged.style) {
     merged.style = { difficulty: merged.quality ?? 'college', naturalness: 'balanced' };
   }
+  merged.selectedModel = remapStaleClaudeModel(merged.selectedModel);
+  merged.blockSelectedModel = remapStaleClaudeModel(merged.blockSelectedModel);
+  merged.htmlModel = remapStaleClaudeModel(merged.htmlModel);
   merged.typography = clampTypography(merged.typography);
   return merged;
 }

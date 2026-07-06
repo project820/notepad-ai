@@ -1,9 +1,9 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 import { ClaudeCliProvider, mapClaudeStreamJson } from '../main/ai/claude-cli-provider';
 import { FallbackProvider, type StreamSource } from '../main/ai/fallback-provider';
 import { buildCliPrompt } from '../main/ai/cli-prompt';
-import type { CliProcess } from '../main/ai/cli-runner';
+import { __setShellExecForTests, __setCliProbeForTests, __resetCliSpawnPathForTests, type CliProcess } from '../main/ai/cli-runner';
 import type { AiChatEvent, AiChatRequest } from '../main/ai/types';
 
 class FakeChild implements CliProcess {
@@ -31,6 +31,14 @@ const req: AiChatRequest = {
   userText: 'SENTINEL-USER-TEXT',
   model: { provider: 'claude', id: 'claude-sonnet-4-5' },
 };
+
+// Provider methods now `await buildMinimalEnv()` (async PATH resolver) before spawning.
+// Stub the resolver so these tests never exec the real login shell and resolve fast.
+beforeEach(() => {
+  __setShellExecForTests(async () => 'GJC_PATH=/usr/bin\n');
+  __setCliProbeForTests(() => true);
+});
+afterEach(() => __resetCliSpawnPathForTests());
 
 describe('mapClaudeStreamJson (real stream-json schema)', () => {
   it('extracts assistant text as a delta', () => {
@@ -68,6 +76,7 @@ describe('ClaudeCliProvider', () => {
 
   it('streams assistant text then done; prompt via stdin only, model in argv', async () => {
     const h = harness();
+    await new Promise((r) => setTimeout(r, 0)); // async buildMinimalEnv() resolves → spawn runs
     const child = h.getChild();
     child.emitOut('{"type":"system","subtype":"init"}\n');
     child.emitOut('{"type":"assistant","message":{"content":[{"type":"text","text":"hello world"}]}}\n');

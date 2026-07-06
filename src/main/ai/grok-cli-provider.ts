@@ -73,7 +73,7 @@ export class GrokCliProvider implements AiProvider {
       spawn: this.deps.spawn,
       command: this.cmd(),
       probeArgs: ['--version'],
-      env: buildMinimalEnv(),
+      env: await buildMinimalEnv(),
       cwd: os.tmpdir(),
     });
     return {
@@ -108,7 +108,7 @@ export class GrokCliProvider implements AiProvider {
         ],
         prompt: '', // grok reads the prompt from --prompt-file; stdin stays empty.
         mapLine: mapGrokStreamingJson,
-        env: buildMinimalEnv(),
+        env: await buildMinimalEnv(),
         cwd: os.tmpdir(),
         signal: req.signal,
         onEvent,

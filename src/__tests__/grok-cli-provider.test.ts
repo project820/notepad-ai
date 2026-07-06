@@ -1,7 +1,7 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 import { GrokCliProvider, mapGrokStreamingJson, type PromptFileWriter } from '../main/ai/grok-cli-provider';
-import type { CliProcess } from '../main/ai/cli-runner';
+import { __setShellExecForTests, __setCliProbeForTests, __resetCliSpawnPathForTests, type CliProcess } from '../main/ai/cli-runner';
 import type { AiChatEvent, AiChatRequest } from '../main/ai/types';
 
 class FakeChild implements CliProcess {
@@ -29,6 +29,14 @@ const req: AiChatRequest = {
   userText: 'SENTINEL-USER-TEXT',
   model: { provider: 'grok', id: 'grok' },
 };
+
+// Provider methods now `await buildMinimalEnv()` (async PATH resolver) before spawning.
+// Stub the resolver so these tests never exec the real login shell and resolve fast.
+beforeEach(() => {
+  __setShellExecForTests(async () => 'GJC_PATH=/usr/bin\n');
+  __setCliProbeForTests(() => true);
+});
+afterEach(() => __resetCliSpawnPathForTests());
 
 describe('mapGrokStreamingJson (real streaming-json schema)', () => {
   it('maps text->delta, end->done, error->error, thought->null', () => {
