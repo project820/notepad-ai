@@ -394,11 +394,20 @@ function detectInvalidationMarker(body: string): 'invalid_grant' | 'token_invali
   }
   if (!parsed || typeof parsed !== 'object') return null;
   const j = parsed as { error?: unknown; error_code?: unknown };
-  // Only the canonical OAuth `error` code (or an explicit `error_code`) counts as a
-  // terminal invalidation. Deliberately NOT `error_description` — a transient error
-  // whose human-readable description merely mentions "invalid_grant" must NOT delete
-  // the user's tokens (destroy-on-transient anti-goal).
-  const code = typeof j.error === 'string' ? j.error : typeof j.error_code === 'string' ? j.error_code : '';
+  // Only an explicit, canonical OAuth error CODE counts as a terminal invalidation.
+  // Accept the top-level string `error`, an `error_code`, OR a nested structured
+  // `error.code` / `error.type` (e.g. {"error":{"code":"token_invalidated"}}).
+  // Deliberately NOT `error_description` — a transient error whose human-readable
+  // description merely mentions "invalid_grant" must NOT delete the user's tokens
+  // (destroy-on-transient anti-goal).
+  let code = '';
+  if (typeof j.error === 'string') code = j.error;
+  else if (j.error && typeof j.error === 'object') {
+    const e = j.error as { code?: unknown; type?: unknown };
+    if (typeof e.code === 'string') code = e.code;
+    else if (typeof e.type === 'string') code = e.type;
+  }
+  if (!code && typeof j.error_code === 'string') code = j.error_code;
   if (code === 'invalid_grant') return 'invalid_grant';
   if (code === 'token_invalidated') return 'token_invalidated';
   return null;

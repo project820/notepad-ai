@@ -217,6 +217,19 @@ describe('codex-auth forced refresh (Bug A: 401 hard refresh)', () => {
     expect(h.unlink).toHaveBeenCalled();
   });
 
+  it('deletes stored tokens on a NESTED structured marker ({error:{code:token_invalidated}})', async () => {
+    primeStoredWithRefresh();
+    global.fetch = vi.fn(
+      async () => new Response(JSON.stringify({ error: { code: 'token_invalidated' } }), { status: 401 }),
+    ) as unknown as typeof fetch;
+
+    const { forceRefreshAccessToken } = await import('../main/codex-auth');
+    const res = await forceRefreshAccessToken();
+
+    expect(res).toEqual({ kind: 'invalidated', marker: 'token_invalidated' });
+    expect(h.unlink).toHaveBeenCalled();
+  });
+
   it('RETAINS tokens on a transient body that only MENTIONS a marker in error_description', async () => {
     // The canonical `error` code is non-terminal; the marker string appears only in
     // the human-readable description. This must NOT sign the user out (destroy-on-
