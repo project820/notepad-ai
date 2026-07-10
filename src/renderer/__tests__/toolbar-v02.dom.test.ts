@@ -176,21 +176,20 @@ describe('prefs.rawLineAlign persistence (#G005)', () => {
   });
 });
 
-describe('i18n — raw line alignment keys (#G005)', () => {
+describe('i18n — raw line alignment tooltip (#G005)', () => {
   afterEach(() => setLocale('en'));
 
-  it('exposes menu.rawLineAlign + tip.rawLineAlign in all five locales', () => {
-    const expected: Record<string, { menu: string; tip: string }> = {
-      en: { menu: 'Raw line alignment', tip: 'Align raw lines with preview' },
-      ko: { menu: '원본 줄맞춤', tip: '원본을 미리보기에 줄맞춤' },
-      'zh-Hans': { menu: '原文行对齐', tip: '将原文行与预览对齐' },
-      'zh-Hant': { menu: '原文行對齊', tip: '將原文行與預覽對齊' },
-      ja: { menu: '原文行の整列', tip: '原文をプレビューに整列' },
+  it('exposes tip.rawLineAlign in all five locales', () => {
+    const expected: Record<string, string> = {
+      en: 'Align raw lines with preview',
+      ko: '원본을 미리보기에 줄맞춤',
+      'zh-Hans': '将原文行与预览对齐',
+      'zh-Hant': '將原文行與預覽對齊',
+      ja: '原文をプレビューに整列',
     };
-    for (const [loc, v] of Object.entries(expected)) {
+    for (const [loc, label] of Object.entries(expected)) {
       setLocale(loc as never);
-      expect(t('menu.rawLineAlign'), `menu @ ${loc}`).toBe(v.menu);
-      expect(t('tip.rawLineAlign'), `tip @ ${loc}`).toBe(v.tip);
+      expect(t('tip.rawLineAlign'), `tip @ ${loc}`).toBe(label);
     }
   });
 });

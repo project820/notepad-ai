@@ -1,6 +1,6 @@
 /**
  * unified-chat.ts — the single writing-collaborator chat panel (G003) that
- * replaces Side Chat (⌘J) + Bottom Chat (⌘;).
+ * replaced the prior separate chat surfaces.
  *
  * Pure `renderUnifiedChat()` (HTML string, Node-testable) + DOM `mountUnifiedChat()`
  * that wires the composer, mode chips, and per-message apply actions to injected

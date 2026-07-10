@@ -1,10 +1,7 @@
 /**
- * Quality dial (F6) — 5 levels mapped to ChatGPT Canvas-style "reading level".
- * Injected into every AI system prompt so all surfaces (bottom chat,
- * side chat, future block-AI) match the chosen sophistication.
+ * Quality dial (F6) — five levels mapped to ChatGPT Canvas-style "reading level".
+ * Injected into every AI system prompt to match the chosen sophistication.
  */
-
-import { t } from './i18n';
 
 export type Quality = 'elementary' | 'highschool' | 'college' | 'professor' | 'professional';
 
@@ -16,9 +13,6 @@ export const QUALITY_ORDER: Quality[] = [
   'professional',
 ];
 
-export function qualityLabel(q: Quality): string {
-  return t(`quality.${q}`);
-}
 
 /**
  * Returns a system-prompt-ready directive describing the target reading level.

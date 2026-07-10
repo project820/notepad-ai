@@ -2,7 +2,7 @@
  * provider-settings-panel.ts — multi-provider AI settings UI (G001 renderer,
  * extended for G003 local providers).
  *
- * Follows the settings-editor-panel pattern:
+ * Follows a pure-render / DOM-mount split:
  *   - `renderProviderSettingsPanel(opts)` — pure, no DOM, returns HTML string
  *     (testable in Node).
  *   - `mountProviderSettingsPanel(parent, opts)` — DOM-dependent, wires actions.

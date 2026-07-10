@@ -1,9 +1,9 @@
 /**
  * Unified chat history — pure merge/restore logic for the single collaborator
- * chat that replaces the separate Side Chat (⌘J) and Bottom Chat (⌘;).
+ * chat replacing the prior separate chat surfaces.
  *
- * Migration rule (locked): legacy bottom-chat history comes first; legacy
- * side-chat history is appended AFTER a "Legacy Side Chat" separator. Histories
+ * Migration rule (locked): the primary legacy chat history comes first; the
+ * secondary history is appended after a separator. Histories
  * are NOT interleaved (no reliable timestamps exist). All inputs are sanitized
  * so corrupt snapshots never crash restore.
  *
@@ -20,9 +20,9 @@ export type UnifiedChatItem =
 
 export type UnifiedThreadSnapshot = {
   unifiedChatHistory?: unknown;
-  /** Legacy bottom-chat history (persisted in older sessions as chatHistory). */
+  /** Primary legacy chat history (persisted in older sessions as chatHistory). */
   chatHistory?: unknown;
-  /** Legacy side-chat history (often absent — older snapshots did not persist it). */
+  /** Secondary legacy chat history (often absent from older snapshots). */
   sideChatHistory?: unknown;
 };
 
