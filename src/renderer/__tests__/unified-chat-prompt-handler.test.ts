@@ -1,59 +1,30 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import {
   buildUnifiedChatInstructions,
   UNIFIED_CHAT_SURFACE_PROMPT,
-  type AssemblerFn,
 } from '../unified-chat-prompt-handler';
 
-describe('buildUnifiedChatInstructions — legacy path (toggle off)', () => {
+describe('buildUnifiedChatInstructions', () => {
   it('includes the collaborator surface prompt and a document section', () => {
-    const out = buildUnifiedChatInstructions({ toggleEnabled: false, documentText: 'hello' });
+    const out = buildUnifiedChatInstructions({ documentText: 'hello' });
     expect(out).toContain(UNIFIED_CHAT_SURFACE_PROMPT);
     expect(out).toContain('=== Current document ===');
     expect(out).toContain('hello');
   });
+
   it('uses (empty) when no document text', () => {
-    expect(buildUnifiedChatInstructions({ toggleEnabled: false })).toContain('(empty)');
+    expect(buildUnifiedChatInstructions({})).toContain('(empty)');
   });
+
   it('appends the style directive when present', () => {
-    const out = buildUnifiedChatInstructions({ toggleEnabled: false, styleDirectiveStr: 'STYLE-X' });
+    const out = buildUnifiedChatInstructions({ styleDirectiveStr: 'STYLE-X' });
     expect(out).toContain('STYLE-X');
   });
-  it('omits an empty style directive (no spurious blank section)', () => {
-    const out = buildUnifiedChatInstructions({ toggleEnabled: false, styleDirectiveStr: '   ' });
-    expect(out).toBe(`${UNIFIED_CHAT_SURFACE_PROMPT}\n\n=== Current document ===\n(empty)\n=== End document ===`);
-  });
-  it('does not call the assembler when toggle is off', () => {
-    const asm = vi.fn(() => 'X');
-    buildUnifiedChatInstructions({ toggleEnabled: false }, asm);
-    expect(asm).not.toHaveBeenCalled();
-  });
-});
 
-describe('buildUnifiedChatInstructions — assembler path (toggle on)', () => {
-  it('routes through the assembler with the BottomChat surface and collaborator prompt', () => {
-    let captured: Parameters<AssemblerFn>[0] | undefined;
-    const asm: AssemblerFn = vi.fn((r) => {
-      captured = r;
-      return 'ASSEMBLED';
-    });
-    const out = buildUnifiedChatInstructions(
-      { toggleEnabled: true, systemlawContent: 'law', ownerContent: 'owner', styleDirectiveStr: 'style', documentText: 'doc' },
-      asm,
-    );
-    expect(out).toBe('ASSEMBLED');
-    expect(asm).toHaveBeenCalledTimes(1);
-    const req = captured!;
-    expect(req.surface).toBe('BottomChat');
-    expect(req.surfacePrompt).toBe(UNIFIED_CHAT_SURFACE_PROMPT);
-    expect(req.systemlawContent).toBe('law');
-    expect(req.ownerContent).toBe('owner');
-    expect(req.qualityDirective).toBe('style');
-    expect(req.documentText).toBe('doc');
-  });
-  it('never throws on empty input and returns a string', () => {
-    expect(typeof buildUnifiedChatInstructions({ toggleEnabled: true }, () => '')).toBe('string');
+  it('omits an empty style directive without a spurious blank section', () => {
+    const out = buildUnifiedChatInstructions({ styleDirectiveStr: '   ' });
+    expect(out).toBe(`${UNIFIED_CHAT_SURFACE_PROMPT}\n\n=== Current document ===\n(empty)\n=== End document ===`);
   });
 });
 

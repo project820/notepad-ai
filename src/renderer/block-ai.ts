@@ -65,20 +65,6 @@ function prettyModel(id: string): string {
  *   6. User clicks one → it replaces the selection.
  */
 
-/**
- * Context returned by `getPromptAssemblyContext` — pre-loaded data needed by
- * `buildBlockAiInstructions` when the v1.1 feature toggle is on.
- *
- * Optional dep — when absent the handler always uses the legacy v1.0 path.
- */
-type PromptAssemblyContext = {
-  /** Current state of the v1.1 prompt-assembly toggle. */
-  enabled: boolean;
-  /** Pre-loaded content of userData/systemlaw.md (layer 0). */
-  systemlawContent: string;
-  /** Pre-loaded content of userData/Owner.md (layer 1). */
-  ownerContent: string;
-};
 
 export type BlockAiDeps = {
   view: EditorView;
@@ -91,15 +77,6 @@ export type BlockAiDeps = {
   getQuality: () => Quality;
   /** Optional always-on humanize strength (from the unified Style setting). Defaults to 'balanced'. */
   getNaturalness?: () => Naturalness;
-  /**
-   * Optional — fetch the v1.1 prompt-assembly context (toggle state +
-   * pre-loaded systemlaw / Owner content) from the main process.
-   *
-   * When this dep is omitted (or returns `enabled: false`), the handler
-   * uses the v1.0 legacy path — byte-identical to pre-v1.1 behaviour.
-   * Add this dep to enable the new 7-layer assembly when the toggle is on.
-   */
-  getPromptAssemblyContext?: () => Promise<PromptAssemblyContext>;
   /** Optional — open the AI settings / login modal so the user can re-authenticate
    *  after an `errorKind:'auth'` chat failure (e.g. an expired ChatGPT session). */
   openAiSettings?: () => void;
@@ -391,33 +368,9 @@ export function installBlockAi(deps: BlockAiDeps) {
       detectLanguage(fragment),
     );
 
-    // ── Prompt assembly (v1.1 routing) ────────────────────────────────────
-    // When `getPromptAssemblyContext` is provided, fetch the toggle state and
-    // pre-loaded userData files, then delegate to `buildBlockAiInstructions`.
-    // When the dep is absent (or returns enabled=false), the handler falls back
-    // to the v1.0 legacy concatenation — byte-identical to pre-v1.1 behaviour.
-    let instructions: string;
-    if (deps.getPromptAssemblyContext) {
-      let ctx: PromptAssemblyContext;
-      try {
-        ctx = await deps.getPromptAssemblyContext();
-      } catch {
-        // IPC failure → fall back to legacy path rather than crashing.
-        ctx = { enabled: false, systemlawContent: '', ownerContent: '' };
-      }
-      instructions = buildBlockAiInstructions({
-        toggleEnabled:      ctx.enabled,
-        systemlawContent:   ctx.systemlawContent,
-        ownerContent:       ctx.ownerContent,
-        qualityDirectiveStr: styleStr,
-      });
-    } else {
-      // No context provider — legacy v1.0 path (toggle effectively off).
-      instructions = buildBlockAiInstructions({
-        toggleEnabled:      false,
-        qualityDirectiveStr: styleStr,
-      });
-    }
+    const instructions = buildBlockAiInstructions({
+      qualityDirectiveStr: styleStr,
+    });
 
     const id = 'ba-' + Math.random().toString(36).slice(2);
     inflightId = id;
@@ -515,7 +468,7 @@ export function installBlockAi(deps: BlockAiDeps) {
         const singlePara = html.match(/^<p>([\s\S]*)<\/p>$/);
         if (singlePara && !singlePara[1].includes('<p>')) html = singlePara[1];
         document.execCommand('insertHTML', false, html);
-        // Trigger an input event so the bottom-chat sync (turndown) picks up the change.
+        // Trigger an input event so preview synchronization picks up the change.
         deps.previewEl.dispatchEvent(new Event('input', { bubbles: true }));
       } catch (err) {
         console.error('Block-AI apply (preview) failed:', err);

@@ -147,23 +147,6 @@ const api = {
   ): Promise<{ ollama: string; lmstudio: string }> =>
     ipcRenderer.invoke('local-ai:set-config', partial),
 
-  /**
-   * Fetch the v1.1 prompt-assembly context from the main process.
-   *
-   * Returns the current toggle state together with the pre-loaded contents of
-   * `userData/systemlaw.md` and `userData/Owner.md`.  When the toggle is off,
-   * the file contents are empty strings (no I/O performed).
-   *
-   * Renderer surfaces call this before building the system prompt so they can
-   * decide whether to use the new 7-layer assembly or the v1.0 legacy path.
-   *
-   * Never rejects — any main-process error returns `{ enabled: false, ... }`.
-   */
-  getPromptAssemblyContext: (): Promise<{
-    enabled: boolean;
-    systemlawContent: string;
-    ownerContent: string;
-  }> => ipcRenderer.invoke('prompt:assembly-context'),
 
   projectWizardStart: (projectFolder: string): Promise<ProjectWizardStateResult> =>
     ipcRenderer.invoke('project-wizard:start', projectFolder),

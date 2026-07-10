@@ -117,7 +117,6 @@ type Api = {
   aiDeleteProviderKey: (provider: AiProviderId) => Promise<void>;
   localAiGetConfig: () => Promise<{ ollama: string; lmstudio: string }>;
   localAiSetConfig: (partial: { ollama?: string; lmstudio?: string }) => Promise<{ ollama: string; lmstudio: string }>;
-  getPromptAssemblyContext: () => Promise<{ enabled: boolean; systemlawContent: string; ownerContent: string }>;
   projectWizardStart: (projectFolder: string) => Promise<ProjectWizardStateResult>;
   projectWizardSaveApprovedDraft: (input: ProjectWizardSaveApprovedDraftInput) => Promise<ProjectWizardSaveApprovedDraftResult>;
   sessionGet: () => Promise<any>;
@@ -1135,10 +1134,6 @@ installBlockAi({
   loadModels: (force) => loadModelsCached(force),
   getQuality: () => currentStyle().difficulty,
   getNaturalness: () => currentStyle().naturalness,
-  // v1.1 Phase 1: fetch toggle state + userData file contents from main process.
-  // When toggle is off the IPC returns empty strings so the handler falls back
-  // to the v1.0 legacy path — byte-identical to pre-v1.1 behaviour.
-  getPromptAssemblyContext: () => window.api.getPromptAssemblyContext(),
   // Re-auth entry for classified errorKind:'auth' chat errors — same AI settings /
   // login modal opener the header uses (device-code flow lives inside it).
   openAiSettings: () => openSettings(),
@@ -1320,17 +1315,7 @@ async function sendUnified(
       ? styleDirective({ ...currentStyle(), naturalness: 'off' }, lang)
       : styleDirective(currentStyle(), lang);
 
-  let ctx = { enabled: false, systemlawContent: '', ownerContent: '' };
-  try {
-    ctx = await window.api.getPromptAssemblyContext();
-  } catch {
-    /* legacy path */
-  }
-
   const instructions = buildUnifiedChatInstructions({
-    toggleEnabled: ctx.enabled,
-    systemlawContent: ctx.systemlawContent,
-    ownerContent: ctx.ownerContent,
     styleDirectiveStr: styleStr,
     documentText: (mode === 'advise' && adviceSnapshot ? adviceSnapshot : editor.getDoc()).slice(0, 12000),
   });

@@ -41,9 +41,6 @@ import {
   type OutboundSink,
   type WindowRecord,
 } from './window-registry';
-import { isPromptAssemblyEnabled } from './prompts/toggle';
-import { readSystemlaw } from './prompts/read-systemlaw';
-import { readOwner } from './prompts/read-owner';
 import {
   createContextStackLoader,
   createWizardService,
@@ -995,38 +992,6 @@ async function requireProjectFolder(projectFolder: unknown): Promise<string> {
   return projectFolder;
 }
 
-/**
- * Returns the current state of the v1.1 prompt-assembly feature toggle
- * together with the pre-loaded userData file contents that the renderer needs
- * to call `buildBlockAiInstructions` (and equivalent handlers on the other
- * three AI surfaces).
- *
- * When the toggle is OFF the file contents are empty strings — no filesystem
- * reads are performed — so the IPC cost when toggle is off is minimal.
- *
- * Graceful fallback: any I/O error causes the handler to return
- * `{ enabled: false, systemlawContent: '', ownerContent: '' }` rather than
- * propagating the error to the renderer.  The renderer treats this as "legacy
- * path" and proceeds without crashing.
- */
-handleTrusted('prompt:assembly-context', async () => {
-  const enabled = isPromptAssemblyEnabled();
-  if (!enabled) {
-    // Toggle off — skip filesystem reads; return minimal context.
-    return { enabled: false, systemlawContent: '', ownerContent: '' };
-  }
-  try {
-    const userDataPath = app.getPath('userData');
-    const [systemlawContent, ownerContent] = await Promise.all([
-      readSystemlaw(userDataPath),
-      readOwner(userDataPath),
-    ]);
-    return { enabled, systemlawContent, ownerContent };
-  } catch {
-    // Unexpected error — fall back to legacy path to avoid crashing the renderer.
-    return { enabled: false, systemlawContent: '', ownerContent: '' };
-  }
-});
 
 // ---------- Session snapshot IPC ----------
 
