@@ -111,6 +111,7 @@
   "devDependencies": {
     "@types/markdown-it": "^14.1.2",
     "@types/node": "^22.9.0",
+    "@types/turndown": "^5.0.6",
     "concurrently": "^9.1.0",
     "cross-env": "^7.0.3",
     "electron": "^33.2.0",
@@ -125,10 +126,10 @@
   "dependencies": {
     "@codemirror/commands": "^6.7.1",
     "@codemirror/lang-markdown": "^6.3.1",
+    "@codemirror/language": "^6.12.4",
     "@codemirror/state": "^6.4.1",
-    "@codemirror/theme-one-dark": "^6.1.2",
     "@codemirror/view": "^6.35.0",
-    "@types/turndown": "^5.0.6",
+    "@lezer/highlight": "^1.2.3",
     "dompurify": "^3.4.11",
     "kordoc": "^2.7.1",
     "markdown-it": "^14.1.0",
