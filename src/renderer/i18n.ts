@@ -531,7 +531,7 @@ const DICTS: Record<Locale, Dict> = {
     'table.pick': '選擇大小', 'table.addRow': '+ 列', 'table.addCol': '+ 欄', 'table.delRow': '− 列', 'table.delCol': '− 欄',
     'table.addRowTitle': '在下方新增列', 'table.addColTitle': '在右側新增欄', 'table.delRowTitle': '刪除最後一列', 'table.delColTitle': '刪除欄',
     'table.rowAbove': '↑ 列', 'table.rowBelow': '↓ 列', 'table.colLeft': '← 欄', 'table.colRight': '欄 →',
-    'table.confirmDeleteRow': '刪除此列？其中有資料。', 'table.confirmDeleteCol': '刪除此欄？其中有資料。',
+    'table.confirmDeleteRow': '刪除此行？其中有資料。', 'table.confirmDeleteCol': '刪除此欄？其中有資料。',
     'restore.title': '還原上一次的工作階段？', 'restore.yes': '還原', 'restore.no': '忽略',
     'update.title': '有可用更新', 'update.download': '下載', 'update.dismiss': '稍後',
     'type.title': '顯示', 'type.letterSpacing': '字距', 'type.charWidth': '字寬', 'type.lineHeight': '行距',
