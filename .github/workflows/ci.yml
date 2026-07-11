@@ -19,3 +19,8 @@ jobs:
       - run: npm run typecheck
       - run: npm run test
       - run: npm run build
+      - run: npm run test:security-e2e
+      - run: npm run test:converter-e2e
+      - run: npm run test:html-export
+      - run: npm run test:roundtrip-smoke
+      - run: npm run knip
