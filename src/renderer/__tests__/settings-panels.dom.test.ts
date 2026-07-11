@@ -24,40 +24,68 @@ const SETTINGS_LOCALE_EXPECTATIONS: ReadonlyArray<{
   dialog: string;
   close: string;
   grokSetupError: string;
+  statusLoadFailed: string;
+  retry: string;
+  grokUnverified: string;
+  grokAuthUnknown: string;
 }> = [
   {
     locale: 'en',
     dialog: 'Settings',
     close: 'Close',
     grokSetupError: 'Grok CLI is unavailable. Install it and run `grok login` in a terminal, then reopen the app.',
+    statusLoadFailed: 'Could not load provider status. Try again.',
+    retry: 'Retry',
+    grokUnverified: 'Status unverified — ready if you are signed in via `grok login`',
+    grokAuthUnknown: 'Grok CLI is installed, but its sign-in status could not be verified. Run `grok login` in a terminal, then reopen the app.',
   },
   {
     locale: 'ko',
     dialog: '설정',
     close: '닫기',
     grokSetupError: 'Grok CLI를 사용할 수 없습니다. 설치한 뒤 터미널에서 `grok login`을 실행하고 앱을 다시 여세요.',
+    statusLoadFailed: '제공자 상태를 불러오지 못했습니다. 다시 시도하세요.',
+    retry: '다시 시도',
+    grokUnverified: '`grok login`으로 로그인했다면 사용할 준비가 되었지만 상태를 확인할 수 없습니다',
+    grokAuthUnknown: 'Grok CLI는 설치되어 있지만 로그인 상태를 확인할 수 없습니다. 터미널에서 `grok login`을 실행한 후 앱을 다시 여세요.',
   },
   {
     locale: 'zh-Hans',
     dialog: '设置',
     close: '关闭',
     grokSetupError: 'Grok CLI 不可用。请安装后在终端运行 `grok login`，然后重新打开应用。',
+    statusLoadFailed: '无法加载提供商状态。请重试。',
+    retry: '重试',
+    grokUnverified: '状态未经验证 — 如果您已通过 `grok login` 登录，即可使用',
+    grokAuthUnknown: 'Grok CLI 已安装，但无法验证登录状态。请在终端运行 `grok login`，然后重新打开应用。',
   },
   {
     locale: 'zh-Hant',
     dialog: '設定',
     close: '關閉',
     grokSetupError: 'Grok CLI 無法使用。請安裝後在終端機執行 `grok login`，然後重新開啟應用程式。',
+    statusLoadFailed: '無法載入供應商狀態。請重試。',
+    retry: '重試',
+    grokUnverified: '狀態未經驗證 — 如果您已透過 `grok login` 登入，即可使用',
+    grokAuthUnknown: 'Grok CLI 已安裝，但無法驗證登入狀態。請在終端機執行 `grok login`，然後重新開啟應用程式。',
   },
   {
     locale: 'ja',
     dialog: '設定',
     close: '閉じる',
     grokSetupError: 'Grok CLI は利用できません。インストール後にターミナルで `grok login` を実行し、アプリを開き直してください。',
+    statusLoadFailed: 'プロバイダーの状態を読み込めませんでした。もう一度お試しください。',
+    retry: '再試行',
+    grokUnverified: '状態を確認できません — `grok login` でサインイン済みなら使用できます',
+    grokAuthUnknown: 'Grok CLI はインストールされていますが、サインイン状態を確認できません。ターミナルで `grok login` を実行してからアプリを開き直してください。',
   },
 ];
 
 const EN_GROK_SETUP_ERROR = SETTINGS_LOCALE_EXPECTATIONS[0].grokSetupError;
+const EN_STATUS_LOAD_FAILED = SETTINGS_LOCALE_EXPECTATIONS[0].statusLoadFailed;
+const EN_RETRY = SETTINGS_LOCALE_EXPECTATIONS[0].retry;
+const EN_GROK_UNVERIFIED = SETTINGS_LOCALE_EXPECTATIONS[0].grokUnverified;
+const EN_GROK_AUTH_UNKNOWN = SETTINGS_LOCALE_EXPECTATIONS[0].grokAuthUnknown;
 const GROK_SETUP_STATUS: ProviderAuthStatus = {
   provider: 'grok',
   label: 'Grok (CLI)',
@@ -345,19 +373,33 @@ describe('openSettingsModal — accessibility', () => {
     }
   });
 
-  it('shows a retryable load failure instead of zero-auth guidance', async () => {
+  it.each(SETTINGS_LOCALE_EXPECTATIONS)('localizes retryable provider-status load failures @ $locale', async ({
+    locale,
+    statusLoadFailed,
+    retry,
+  }) => {
     const aiProvidersStatus = vi.fn()
       .mockRejectedValueOnce(new Error('IPC unavailable'))
       .mockResolvedValueOnce([]);
     const restoreApi = installProviderStatusApi(aiProvidersStatus);
     try {
+      setLocale(locale);
       openSettingsModal({ onSetCustomModel: vi.fn() });
       await flushSettingsRender();
 
-      expect(document.querySelector('.prov-load-error')?.textContent).toContain('Could not load provider status');
+      const loadError = document.querySelector<HTMLElement>('.prov-load-error')!;
+      const retryButton = document.querySelector<HTMLButtonElement>('[data-prov-action="retry-status"]')!;
+      expect(loadError.textContent, `load failure @ ${locale}`).toBe(`${statusLoadFailed} ${retry}`);
+      expect(retryButton.textContent, `retry label @ ${locale}`).toBe(retry);
+      expect(loadError.textContent).not.toContain('settings.prov.statusLoadFailed');
+      expect(retryButton.textContent).not.toContain('settings.prov.retry');
       expect(document.querySelector('.prov-zero-auth')).toBeNull();
+      if (locale !== 'en') {
+        expect(loadError.textContent).not.toContain(EN_STATUS_LOAD_FAILED);
+        expect(retryButton.textContent).not.toContain(EN_RETRY);
+      }
 
-      document.querySelector<HTMLButtonElement>('[data-prov-action="retry-status"]')!.click();
+      retryButton.click();
       await flushSettingsRender();
 
       expect(aiProvidersStatus).toHaveBeenCalledTimes(2);
@@ -365,6 +407,7 @@ describe('openSettingsModal — accessibility', () => {
     } finally {
       document.querySelector<HTMLButtonElement>('#settings-close')?.click();
       restoreApi();
+      setLocale('en');
     }
   });
 
@@ -392,7 +435,11 @@ describe('openSettingsModal — accessibility', () => {
     }
   });
 
-  it('renders Grok installed-but-auth-unverified guidance exactly once', async () => {
+  it.each(SETTINGS_LOCALE_EXPECTATIONS)('localizes installed-but-auth-unverified Grok guidance @ $locale', async ({
+    locale,
+    grokUnverified,
+    grokAuthUnknown,
+  }) => {
     const restoreApi = installProviderStatusApi(
       vi.fn().mockResolvedValue([{
         provider: 'grok',
@@ -405,20 +452,28 @@ describe('openSettingsModal — accessibility', () => {
       } satisfies ProviderAuthStatus]),
     );
     try {
+      setLocale(locale);
       openSettingsModal({ onSetCustomModel: vi.fn() });
       await flushSettingsRender();
 
       const status = document.querySelector<HTMLElement>('.prov-status')!;
-      expect(status.textContent).toBe('Status unverified — ready if you are signed in via `grok login`');
+      const guidance = document.querySelector<HTMLElement>('.prov-error')!;
+      expect(status.textContent, `unverified badge @ ${locale}`).toBe(grokUnverified);
+      expect(guidance.textContent, `unverified guidance @ ${locale}`).toBe(grokAuthUnknown);
       expect(status.classList.contains('prov-status-unknown')).toBe(true);
+      expect(status.textContent).not.toContain('settings.prov.unverified');
+      expect(guidance.textContent).not.toContain('settings.prov.error.grokCliAuthUnknown');
       expect(status.textContent).not.toContain('Not connected');
-      expect(document.querySelectorAll('.prov-error')).toHaveLength(1);
-      expect(document.querySelector('.prov-error')?.textContent?.match(/grok login/g)).toHaveLength(1);
       expect(document.querySelector('.prov-zero-auth')).toBeNull();
       expect(document.querySelectorAll('.prov-local-note')).toHaveLength(0);
+      if (locale !== 'en') {
+        expect(status.textContent).not.toContain(EN_GROK_UNVERIFIED);
+        expect(guidance.textContent).not.toContain(EN_GROK_AUTH_UNKNOWN);
+      }
     } finally {
       document.querySelector<HTMLButtonElement>('#settings-close')?.click();
       restoreApi();
+      setLocale('en');
     }
   });
 });
