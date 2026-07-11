@@ -200,6 +200,16 @@ describe('mountLeftPanel — file tab', () => {
     await waitFor(() => host.querySelector('.ft-note.ft-error'));
     expect(host.querySelector('.ft-note.ft-error')).not.toBeNull();
   });
+  it('clears a persisted root that no longer has a main-process grant', async () => {
+    const { host, files } = await showFilesTab({
+      listDir: vi.fn(async () => ({ ok: false, entries: [], error: 'workspace-not-authorized' })),
+    });
+
+    await waitFor(() => vi.mocked(files.onWorkspaceRootChange).mock.calls.length);
+    expect(files.onWorkspaceRootChange).toHaveBeenCalledWith(null);
+    expect(host.querySelector('.ft-empty')?.textContent).toBe('Open a folder to browse files');
+    expect(host.querySelector('.ft-action[data-action="open-folder"]')).not.toBeNull();
+  });
 
   it('narrows the tree as the filter input changes', async () => {
     const { host } = await showFilesTab();

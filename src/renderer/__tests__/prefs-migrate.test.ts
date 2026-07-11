@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest';
+// @vitest-environment happy-dom
+import { beforeEach, describe, expect, it } from 'vitest';
 
-import { migratePrefs } from '../prefs';
+import { loadPrefs, migratePrefs, savePrefs } from '../prefs';
+beforeEach(() => {
+  localStorage.clear();
+});
 
 describe('migratePrefs', () => {
   it('null input yields defaults with derived structured fields', () => {
@@ -65,6 +69,20 @@ describe('migratePrefs', () => {
   it('preserves workspaceRoot and leaves it unset by default', () => {
     expect(migratePrefs(null).workspaceRoot).toBeUndefined();
     expect(migratePrefs({ workspaceRoot: '/home/u/notes' }).workspaceRoot).toBe('/home/u/notes');
+  });
+});
+describe('savePrefs', () => {
+  it('merges a local field change with a newer change from another window', () => {
+    const local = loadPrefs();
+    localStorage.setItem(
+      'notepad-ai:prefs:v1',
+      JSON.stringify({ ...local, fontSize: 'lg' }),
+    );
+
+    local.theme = 'dark';
+    savePrefs(local);
+
+    expect(loadPrefs()).toMatchObject({ theme: 'dark', fontSize: 'lg' });
   });
 });
 

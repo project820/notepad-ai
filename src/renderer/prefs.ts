@@ -37,6 +37,30 @@ export type Prefs = {
 };
 
 const KEY = 'notepad-ai:prefs:v1';
+let lastPersistedPrefs: Prefs | null = null;
+
+function clonePrefs(prefs: Prefs): Prefs {
+  return JSON.parse(JSON.stringify(prefs)) as Prefs;
+}
+
+function readStoredPrefs(): Prefs {
+  try {
+    const raw = localStorage.getItem(KEY);
+    return migratePrefs(raw ? JSON.parse(raw) : null);
+  } catch {
+    return migratePrefs(null);
+  }
+}
+
+function changedPrefs(base: Prefs, next: Prefs): Partial<Prefs> {
+  const changes: Partial<Prefs> = {};
+  for (const key of new Set([...Object.keys(base), ...Object.keys(next)]) as Set<keyof Prefs>) {
+    if (JSON.stringify(base[key]) !== JSON.stringify(next[key])) {
+      Object.assign(changes, { [key]: next[key] });
+    }
+  }
+  return changes;
+}
 
 function detectLocale(): 'en' | 'ko' | 'zh-Hans' | 'zh-Hant' | 'ja' {
   try {
@@ -102,18 +126,18 @@ export function migratePrefs(parsed: Partial<Prefs> | null | undefined): Prefs {
 }
 
 export function loadPrefs(): Prefs {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return migratePrefs(null);
-    return migratePrefs(JSON.parse(raw));
-  } catch {
-    return migratePrefs(null);
-  }
+  const prefs = readStoredPrefs();
+  lastPersistedPrefs = clonePrefs(prefs);
+  return prefs;
 }
 
 export function savePrefs(prefs: Prefs) {
   try {
-    localStorage.setItem(KEY, JSON.stringify(prefs));
+    const stored = readStoredPrefs();
+    const base = lastPersistedPrefs ?? stored;
+    const merged = migratePrefs({ ...stored, ...changedPrefs(base, prefs) });
+    localStorage.setItem(KEY, JSON.stringify(merged));
+    lastPersistedPrefs = clonePrefs(merged);
   } catch {
     /* ignore */
   }

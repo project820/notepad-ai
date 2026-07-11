@@ -240,6 +240,7 @@ function onDocChange(doc: string) {
   }
   updateWordCount(doc);
   scheduleAutosave();
+  scheduleSessionSnapshot();
 }
 
 async function save() {
@@ -280,6 +281,7 @@ function newDoc() {
   updateWordCount('');
   statusEl.textContent = 'New document';
   editor.focus();
+  scheduleSessionSnapshot();
 }
 
 function applyPreviewMode() {
@@ -325,6 +327,7 @@ preview.onAfterRender(() => {
     preview.setDoc(newDoc);
     updateWordCount(newDoc);
     scheduleAutosave();
+    scheduleSessionSnapshot();
   });
 });
 wirePreviewLinks(preview.el, {
@@ -1100,7 +1103,7 @@ window.addEventListener('beforeunload', () => {
   // in Electron that silently cancels the quit (no dialog), so the app would only
   // close via force-quit. Autosave + the session snapshot already preserve work.
   if (dirty) void save();
-  scheduleSessionSnapshot();
+  void flushSessionSnapshot();
 });
 
 setTitle();
@@ -1281,6 +1284,7 @@ async function sendUnified(
   if (!hasAuth) {
     unifiedChat.addMessage('user', text);
     unifiedChatHistory.push({ type: 'message', role: 'user', text });
+    scheduleSessionSnapshot();
     unifiedChat.addMessage(
       'assistant',
       'No AI provider is connected. Open Settings to sign in with ChatGPT or add a Claude / OpenRouter API key.',
@@ -1305,6 +1309,7 @@ async function sendUnified(
   unifiedChat.addMessage('user', userDisplay);
   // Image bytes / file blobs are never persisted in session history (text only).
   unifiedChatHistory.push({ type: 'message', role: 'user', text: userDisplay });
+  scheduleSessionSnapshot();
 
   const stream = unifiedChat.beginAssistant();
   const id = ucId();
@@ -1717,18 +1722,6 @@ async function requestLocaleRestart(l: Locale) {
   await window.api.relaunchApp();
 }
 
-const origOnDocChange = onDocChange;
-// Replace editor onChange wrapper to also snapshot
-(editor as any).__hookedSnapshot = true;
-function snapshottingDocChange(doc: string) {
-  origOnDocChange(doc);
-  scheduleSessionSnapshot();
-}
-// Re-wire — recreate the update listener via setDoc won't help; just install a periodic ticker
-setInterval(() => {
-  if (dirty) scheduleSessionSnapshot();
-}, 5000);
-void snapshottingDocChange; // referenced to satisfy linter
 
 function showRestoreBanner(snap: any) {
   // Built with createElement + textContent (never innerHTML): the persisted doc

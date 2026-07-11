@@ -308,6 +308,13 @@ export function mountLeftPanel(host: HTMLElement, opts: LeftPanelOpts): LeftPane
     try {
       const res = await files.listDir(reqRoot, dirPath);
       if (root !== reqRoot) return; // root changed mid-flight — drop stale result
+      if (!res.ok && res.error === 'workspace-not-authorized') {
+        // File grants are main-process memory only. A persisted root from a prior
+        // launch cannot be listed until the user picks it again.
+        setRoot(null, true);
+        setStatus(t('panel.files.error'));
+        return;
+      }
       dirCache.set(
         dirPath,
         res.ok
