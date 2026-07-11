@@ -211,9 +211,11 @@ window.api.onCloseQueryState((requestId) => {
   });
 });
 window.api.onCloseSave((requestId) => {
-  void docLifecycle.save().then(() => {
+  void (async () => {
+    await docLifecycle.save();
+    if (!ctx.dirty && sessionSnapshot) await sessionSnapshot.flushSessionSnapshot();
     window.api.sendCloseSaveResult(requestId, !ctx.dirty);
-  }).catch(() => {
+  })().catch(() => {
     window.api.sendCloseSaveResult(requestId, false);
   });
 });

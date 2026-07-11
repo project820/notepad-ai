@@ -51,6 +51,7 @@ type AppWindows = {
   approveClose: (win: BrowserWindow) => Promise<boolean>;
   approveAllForQuit: () => Promise<boolean>;
   clearCloseApprovals: () => void;
+  preserveSessionOnClose: () => void;
 };
 
 /**
@@ -91,6 +92,7 @@ export function createAppWindows({
   let ready = false;
   let launchWindowId: number | null = null;
   const pending: string[] = [];
+  let preserveSessionOnClose = false;
   const approvedCloseWindowIds = new Set<number>();
   const pendingState = new Map<string, { webContentsId: number; resolve: (state: CloseGuardState | null) => void }>();
   const pendingSave = new Map<string, { webContentsId: number; resolve: (saved: boolean) => void }>();
@@ -358,9 +360,11 @@ export function createAppWindows({
       fileGrants.release(record.webContentsId);
       projectWizardRoots.release(record.webContentsId);
       approvedCloseWindowIds.delete(win.id);
-      void removeSessionWindow(record.windowKey).catch((error) => {
-        console.error('[session] failed to remove closed window:', error);
-      });
+      if (!preserveSessionOnClose) {
+        void removeSessionWindow(record.windowKey).catch((error) => {
+          console.error('[session] failed to remove closed window:', error);
+        });
+      }
       if (launchWindowId === win.id) launchWindowId = null;
       console.log(`[window] closed id=${win.id}`);
     });
@@ -432,5 +436,8 @@ export function createAppWindows({
     approveClose,
     approveAllForQuit,
     clearCloseApprovals: () => approvedCloseWindowIds.clear(),
+    preserveSessionOnClose: () => {
+      preserveSessionOnClose = true;
+    },
   };
 }

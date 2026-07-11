@@ -73,6 +73,7 @@ handleTrusted('app:relaunch', async () => {
     return;
   }
   relaunchApproved = true;
+  windows.preserveSessionOnClose();
   app.relaunch();
   app.quit();
 });

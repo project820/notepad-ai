@@ -90,5 +90,5 @@ export function initSessionSnapshot(ctx: AppContext, deps: SessionSnapshotDeps) 
     }
   })();
 
-  return { scheduleSessionSnapshot, requestLocaleRestart };
+  return { scheduleSessionSnapshot, flushSessionSnapshot, requestLocaleRestart };
 }
