@@ -16,7 +16,7 @@ export type TypographyPref = {
 
 export const DEFAULT_TYPOGRAPHY: TypographyPref = { letterSpacing: 0, charScaleX: 1, lineHeight: 1 };
 
-export const TYPO_RANGES = {
+const TYPO_RANGES = {
   letterSpacing: { min: -0.5, max: 3, step: 0.5 },
   charScaleX: { min: 0.85, max: 1.3, step: 0.05 },
   lineHeight: { min: 1, max: 2, step: 0.1 },

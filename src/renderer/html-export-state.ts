@@ -18,7 +18,7 @@ export type Orientation = 'vertical' | 'horizontal';
 export type LayoutKind = 'scroll' | 'slides';
 
 /** Entry mode for the advanced panel: auto = read-good defaults; detail = extra knobs. */
-export type HtmlExportMode = 'auto' | 'detail';
+type HtmlExportMode = 'auto' | 'detail';
 /** Generation purpose — an optional ADVANCED knob (no longer part of the 4-core flow). */
 export type HtmlPurpose =
   | 'presentation'
@@ -32,7 +32,7 @@ export type HtmlPurpose =
 export type Density = 'compact' | 'normal' | 'roomy';
 export type ReadableWidth = 'narrow' | 'normal' | 'wide';
 
-export type HtmlExportStep =
+type HtmlExportStep =
   | 'idle'
   | 'choose-orientation'
   | 'choose-layout'

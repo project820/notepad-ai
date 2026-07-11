@@ -19,7 +19,7 @@ export type StyleSetting = {
 export const DEFAULT_STYLE: StyleSetting = { difficulty: 'college', naturalness: 'balanced' };
 
 /** Humanize engine id bound to a provider (mirrors the main-process catalog). */
-export function humanizeEngineIdForProvider(provider: string): string {
+function humanizeEngineIdForProvider(provider: string): string {
   if (provider === 'claude') return 'claude';
   if (provider === 'openrouter') return 'openrouter';
   return 'openai';

@@ -10,6 +10,7 @@
  */
 
 import type { ConverterRequest, ConverterResponse } from './converter-host';
+type KordocModule = typeof import('kordoc') & { default?: typeof import('kordoc') };
 
 // In a utilityProcess child, the parent channel is on `process.parentPort`.
 const parentPort = (process as unknown as { parentPort?: { on(ev: 'message', cb: (e: { data: ConverterRequest }) => void): void; postMessage(msg: ConverterResponse): void } }).parentPort;
@@ -25,8 +26,8 @@ if (parentPort) {
       const buf = Buffer.from(data);
       // kordoc ships an ESM-only entry; use a native dynamic import (hidden from
       // the TS CommonJS transform via new Function) — mirrors the main path.
-      const nativeImport: (s: string) => Promise<any> = new Function('s', 'return import(s)') as any;
-      const kordoc = await nativeImport('kordoc');
+      const nativeImport: (s: string) => Promise<unknown> = new Function('s', 'return import(s)') as (s: string) => Promise<unknown>;
+      const kordoc = (await nativeImport('kordoc')) as KordocModule;
       const parseFn = kordoc.parse ?? kordoc.default?.parse;
       const renderHtml = kordoc.renderHtml ?? kordoc.default?.renderHtml;
       if (typeof parseFn !== 'function') {

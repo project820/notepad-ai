@@ -31,7 +31,7 @@ import type { FontsReadyFn, MeasureFn, SlideDims } from './html-export-layout';
 import { renderBlocks } from './html-export-renderer';
 
 /** True only when a usable DOM (createElement + a live `<body>`) is present. */
-export function hasDom(doc?: Document): boolean {
+function hasDom(doc?: Document): boolean {
   const d = doc ?? (typeof document !== 'undefined' ? document : undefined);
   return !!d && typeof d.createElement === 'function' && !!d.body;
 }
@@ -57,7 +57,7 @@ export type DomMeasureOptions = {
 };
 
 /** The id of the singleton offscreen measurement root appended to `<body>`. */
-export const MEASURE_ROOT_ID = 'he-measure-root';
+const MEASURE_ROOT_ID = 'he-measure-root';
 /** The id of the singleton injected measurement stylesheet. */
 const MEASURE_STYLE_ID = 'he-measure-style';
 

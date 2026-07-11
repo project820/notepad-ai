@@ -14,14 +14,14 @@
  */
 
 /** A single chat message persisted with a window (mirrors the legacy payload). */
-export type SessionChatMessage = { role: 'user' | 'assistant'; text: string };
+type SessionChatMessage = { role: 'user' | 'assistant'; text: string };
 
 /** v1 unified collaborator-chat entry (messages + legacy separators). */
-export type SessionUnifiedChatEntry =
+type SessionUnifiedChatEntry =
   | { type: 'message'; role: 'user' | 'assistant'; text: string; legacySource?: 'bottom' | 'side' }
   | { type: 'separator'; label: string };
 
-export type SessionViewMode = 'split' | 'editor-only' | 'preview-only';
+type SessionViewMode = 'split' | 'editor-only' | 'preview-only';
 
 /**
  * The legacy (pre multi-window) single-snapshot shape. This is the exact shape

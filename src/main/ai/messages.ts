@@ -4,9 +4,9 @@
 
 import type { AiImageAttachment, ChatTurn, SurfaceMode } from './types';
 
-export type OpenAiTextPart = { type: 'text'; text: string };
-export type OpenAiImagePart = { type: 'image_url'; image_url: { url: string } };
-export type AnthropicTextPart = { type: 'text'; text: string };
+type OpenAiTextPart = { type: 'text'; text: string };
+type OpenAiImagePart = { type: 'image_url'; image_url: { url: string } };
+type AnthropicTextPart = { type: 'text'; text: string };
 export type AnthropicImagePart = {
   type: 'image';
   source: { type: 'base64'; media_type: string; data: string };

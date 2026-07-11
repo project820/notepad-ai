@@ -71,7 +71,7 @@ export type PlannedSlide = {
   continued?: boolean;
 };
 
-export type LayoutDiagnostics = {
+type LayoutDiagnostics = {
   /** Number of planned slides (0 when the plan failed). */
   slideCount: number;
   /** Number of split operations performed. */

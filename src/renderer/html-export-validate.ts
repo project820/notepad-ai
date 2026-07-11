@@ -52,7 +52,7 @@ export function validateSelfContainedHtml(html: string): SelfContainedVerdict {
 // layoutDiagnostics — pure containment-invariant description (G005/G006 gate).
 // ---------------------------------------------------------------------------
 
-export type LayoutContainmentInvariant = { id: string; description: string };
+type LayoutContainmentInvariant = { id: string; description: string };
 
 export type LayoutDiagnostics = {
   layout: LayoutKind;

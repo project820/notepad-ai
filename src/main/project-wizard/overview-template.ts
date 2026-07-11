@@ -96,7 +96,7 @@ export function renderOverviewMarkdown(draft: OverviewDraft): string {
   return `${lines.join('\n')}${body ? `${body}\n` : defaultOverviewBody()}`;
 }
 
-export function defaultOverviewBody(): string {
+function defaultOverviewBody(): string {
   return [
     '## Purpose',
     '',

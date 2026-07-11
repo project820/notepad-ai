@@ -8,7 +8,7 @@
 
 export type AiProviderId = 'chatgpt' | 'claude' | 'openrouter' | 'ollama' | 'lmstudio' | 'grok';
 
-export const AI_PROVIDER_IDS: readonly AiProviderId[] = ['chatgpt', 'claude', 'openrouter', 'ollama', 'lmstudio', 'grok'];
+const AI_PROVIDER_IDS: readonly AiProviderId[] = ['chatgpt', 'claude', 'openrouter', 'ollama', 'lmstudio', 'grok'];
 
 export function isAiProviderId(value: unknown): value is AiProviderId {
   return typeof value === 'string' && (AI_PROVIDER_IDS as readonly string[]).includes(value);
@@ -82,7 +82,7 @@ export type AiImageAttachment = {
   name?: string;
 };
 
-export const ALLOWED_IMAGE_MIME = ['image/png', 'image/jpeg', 'image/webp'] as const;
+const ALLOWED_IMAGE_MIME = ['image/png', 'image/jpeg', 'image/webp'] as const;
 /** Max images per turn. */
 export const MAX_IMAGE_ATTACHMENTS = 4;
 /** Max decoded bytes per image (8 MiB). */

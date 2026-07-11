@@ -17,7 +17,7 @@
 // ---------------------------------------------------------------------------
 
 /** The seven (+1) palette roles the engine wires to CSS variables. */
-export type DesignThemeColors = {
+type DesignThemeColors = {
   bg: string;
   surface: string;
   ink: string;
@@ -29,7 +29,7 @@ export type DesignThemeColors = {
 };
 
 /** Type scale, in px (sizes) / unitless (weight, lineHeight). Slide-safe clamps applied. */
-export type DesignTypeScale = {
+type DesignTypeScale = {
   titleSize: number;
   headingSize: number;
   bodySize: number;
@@ -40,33 +40,33 @@ export type DesignTypeScale = {
 };
 
 /** Spacing rhythm in px. `scale` is an ascending list of distinct step values. */
-export type DesignSpacing = {
+type DesignSpacing = {
   unit: number;
   scale: number[];
   rhythm: number;
 };
 
 /** Corner radii in px. `full` is the pill radius (>= 1000 when present). */
-export type DesignRadii = {
+type DesignRadii = {
   sm: number;
   md: number;
   lg: number;
   full: number;
 };
 
-export type DesignBorders = {
+type DesignBorders = {
   width: number;
   style: 'solid' | 'dashed' | 'dotted';
 };
 
-export type DesignDensity = 'compact' | 'comfortable' | 'spacious';
-export type DesignContrast = 'low' | 'normal' | 'high';
-export type DesignCorner = 'sharp' | 'soft' | 'round';
-export type DesignDivider = 'none' | 'hairline' | 'rule';
-export type DesignMotion = 'restrained' | 'standard';
+type DesignDensity = 'compact' | 'comfortable' | 'spacious';
+type DesignContrast = 'low' | 'normal' | 'high';
+type DesignCorner = 'sharp' | 'soft' | 'round';
+type DesignDivider = 'none' | 'hairline' | 'rule';
+type DesignMotion = 'restrained' | 'standard';
 
 /** Tone — adjectives detected in the prose, mapped to concrete design knobs. */
-export type DesignTone = {
+type DesignTone = {
   adjectives: string[];
   density: DesignDensity;
   contrast: DesignContrast;
@@ -77,7 +77,7 @@ export type DesignTone = {
 };
 
 /** Which signature elements the design.md actually mentions. */
-export type DesignSignature = {
+type DesignSignature = {
   kicker: boolean;
   divider: boolean;
   sectionHeader: boolean;

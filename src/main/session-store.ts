@@ -25,7 +25,7 @@ import { atomicWrite as atomicWriteFile, nodeAtomicBackend } from './atomic-writ
  */
 
 /** Back-compat alias for the legacy single-snapshot shape (pre multi-window). */
-export type SessionSnapshot = LegacySessionSnapshot;
+type SessionSnapshot = LegacySessionSnapshot;
 
 function sessionPath() {
   return path.join(app.getPath('userData'), 'session.json');
@@ -48,7 +48,7 @@ async function atomicWrite(target: string, data: string): Promise<void> {
   }
 }
 
-export async function readSession(): Promise<SessionSnapshot | null> {
+async function readSession(): Promise<SessionSnapshot | null> {
   try {
     const buf = await fs.readFile(sessionPath(), 'utf-8');
     return JSON.parse(buf) as SessionSnapshot;
@@ -57,7 +57,7 @@ export async function readSession(): Promise<SessionSnapshot | null> {
   }
 }
 
-export async function writeSession(snap: SessionSnapshot): Promise<void> {
+async function writeSession(snap: SessionSnapshot): Promise<void> {
   try {
     await atomicWrite(sessionPath(), JSON.stringify(snap, null, 2));
   } catch {
@@ -65,13 +65,13 @@ export async function writeSession(snap: SessionSnapshot): Promise<void> {
   }
 }
 
-export async function markCleanExit(): Promise<void> {
+async function markCleanExit(): Promise<void> {
   const cur = (await readSession()) ?? { savedAt: Date.now(), doc: '', currentPath: null, pendingTitle: null };
   cur.cleanExit = true;
   await writeSession(cur);
 }
 
-export async function clearSession(): Promise<void> {
+async function clearSession(): Promise<void> {
   try {
     await fs.unlink(sessionPath());
   } catch {
@@ -80,7 +80,7 @@ export async function clearSession(): Promise<void> {
 }
 
 /** Read the persisted session and migrate it into the v2 aggregate (migrate-on-read). */
-export async function readSessionV2(): Promise<SessionSnapshotV2> {
+async function readSessionV2(): Promise<SessionSnapshotV2> {
   try {
     const buf = await fs.readFile(sessionPath(), 'utf-8');
     return migrateSessionSnapshot(JSON.parse(buf));
@@ -90,7 +90,7 @@ export async function readSessionV2(): Promise<SessionSnapshotV2> {
 }
 
 /** Atomically persist the v2 aggregate (temp file + rename). */
-export async function writeSessionV2(state: SessionSnapshotV2): Promise<void> {
+async function writeSessionV2(state: SessionSnapshotV2): Promise<void> {
   try {
     await atomicWrite(sessionPath(), JSON.stringify(state, null, 2));
   } catch {

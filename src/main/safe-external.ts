@@ -243,7 +243,7 @@ export function parseDesignListFromContents(json: unknown): DesignListEntry[] {
 }
 
 /** Max bytes for a fetched design icon (avatar). Larger responses are rejected. */
-export const DESIGN_ICON_MAX_BYTES = 64 * 1024;
+const DESIGN_ICON_MAX_BYTES = 64 * 1024;
 
 /**
  * Allowlist for a design icon URL — only GitHub avatar PNGs on

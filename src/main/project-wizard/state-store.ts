@@ -9,7 +9,7 @@ export type StateFs = {
   realpath(filePath: string): Promise<string>;
 };
 
-export function projectWizardStatePath(projectFolder: string): string {
+function projectWizardStatePath(projectFolder: string): string {
   return path.join(projectFolder, '.notepad-ai', 'wizard-state.json');
 }
 

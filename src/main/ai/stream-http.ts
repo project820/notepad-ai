@@ -57,7 +57,7 @@ export async function readCappedText(resp: Response, maxBytes: number): Promise<
   return out.slice(0, maxBytes);
 }
 
-export type SseMap = {
+type SseMap = {
   /** Text to append (empty string for keep-alives / non-text events). */
   delta: string;
   /** True when this event terminates the stream successfully. */

@@ -3,7 +3,7 @@
  * Items render as menu rows with optional check-mark for current selection.
  */
 
-export type MenuItem<T extends string = string> = {
+type MenuItem<T extends string = string> = {
   value: T;
   label: string;
   hint?: string;

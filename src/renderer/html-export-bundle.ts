@@ -24,7 +24,7 @@ import { sha256Base64 } from './sha256';
 export const EXPORT_MANIFEST_SCHEMA_VERSION = 1;
 
 /** The machine-readable provenance block embedded in every exported document. */
-export type ExportManifest = {
+type ExportManifest = {
   schemaVersion: number;
   orientation: Orientation;
   layout: LayoutKind;

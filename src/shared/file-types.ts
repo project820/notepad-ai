@@ -10,22 +10,22 @@
  */
 
 /** Markdown source extensions opened verbatim (no conversion). */
-export const MARKDOWN_EXTS = ['md', 'markdown', 'mdx'] as const;
+const MARKDOWN_EXTS = ['md', 'markdown', 'mdx'] as const;
 
 /** Plain-text extensions opened verbatim. */
-export const TEXT_EXTS = ['txt'] as const;
+const TEXT_EXTS = ['txt'] as const;
 
 /** Hangul word-processor extensions (kordoc conversion). */
-export const HWP_EXTS = ['hwp', 'hwpx', 'hwpml'] as const;
+const HWP_EXTS = ['hwp', 'hwpx', 'hwpml'] as const;
 
 /** MS Word extensions (kordoc conversion). */
-export const WORD_EXTS = ['docx'] as const;
+const WORD_EXTS = ['docx'] as const;
 
 /** PDF extensions (kordoc conversion). */
-export const PDF_EXTS = ['pdf'] as const;
+const PDF_EXTS = ['pdf'] as const;
 
 /** Spreadsheet extensions (kordoc conversion). */
-export const SPREADSHEET_EXTS = ['xlsx', 'xls'] as const;
+const SPREADSHEET_EXTS = ['xlsx', 'xls'] as const;
 
 /**
  * Extensions that require kordoc conversion to Markdown before editing. Order

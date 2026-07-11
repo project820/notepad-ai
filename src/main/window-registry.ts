@@ -14,7 +14,7 @@
 import type { SessionWindowSnapshot } from './session-schema';
 
 /** One queued main→renderer message held until the target window reports ready. */
-export type OutboundMessage = { channel: string; payload: unknown };
+type OutboundMessage = { channel: string; payload: unknown };
 
 /** Performs the actual delivery of a main→renderer message (e.g. `webContents.send`). */
 export type OutboundSink = (channel: string, payload: unknown) => void;

@@ -37,8 +37,8 @@ export type SourceLineRange = {
 /** DOM attribute names carrying the map. Shared by the writer and readers so
  *  tagging and collection can never disagree on the attribute spelling. */
 export const SRC_START_ATTR = 'data-src-start';
-export const SRC_END_ATTR = 'data-src-end';
-export const MAP_ID_ATTR = 'data-map-id';
+const SRC_END_ATTR = 'data-src-end';
+const MAP_ID_ATTR = 'data-map-id';
 
 /** Minimal element shape the readers depend on — keeps the pure helpers
  *  testable without a DOM (a plain stub satisfies it). */

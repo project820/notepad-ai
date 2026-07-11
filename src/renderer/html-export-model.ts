@@ -46,7 +46,7 @@ export type HtmlExportRequest = {
 export type ChartType = 'bar' | 'line' | 'pie' | 'donut' | 'timeline';
 export const CHART_TYPES: readonly ChartType[] = ['bar', 'line', 'pie', 'donut', 'timeline'];
 
-export type ChartSeries = { name?: string; values: number[] };
+type ChartSeries = { name?: string; values: number[] };
 export type ChartSpec = {
   type: ChartType;
   title?: string;

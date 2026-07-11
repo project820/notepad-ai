@@ -47,7 +47,7 @@ export type ToolbarHandlers = {
 };
 
 // ---- SVG glyphs (no emoji) ----
-export const ICONS = {
+const ICONS = {
   undo: `<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8 a5 5 0 1 1 1.6 3.7"/><polyline points="3,4.5 3,8 6.5,8"/></svg>`,
   redo: `<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8 a5 5 0 1 0 -1.6 3.7"/><polyline points="13,4.5 13,8 9.5,8"/></svg>`,
   bold: 'B',

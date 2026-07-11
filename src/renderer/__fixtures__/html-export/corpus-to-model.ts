@@ -36,7 +36,7 @@ export const CORPUS_FIXTURES = [
 ] as const;
 
 /** The user's REAL handover source — supplied separately, NEVER synthesized. */
-export const REAL_HANDOVER_FIXTURE = 'gentz-handover.md';
+const REAL_HANDOVER_FIXTURE = 'gentz-handover.md';
 
 type Pending =
   | { kind: 'none' }

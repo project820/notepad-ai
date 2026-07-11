@@ -1,8 +1,8 @@
 export type ScanScope = 'fast_structure' | 'document_centered' | 'codex_full' | 'manual_explanation';
 
-export type AnalysisProfile = 'spark' | 'normal' | 'detailed';
+type AnalysisProfile = 'spark' | 'normal' | 'detailed';
 
-export type WizardStage =
+type WizardStage =
   | 'idle'
   | 'consent'
   | 'scan_scope'
@@ -16,14 +16,14 @@ export type WizardStage =
 
 export type ContextStatus = 'not_ready' | 'partially_ready' | 'ready';
 
-export type StageStatement = {
+type StageStatement = {
   at: string;
   stage: WizardStage;
   message: string;
   data?: Record<string, unknown>;
 };
 
-export type ManualExplanation = {
+type ManualExplanation = {
   purpose: string;
   folderScope: string;
   constraints: string;

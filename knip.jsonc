@@ -1,0 +1,19 @@
+{
+  "$schema": "./node_modules/knip/schema.json",
+  "entry": [
+    "src/main/main.ts",
+    "src/main/preload.ts",
+    "src/main/converter-worker.ts",
+    "scripts/*.mjs",
+    "scripts/he-harness.ts"
+  ],
+  "project": [
+    "src/**/*.{ts,tsx}",
+    "scripts/**/*.{ts,mjs}"
+  ],
+  "vitest": {
+    "entry": ["src/__tests__/**/*.test.ts"]
+  },
+  // macOS system binary invoked by the install:local package script.
+  "ignoreBinaries": ["ditto"]
+}

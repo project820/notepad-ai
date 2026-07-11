@@ -8,7 +8,7 @@ import { gfm } from 'turndown-plugin-gfm';
  * token. Sanitize so a hostile/odd id (spaces, `}`, newlines, `onclick=…`)
  * cannot corrupt the round-trip or smuggle extra attrs (G006 heading-id check).
  */
-export function safeHeadingId(raw: string): string {
+function safeHeadingId(raw: string): string {
   return (raw ?? '')
     .trim()
     .replace(/[^\w-]+/g, '-')

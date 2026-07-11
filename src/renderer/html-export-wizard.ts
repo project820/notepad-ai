@@ -47,10 +47,10 @@ import {
 import { defaultHtmlFileName } from './html-export-prompt';
 
 /** A model choice for HTML generation (provider + id, with optional context size). */
-export type HtmlModelChoice = { provider: string; id: string; label?: string; contextWindow?: number };
+type HtmlModelChoice = { provider: string; id: string; label?: string; contextWindow?: number };
 
 /** A running AI generation: a promise for the full reply plus a cancel hook. */
-export type AiGenerateJob = { result: Promise<string>; cancel: () => void };
+type AiGenerateJob = { result: Promise<string>; cancel: () => void };
 
 export type HtmlExportDeps = {
   getMarkdown: () => string;

@@ -11,7 +11,7 @@ import { RangeSetBuilder } from '@codemirror/state';
  * - Task markers `- [ ]` / `- [x]` become real clickable checkboxes
  */
 
-export const markdownHighlight = HighlightStyle.define([
+const markdownHighlight = HighlightStyle.define([
   { tag: t.heading1, fontSize: '1.7em', fontWeight: '700', color: 'var(--color-ink)' },
   { tag: t.heading2, fontSize: '1.45em', fontWeight: '700', color: 'var(--color-ink)' },
   { tag: t.heading3, fontSize: '1.25em', fontWeight: '700', color: 'var(--color-ink)' },

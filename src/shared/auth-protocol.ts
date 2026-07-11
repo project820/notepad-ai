@@ -4,7 +4,7 @@
  */
 
 /** Non-secret warning code surfaced to the renderer. */
-export type AuthWarningCode = 'secure_storage_unavailable';
+type AuthWarningCode = 'secure_storage_unavailable';
 
 /** Non-secret authentication state surfaced to the renderer. */
 export type AuthSnapshot = {
@@ -19,7 +19,7 @@ export type AuthSnapshot = {
 };
 
 /** Stable, renderer-safe error codes emitted by the device-code login flow. */
-export type LoginErrorCode =
+type LoginErrorCode =
   | 'device_code_request_failed'
   | 'device_code_response_invalid'
   | 'cancelled'

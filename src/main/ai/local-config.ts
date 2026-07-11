@@ -141,7 +141,7 @@ export class LocalConfigStore {
 }
 
 /** Thrown by {@link withLocalTimeout} when the wrapped op exceeds its budget. */
-export class LocalTimeoutError extends Error {
+class LocalTimeoutError extends Error {
   constructor(ms: number) {
     super(`Local request timed out after ${ms}ms`);
     this.name = 'LocalTimeoutError';

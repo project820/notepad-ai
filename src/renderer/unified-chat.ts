@@ -72,7 +72,7 @@ export type UnifiedChatHandlers = {
 };
 
 /** Live streaming handle for one assistant turn. */
-export type AssistantStream = {
+type AssistantStream = {
   /** Append a streamed delta and re-render the (markdown) body. */
   pushDelta: (text: string) => void;
   /** Finalize the bubble, attach apply actions, and return the trimmed text. */

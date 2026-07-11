@@ -11,6 +11,7 @@
  */
 
 import { ApiKeyStore, type KeyStoreBackend } from './api-key-store';
+import type { ChatGptProvider } from './chatgpt-provider';
 import { atomicWrite, nodeAtomicBackend } from '../atomic-write';
 import { ComposedClaudeProvider } from './claude-composed';
 import { GrokCliProvider } from './grok-cli-provider';
@@ -265,8 +266,9 @@ function createElectronKeyBackend(): KeyStoreBackend {
  * adapter. Local providers read their base URL lazily from `localConfig` so a
  * settings change takes effect on the next discovery without a rebuild.
  */
-export function buildDefaultProviders(keys: ApiKeyStore, localConfig?: LocalConfigStore): ProviderMap {
-  const { ChatGptProvider } = require('./chatgpt-provider') as typeof import('./chatgpt-provider');
+function buildDefaultProviders(keys: ApiKeyStore, localConfig?: LocalConfigStore): ProviderMap {
+  type ChatGptProviderConstructor = new () => ChatGptProvider;
+  const { ChatGptProvider } = require('./chatgpt-provider') as { ChatGptProvider: ChatGptProviderConstructor };
   const getOllamaBaseUrl = async () => (await localConfig?.get())?.ollama ?? DEFAULT_OLLAMA_BASE_URL;
   const getLmStudioBaseUrl = async () => (await localConfig?.get())?.lmstudio ?? DEFAULT_LMSTUDIO_BASE_URL;
   const cliSpawn = nodeCliSpawn();

@@ -4,8 +4,8 @@ import type { Naturalness } from './humanize-engine';
 import { clampTypography, type TypographyPref } from './typography';
 import type { AiProviderId } from '../main/ai/types';
 
-export type SelectedModel = { provider: AiProviderId; id: string };
-export type StylePref = { difficulty: Quality; naturalness: Naturalness };
+type SelectedModel = { provider: AiProviderId; id: string };
+type StylePref = { difficulty: Quality; naturalness: Naturalness };
 
 export type Prefs = {
   theme: Theme;
