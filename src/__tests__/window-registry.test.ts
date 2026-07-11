@@ -145,6 +145,22 @@ describe('path ownership', () => {
     expect(reg.ownerOfPath('/a.md')).toBeNull();
     expect(reg.claimPath(2, '/a.md')).toBe(true); // now claimable
   });
+  it('releases a path when the renderer snapshots a new document', () => {
+    reg.claimPath(1, '/a.md');
+
+    reg.syncSnapshotPath(1, { path: null });
+
+    expect(reg.ownerOfPath('/a.md')).toBeNull();
+    expect(reg.claimPath(2, '/a.md')).toBe(true);
+  });
+
+  it('retains a path when the renderer snapshots the same document', () => {
+    reg.claimPath(1, '/a.md');
+
+    reg.syncSnapshotPath(1, { path: '/a.md' });
+
+    expect(reg.ownerOfPath('/a.md')?.windowId).toBe(1);
+  });
 
   it('ownerOfPath returns null for an unowned path', () => {
     expect(reg.ownerOfPath('/nobody.md')).toBeNull();

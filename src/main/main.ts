@@ -812,7 +812,7 @@ handleTrusted('auth:login', async (event) => {
   const sender = event.sender;
   return new Promise<void>((resolve) => {
     void startLogin((update: LoginUpdate) => {
-      sender.send('auth:login-update', update);
+      if (!sender.isDestroyed()) sender.send('auth:login-update', update);
       if (update.kind === 'success' || update.kind === 'error') resolve();
     });
   });
@@ -1016,6 +1016,7 @@ handleTrusted('session:write', async (event, snap: unknown) => {
   if (!rec) return;
   const win = toWindowSnapshot(rec.windowKey, snap);
   rec.lastSnapshot = win; // track content/dirty so a blank launch window is reused safely
+  registry.syncSnapshotPath(rec.windowId, win);
   const next = await mutateSessionAggregate((cur) => ({
     ...upsertWindowSnapshot(cur, win),
     cleanExit: false,
