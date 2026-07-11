@@ -1,0 +1,144 @@
+/* =============================================================
+ * LOGIN MODAL
+ * ============================================================= */
+.login-modal-root {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: color-mix(in srgb, var(--color-surface-deep) 55%, transparent);
+  -webkit-app-region: no-drag;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(6px);
+  animation: lm-fade 0.18s ease-out;
+}
+@keyframes lm-fade { from { opacity: 0 } to { opacity: 1 } }
+.login-modal {
+  width: min(440px, calc(100% - 32px));
+  background: var(--color-surface-card);
+  color: var(--color-ink);
+  border: 1px solid var(--color-hairline-strong);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+}
+.login-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--color-hairline);
+  background: var(--color-canvas);
+}
+.brand { display: flex; align-items: center; gap: 14px; }
+.brand-mark {
+  width: 40px; height: 40px;
+  border-radius: var(--r-md);
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  display: flex; align-items: center; justify-content: center;
+  font: var(--type-button-md);
+  font-weight: 700;
+}
+.brand-title { font: var(--type-heading-sm); font-size: 16px; }
+.brand-sub { font: var(--type-caption); color: var(--color-mute); }
+.login-modal-close {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--color-mute);
+  cursor: pointer;
+  padding: 6px;
+  border-radius: var(--r-full);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.login-modal-close:hover { color: var(--color-ink); background: var(--color-surface-bone); }
+
+.login-modal-body {
+  padding: 28px 28px 24px;
+  text-align: center;
+}
+.login-modal-body .lead {
+  font: var(--type-body-md);
+  font-size: 15px;
+  margin: 4px 0 20px;
+}
+.login-modal-body .login-sub {
+  font: var(--type-body-sm);
+  color: var(--color-mute);
+  margin: 10px 0 18px;
+}
+.login-modal-body .login-hint {
+  font: var(--type-caption);
+  color: var(--color-mute);
+  margin-top: 12px;
+}
+
+/* Primary CTA — DESIGN.md `button-primary` 44px pill */
+.login-cta {
+  width: 100%;
+  height: 44px;
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  border: none;
+  border-radius: var(--r-full);
+  font: var(--type-button-md);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.login-cta:hover { background: var(--color-primary-deep); }
+.login-cta[disabled] { opacity: 0.6; cursor: progress; }
+
+.login-cancel {
+  background: transparent;
+  color: var(--color-mute);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--r-full);
+  padding: 6px 16px;
+  font: var(--type-button-sm);
+  font-size: 12.5px;
+  cursor: pointer;
+  margin-top: 16px;
+}
+.login-cancel:hover { color: var(--color-ink); border-color: var(--color-hairline-strong); }
+
+.login-code {
+  font: var(--type-code-md);
+  font-size: 30px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  padding: 16px 18px;
+  background: var(--color-canvas);
+  border: 1px solid var(--color-hairline-strong);
+  border-radius: var(--r-md);
+  margin: 12px 0 12px;
+}
+
+.login-spinner { display: flex; gap: 6px; justify-content: center; margin: 12px 0; }
+.login-spinner .dot {
+  width: 7px; height: 7px;
+  background: var(--color-primary);
+  border-radius: 50%;
+  animation: lm-bob 1.2s infinite ease-in-out;
+}
+.login-spinner .dot:nth-child(2) { animation-delay: 0.15s; }
+.login-spinner .dot:nth-child(3) { animation-delay: 0.3s; }
+@keyframes lm-bob {
+  0%, 80%, 100% { transform: scale(0.6); opacity: 0.4 }
+  40% { transform: scale(1); opacity: 1 }
+}
+
+.login-ok, .login-err {
+  width: 56px; height: 56px;
+  border-radius: var(--r-full);
+  margin: 4px auto 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  font-weight: 700;
+}
+.login-ok { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+.login-err { background: color-mix(in srgb, var(--color-primary) 14%, transparent); color: var(--color-primary); }
+

@@ -1,0 +1,111 @@
+/* =============================================================
+ * TOOLBAR (44px) — editing actions only, single row, no wrap
+ * ============================================================= */
+.toolbar {
+  background: var(--color-canvas);
+  border-bottom: 1px solid var(--color-hairline);
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+.tb-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 0 16px;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+.tb-lead {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.tb-format {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+.tb-trail {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.tb-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--color-hairline);
+  margin: 0 6px;
+  flex-shrink: 0;
+}
+
+/* Icon button — `button-icon` token: 36×36, hairline border, surface-card hover */
+.tb-icbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: transparent;
+  color: var(--color-ink);
+  border: 1px solid transparent;
+  border-radius: var(--r-full);
+  cursor: pointer;
+  font: var(--type-button-sm);
+  font-size: 13px;
+  font-weight: 600;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.tb-icbtn:hover {
+  background: var(--color-surface-card);
+  border-color: var(--color-hairline);
+}
+.tb-icbtn:active {
+  background: var(--color-surface-bone);
+}
+.tb-icbtn-text { font-family: var(--font-display); }
+.tb-icbtn-text em { font-style: italic; }
+.tb-icbtn-text s { text-decoration: line-through; }
+.tb-icbtn svg { display: block; }
+
+/* Table picker popover — content card (rounded.md) */
+.tb-picker {
+  position: fixed;
+  z-index: 100;
+  -webkit-app-region: no-drag;
+  background: var(--color-surface-card);
+  border: 1px solid var(--color-hairline-strong);
+  border-radius: var(--r-md);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.tb-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(10, 18px);
+  grid-auto-rows: 18px;
+  gap: 2px;
+}
+.tb-cell {
+  border: 1px solid var(--color-hairline);
+  border-radius: 2px;
+  background: transparent;
+  cursor: pointer;
+}
+.tb-cell.active {
+  background: var(--color-ink);
+  border-color: var(--color-ink);
+}
+.tb-picker-label {
+  font: var(--type-code-sm);
+  color: var(--color-mute);
+  text-align: center;
+}
+

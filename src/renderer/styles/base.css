@@ -1,0 +1,39 @@
+/* Font-size scale per pref */
+html[data-font-size='sm'] { --fs-editor: 13.5px; --fs-preview: 14px; }
+html[data-font-size='md'] { --fs-editor: 15px;   --fs-preview: 15.5px; }
+html[data-font-size='lg'] { --fs-editor: 17px;   --fs-preview: 17px; }
+html:not([data-font-size]) { --fs-editor: 15px;  --fs-preview: 15.5px; }
+
+/* =============================================================
+ * Reset & base
+ * ============================================================= */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body, .app { height: 100%; width: 100%; }
+html { --ok: var(--color-badge-success); }
+body {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font: var(--type-body-md);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  min-width: 880px;   /* matches Electron BrowserWindow.minWidth */
+}
+
+/* =============================================================
+ * Global focus ring (a11y — WCAG 2.4.7): keyboard focus shows the
+ * brand ring. Mouse focus on controls keeps the subtle border-color
+ * affordance via the :focus:not(:focus-visible) rules below.
+ * ============================================================= */
+*:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  border-radius: inherit;
+}
+
+/* App grid — header / toolbar / workspace / status */
+.app {
+  display: grid;
+  grid-template-rows: 60px 44px 1fr 28px;
+  min-height: 0;
+}
+

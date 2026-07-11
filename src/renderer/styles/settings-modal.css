@@ -1,0 +1,122 @@
+/* =============================================================
+ * SETTINGS MODAL — AI providers + Style (G001 / G004)
+ * ============================================================= */
+.settings-modal-root {
+  position: fixed;
+  inset: 0;
+  z-index: 210;
+  background: color-mix(in srgb, var(--color-surface-deep) 55%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(6px);
+  animation: lm-fade 0.18s ease-out;
+}
+.settings-modal {
+  width: min(520px, calc(100% - 32px));
+  max-height: calc(100% - 64px);
+  display: flex;
+  flex-direction: column;
+  background: var(--color-surface-card);
+  color: var(--color-ink);
+  border: 1px solid var(--color-hairline-strong);
+  border-radius: var(--r-lg, 12px);
+  overflow: hidden;
+}
+.settings-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--color-hairline);
+}
+.settings-modal-title { font-weight: 600; font-size: 15px; }
+.settings-modal-close {
+  background: transparent;
+  border: none;
+  color: var(--color-mute);
+  cursor: pointer;
+  padding: 0;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-full);
+  flex: none;
+}
+.settings-modal-close:hover { background: var(--color-surface-bone); color: var(--color-ink); }
+.settings-modal-body { padding: 16px 18px; overflow-y: auto; display: flex; flex-direction: column; gap: 22px; }
+
+/* ---- Provider settings panel ---- */
+.prov-title, .style-title { font-size: 13px; font-weight: 600; margin-bottom: 10px; color: var(--color-charcoal); text-transform: uppercase; letter-spacing: 0.05em; }
+.prov-zero-auth {
+  background: var(--color-surface-bone);
+  border: 1px solid var(--color-hairline);
+  color: var(--color-body);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+.prov-row {
+  padding: 12px 0;
+  border-top: 1px solid var(--color-hairline);
+}
+.prov-row:first-of-type { border-top: none; }
+.prov-row-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.prov-label { font-weight: 600; font-size: 14px; }
+.prov-status { font-size: 12px; }
+.prov-status-on { color: var(--color-badge-success); }
+.prov-status-off { color: var(--color-ash); }
+.prov-status-unknown { color: var(--color-mute); }
+.prov-error { color: var(--color-primary); font-size: 12px; margin-top: 6px; }
+.prov-local-note { color: var(--color-mute); font-size: 12px; margin-top: 8px; line-height: 1.4; }
+.prov-controls, .prov-custom { display: flex; gap: 8px; margin-top: 8px; align-items: center; flex-wrap: wrap; }
+.prov-key-input, .prov-custom-input, .prov-url-input {
+  flex: 1;
+  min-width: 160px;
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 9px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 7px;
+  background: var(--color-surface-bone);
+  color: var(--color-ink);
+}
+.prov-key-input:focus:not(:focus-visible), .prov-custom-input:focus:not(:focus-visible), .prov-url-input:focus:not(:focus-visible) { outline: none; border-color: var(--color-primary); }
+.prov-btn {
+  font: inherit;
+  font-size: 12.5px;
+  padding: 6px 12px;
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--r-full);
+  background: var(--color-surface-bone);
+  color: var(--color-body);
+  cursor: pointer;
+}
+.prov-btn:hover { border-color: var(--color-primary); }
+.prov-btn-primary { background: var(--color-primary); color: var(--color-on-primary); border-color: var(--color-primary); }
+.prov-btn-primary:hover { background: var(--color-primary-deep); }
+.prov-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ---- Style panel ---- */
+.style-field { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 10px; }
+.style-label { font-size: 13.5px; color: var(--color-body); }
+.style-select {
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 10px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 7px;
+  background: var(--color-surface-bone);
+  color: var(--color-ink);
+  min-width: 180px;
+}
+.style-select:focus:not(:focus-visible) { outline: none; border-color: var(--color-primary); }
+
+/* ---- Default .md editor (⑥ os-integration) ---- */
+.md-handler-desc { font-size: 13px; color: var(--color-mute); margin: 0 0 10px; line-height: 1.4; }
+.md-handler-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.md-handler-controls .prov-status { font-size: 12px; }
+

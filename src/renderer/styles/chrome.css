@@ -1,0 +1,280 @@
+/* =============================================================
+ * NAV-BAR (60px) — DESIGN.md component
+ * Brand · filename | model · font · theme · auth
+ * ============================================================= */
+.navbar {
+  -webkit-app-region: drag;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px 0 84px; /* room for macOS traffic lights on left */
+  background: var(--color-canvas);
+  border-bottom: 1px solid var(--color-hairline);
+  user-select: none;
+  min-width: 0;
+}
+.navbar-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.navbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.wordmark {
+  -webkit-app-region: no-drag;
+  font: var(--type-code-sm);
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: lowercase;
+  color: var(--color-ink);
+  text-decoration: none;
+  cursor: pointer;
+}
+.wordmark-dot { color: var(--color-primary); margin: 0 2px; }
+.navbar-divider {
+  width: 1px;
+  height: 16px;
+  background: var(--color-hairline);
+}
+
+/* Filename input — wrapped with dirty dot pinned inside right edge */
+.filename-wrap {
+  position: relative;
+  flex: 0 1 320px;
+  min-width: 140px;
+  display: flex;
+  align-items: center;
+}
+.filename {
+  -webkit-app-region: no-drag;
+  width: 100%;
+  height: 32px;
+  padding: 0 24px 0 14px;   /* right pad reserved for dirty dot */
+  background: var(--color-surface-bone);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--r-full);
+  color: var(--color-ink);
+  font: var(--type-body-sm);
+  font-weight: 500;
+  transition: background 0.15s, border-color 0.15s;
+  text-overflow: ellipsis;
+}
+.filename:hover {
+  background: var(--color-surface-card);
+}
+.filename:focus {
+  background: var(--color-surface-card);
+  border-color: var(--color-hairline-strong);
+}
+.filename:focus:not(:focus-visible) { outline: none; }
+.dirty-indicator {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: transparent;
+  transition: background 0.15s;
+  pointer-events: none;
+}
+.dirty-indicator.dirty { background: var(--color-primary); }
+
+/* Header icon button — DESIGN.md button-icon */
+.hdr-icbtn {
+  -webkit-app-region: no-drag;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  background: transparent;
+  color: var(--color-ink);
+  border: 1px solid transparent;
+  border-radius: var(--r-full);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  position: relative;
+}
+.hdr-icbtn:hover {
+  background: var(--color-surface-card);
+  border-color: var(--color-hairline);
+}
+.hdr-icbtn:active { background: var(--color-surface-bone); }
+.hdr-icbtn svg { display: block; }
+
+/* =============================================================
+ * Tooltip (data-tooltip) — works on toolbar and header icon buttons
+ * ============================================================= */
+[data-tooltip] { position: relative; }
+[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%) translateY(-2px);
+  background: var(--color-ink);
+  color: var(--color-on-dark);
+  padding: 4px 10px;
+  border-radius: var(--r-xs);
+  white-space: nowrap;
+  font: var(--type-code-sm);
+  font-size: 11px;
+  letter-spacing: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s ease-out 0.4s, transform 0.12s ease-out 0.4s;
+  z-index: 300;
+}
+[data-tooltip]:hover::after,
+[data-tooltip]:focus-visible::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+/* Suppress tooltips whenever a dropdown menu is open — otherwise the
+ * pointer's hover state lingers on the anchor and the ink-coloured
+ * tooltip pseudo gets clipped by parent `overflow: hidden` (side panel),
+ * producing a "cut-off black button" artifact. */
+body:has(.pm-menu) [data-tooltip]::after,
+body.menu-open [data-tooltip]::after {
+  display: none !important;
+}
+
+/* When the JS tooltip overlay (tooltips.ts) is installed it owns rendering;
+ * suppress the CSS pseudo so tooltips never double-render (AC7). */
+body.app-tooltips-on [data-tooltip]::after {
+  display: none !important;
+}
+
+/* JS tooltip overlay node (tooltips.ts) — fixed to <body> so it escapes the
+ * toolbar / side-panel `overflow:hidden` that clipped the pseudo (AC7).
+ * Mirrors the pseudo's ink chip + delayed reveal. */
+.app-tooltip {
+  position: fixed;
+  z-index: 400;
+  background: var(--color-ink);
+  color: var(--color-canvas);
+  padding: 4px 10px;
+  border-radius: var(--r-xs);
+  white-space: nowrap;
+  font: var(--type-code-sm);
+  font-size: 11px;
+  letter-spacing: 0;
+  pointer-events: none;
+  opacity: 0;
+  animation: app-tooltip-in 0.12s ease-out 0.4s forwards;
+}
+@keyframes app-tooltip-in { to { opacity: 1; } }
+
+/* =============================================================
+ * Cmd-hold keyboard nav mode
+ * ============================================================= */
+body.cmd-nav-active .tb-icbtn:focus,
+body.cmd-nav-active .hdr-icbtn:focus {
+  background: var(--color-surface-card);
+  border-color: var(--color-primary);
+  outline: 2px solid color-mix(in srgb, var(--color-primary) 50%, transparent);
+  outline-offset: 2px;
+}
+.cmd-nav-hint {
+  position: fixed;
+  left: 50%;
+  bottom: 48px;
+  transform: translateX(-50%) translateY(8px);
+  background: var(--color-ink);
+  color: var(--color-on-dark);
+  padding: 6px 14px;
+  border-radius: var(--r-full);
+  font: var(--type-code-sm);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.16s, transform 0.16s;
+  z-index: 250;
+}
+.cmd-nav-hint.visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* Signed-in account: small green status dot in the corner */
+.hdr-account.hdr-account-signed-in::after {
+  content: '';
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--ok);
+  border: 1.5px solid var(--color-canvas);
+}
+
+/* =============================================================
+ * Popover menu (dropdown.ts)
+ * ============================================================= */
+.pm-menu {
+  position: fixed;
+  z-index: 350;
+  background: var(--color-surface-card);
+  border: 1px solid var(--color-hairline-strong);
+  border-radius: var(--r-md);
+  padding: 4px;
+  min-width: 160px;
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--color-surface-deep) 10%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  -webkit-app-region: no-drag;
+}
+.pm-item {
+  display: grid;
+  grid-template-columns: 16px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: transparent;
+  border: none;
+  border-radius: var(--r-sm);
+  font: var(--type-body-sm);
+  color: var(--color-ink);
+  cursor: pointer;
+  text-align: left;
+}
+.pm-item:hover {
+  background: var(--color-menu-hover);
+}
+.pm-item-selected {
+  color: var(--color-ink);
+}
+/* Dark menus: give the selected row a primary-tinted fill so it reads on the
+ * low-contrast card; light stays flat (AC4). */
+html[data-theme='dark'] .pm-item-selected {
+  background: var(--color-menu-hover);
+}
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme='light']) .pm-item-selected {
+    background: var(--color-menu-hover);
+  }
+}
+.pm-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px; height: 16px;
+  color: var(--color-primary);
+}
+.pm-label { white-space: nowrap; }
+.pm-hint {
+  font: var(--type-code-sm);
+  color: var(--color-mute);
+}
+

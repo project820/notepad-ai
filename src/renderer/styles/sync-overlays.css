@@ -1,0 +1,185 @@
+/* =============================================================
+ * Selection sync (G004) — cross-pane highlight, display-only.
+ * A subtle brand-orange wash links the editor selection to the
+ * matching preview blocks and back. These are CSS classes only:
+ * Turndown ignores element classes, so the highlight never enters
+ * the saved markdown. Kept low-contrast per DESIGN.md (the orange
+ * is a "stamp", not a notification).
+ * ============================================================= */
+.cm-sync-highlight {
+  background: color-mix(in srgb, var(--color-primary) 8%, transparent);
+}
+.preview-sync-highlight {
+  background: color-mix(in srgb, var(--color-primary) 8%, transparent);
+  border-radius: var(--r-xs);
+}
+
+/* Dark surfaces need a touch more opacity to read as the same gentle wash. */
+html[data-theme='dark'] .cm-sync-highlight,
+html[data-theme='dark'] .preview-sync-highlight {
+  background: color-mix(in srgb, var(--color-primary) 15%, transparent);
+}
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme='light']) .cm-sync-highlight,
+  html:not([data-theme='light']) .preview-sync-highlight {
+    background: color-mix(in srgb, var(--color-primary) 15%, transparent);
+  }
+}
+
+/* Finer selection sync also lights nested blocks (li, paragraphs, table rows).
+ * The base wash above covers li / p directly; table rows need a cell-level wash
+ * so it shows through border-collapse regardless of any cell background. */
+.preview tr.preview-sync-highlight > th,
+.preview tr.preview-sync-highlight > td {
+  background: color-mix(in srgb, var(--color-primary) 8%, transparent);
+}
+html[data-theme='dark'] .preview tr.preview-sync-highlight > th,
+html[data-theme='dark'] .preview tr.preview-sync-highlight > td {
+  background: color-mix(in srgb, var(--color-primary) 15%, transparent);
+}
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme='light']) .preview tr.preview-sync-highlight > th,
+  html:not([data-theme='light']) .preview tr.preview-sync-highlight > td {
+    background: color-mix(in srgb, var(--color-primary) 15%, transparent);
+  }
+}
+/* =============================================================
+ * Raw line alignment (G005) — split-view spacers, display-only.
+ * Block widgets injected into the raw editor to push source lines
+ * down so they sit level with the matching rendered preview blocks.
+ * Pure vertical filler: no text, no border, never selectable, and
+ * never part of the document (so it can't leak into the saved MD).
+ * ============================================================= */
+.cm-line-align-spacer {
+  display: block;
+  width: 100%;
+  pointer-events: none;
+  user-select: none;
+}
+/* =============================================================
+ * Text-settings popover (font size + typography) — anchored to the Aa button.
+ * Hosts custom content inside the shared .pm-menu popover chrome.
+ * ============================================================= */
+.pm-panel {
+  padding: 12px;
+  gap: 0;
+}
+.text-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 220px;
+}
+.ts-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ts-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-mute);
+}
+.ts-seg {
+  display: flex;
+  gap: 4px;
+}
+.ts-seg-btn {
+  flex: 1;
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 8px;
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--r-sm);
+  background: var(--color-surface-bone);
+  color: var(--color-body);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.ts-seg-btn:hover {
+  border-color: var(--color-primary);
+}
+.ts-seg-btn.ts-seg-on {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: var(--color-on-primary);
+}
+.ts-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.ts-row-label {
+  font-size: 13.5px;
+  color: var(--color-body);
+}
+.ts-stepper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ts-step-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-full);
+  border: 1px solid var(--color-hairline);
+  background: var(--color-surface-card);
+  color: var(--color-ink);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s;
+}
+.ts-step-btn:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+.ts-step-val {
+  min-width: 52px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--color-ink);
+}
+
+/* =============================================================
+ * Inline Style settings in the AI chat (difficulty + naturalness).
+ * ============================================================= */
+.uc-style-toggle {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--r-full);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--color-mute);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.uc-style-toggle:hover,
+.uc-style-toggle[aria-expanded='true'] {
+  background: var(--color-surface-bone);
+  color: var(--color-ink);
+  border-color: var(--color-hairline);
+}
+.uc-style-panel {
+  padding: 4px 12px 12px;
+  border-bottom: 1px solid var(--color-hairline);
+}
+.uc-style-panel .style-title {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--color-ink);
+  margin: 10px 0 8px;
+}
+.uc-style-panel .style-select {
+  min-width: 150px;
+}
+

@@ -1,0 +1,62 @@
+/* =============================================================
+ * UPDATE BANNER — new-version notice (unsigned → manual download)
+ * ============================================================= */
+.update-banner {
+  position: fixed;
+  right: 20px;
+  bottom: 56px;
+  z-index: 220;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px;
+  background: var(--color-surface-card);
+  color: var(--color-ink);
+  border: 1px solid var(--color-hairline-strong);
+  border-radius: var(--r-lg, 12px);
+  box-shadow: 0 8px 28px color-mix(in srgb, var(--color-surface-deep) 18%, transparent);
+  animation: lm-fade 0.18s ease-out;
+}
+.update-banner-text { display: flex; flex-direction: column; line-height: 1.3; }
+.update-banner-text strong { font-size: 13.5px; }
+.update-banner-text span { font-size: 12px; color: var(--color-mute); }
+.update-banner-actions { display: flex; gap: 8px; }
+.update-download,
+.update-dismiss {
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  border: 1px solid var(--color-hairline);
+}
+.update-download {
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  border-color: var(--color-primary);
+}
+.update-download:hover { background: var(--color-primary-deep); }
+.update-dismiss { background: var(--color-surface-bone); color: var(--color-body); }
+.update-dismiss:hover { border-color: var(--color-primary); }
+/* =============================================================
+ * AI CONSULTANT HEADER BUTTON — red "Ai" pill (distinct entry to unified chat)
+ * ============================================================= */
+.hdr-ai-consultant {
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  border-color: var(--color-primary);
+  border-radius: 999px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.hdr-ai-consultant .hdr-ai-label {
+  font-size: 11px;
+  line-height: 1;
+}
+.hdr-ai-consultant:hover,
+.hdr-ai-consultant:active {
+  background: var(--color-primary-deep);
+  border-color: var(--color-primary-deep);
+  color: var(--color-on-primary);
+}
+
