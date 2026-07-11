@@ -68,30 +68,47 @@ export async function atomicWrite(
     throw err;
   }
 
-  // The data is committed. Flushing the directory is a durability nicety only,
-  // so swallow any error rather than failing an already-successful write.
+  // The data is committed. Directory sync failures cannot undo the rename, but
+  // unsupported filesystems are expected while other failures remain observable.
   if (backend.fsyncDir) {
-    await backend.fsyncDir(dir).catch(() => {});
+    await backend.fsyncDir(dir).catch((err: unknown) => {
+      if (!isUnsupportedFsyncError(err)) console.warn('[atomic-write] directory fsync failed', err);
+    });
   }
 }
 
-/** fsync `p` (opened with `flags`) best-effort; swallow unsupported/IO errors. */
-async function bestEffortFsync(p: string, flags: string): Promise<void> {
+/** Flush a file to stable storage. */
+async function strictFsync(p: string, flags: string): Promise<void> {
   let handle: FileHandle | undefined;
   try {
     handle = await fs.open(p, flags);
     await handle.sync();
-  } catch {
-    // Best-effort durability — e.g. directory fsync is unsupported on Windows.
   } finally {
-    if (handle) await handle.close().catch(() => {});
+    if (handle) await handle.close();
+  }
+}
+
+function isUnsupportedFsyncError(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'code' in err &&
+    ['EINVAL', 'ENOTSUP', 'EOPNOTSUPP'].includes(String(err.code))
+  );
+}
+
+/** Directory fsync is optional on some platforms; report real I/O failures. */
+async function bestEffortDirectoryFsync(p: string): Promise<void> {
+  try {
+    await strictFsync(p, 'r');
+  } catch (err) {
+    if (!isUnsupportedFsyncError(err)) console.warn('[atomic-write] directory fsync failed', err);
   }
 }
 
 /**
- * Real `node:fs/promises`-backed implementation. fsync uses `fs.open` +
- * `handle.sync()` and tolerates failures. Not exercised by the unit tests,
- * which inject a fake backend instead.
+ * Real `node:fs/promises`-backed implementation. File fsync is strict so a
+ * failed flush cannot be followed by a rename; directory fsync is best-effort.
  */
 export function nodeAtomicBackend(): AtomicWriteBackend {
   return {
@@ -108,10 +125,10 @@ export function nodeAtomicBackend(): AtomicWriteBackend {
       await fs.unlink(p);
     },
     async fsyncFile(p: string): Promise<void> {
-      await bestEffortFsync(p, 'r+');
+      await strictFsync(p, 'r+');
     },
     async fsyncDir(dir: string): Promise<void> {
-      await bestEffortFsync(dir, 'r');
+      await bestEffortDirectoryFsync(dir);
     },
     randomId(): string {
       return randomUUID();

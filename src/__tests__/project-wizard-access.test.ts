@@ -25,6 +25,19 @@ describe('project wizard grant access', () => {
     ).resolves.toBeNull();
   });
 
+  it('rejects a folder beside a directly granted file until the user grants a workspace', async () => {
+    const grants = new FileGrants();
+    grants.grantFile(WC, '/workspace/project/note.md');
+
+    await expect(
+      resolveGrantedProjectFolder(
+        grants,
+        WC,
+        '/workspace/project',
+        identityFs({ '/workspace/project': '/workspace/project' }),
+      ),
+    ).resolves.toBeNull();
+  });
   it('allows a project folder inside a granted workspace and returns its canonical root', async () => {
     const grants = new FileGrants();
     grants.grantWorkspace(WC, '/workspace');

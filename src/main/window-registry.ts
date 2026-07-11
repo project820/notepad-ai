@@ -124,6 +124,11 @@ export class WindowRegistry {
     const rec = this.byWindowId.get(windowId);
     if (rec) rec.currentPath = null;
   }
+  /** Restore the previous path claim after a failed Save As write. */
+  restorePathClaim(windowId: number, previousPath: string | null): void {
+    if (previousPath) this.claimPath(windowId, previousPath);
+    else this.releasePath(windowId);
+  }
   /** Release a path once the owning renderer snapshots a new unsaved document. */
   syncSnapshotPath(windowId: number, snapshot: Pick<SessionWindowSnapshot, 'path'>): void {
     if (snapshot.path === null) this.releasePath(windowId);

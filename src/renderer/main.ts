@@ -11,6 +11,7 @@ import { loadPrefs, savePrefs, applyTheme, applyFontSize, resolvedDark } from '.
 import { wirePreviewTables } from './preview-table-edit';
 import { applyToEditor, applyToPreview, type FormatAction } from './formatting';
 import { htmlToMarkdown } from './html-to-md';
+import { handleSuppressedDocumentChange } from './suppressed-document-change';
 import { buildConvertedHtmlFrame } from './sanitize-html';
 import { buildRestoreBanner } from './restore-banner';
 import { classifyLinkHref } from './link-policy';
@@ -242,6 +243,20 @@ function onDocChange(doc: string) {
   scheduleAutosave();
   scheduleSessionSnapshot();
 }
+function onSuppressedEditorChange(doc: string, syncPreview = false): void {
+  handleSuppressedDocumentChange(doc, {
+    isDirty: () => dirty,
+    markDirty: () => {
+      dirty = true;
+      setTitle();
+    },
+    syncPreview: syncPreview ? (updatedDoc) => preview.setDoc(updatedDoc) : undefined,
+    updateWordCount,
+    scheduleAutosave,
+    scheduleSessionSnapshot,
+  });
+}
+
 
 async function save() {
   const result = await window.api.saveFile(currentPath, editor.getDoc());
@@ -320,14 +335,7 @@ preview.onAfterRender(() => {
     suppressEditorChange = true;
     editor.setDoc(newDoc);
     suppressEditorChange = false;
-    if (!dirty) {
-      dirty = true;
-      setTitle();
-    }
-    preview.setDoc(newDoc);
-    updateWordCount(newDoc);
-    scheduleAutosave();
-    scheduleSessionSnapshot();
+    onSuppressedEditorChange(newDoc, true);
   });
 });
 wirePreviewLinks(preview.el, {
@@ -703,12 +711,7 @@ function flushPreviewToSource(): boolean {
   suppressEditorChange = true;
   editor.setDoc(md);
   suppressEditorChange = false;
-  if (!dirty) {
-    dirty = true;
-    setTitle();
-  }
-  updateWordCount(md);
-  scheduleAutosave();
+  onSuppressedEditorChange(md);
   return true;
 }
 
@@ -752,8 +755,7 @@ preview.el.addEventListener('focusout', () => {
         suppressEditorChange = true;
         editor.setDoc(md);
         suppressEditorChange = false;
-        updateWordCount(md);
-        scheduleAutosave();
+        onSuppressedEditorChange(md);
       }
       preview.setDoc(editor.getDoc());
     }
@@ -1099,7 +1101,7 @@ themeMql.addEventListener('change', (e) => {
 });
 
 window.addEventListener('beforeunload', () => {
-  // Best-effort flush on quit. We must NOT call preventDefault()/returnValue here:
+  // Best-effort flush before a window unload. We must NOT call preventDefault()/returnValue here:
   // in Electron that silently cancels the quit (no dialog), so the app would only
   // close via force-quit. Autosave + the session snapshot already preserve work.
   if (dirty) void save();
@@ -1192,10 +1194,7 @@ function applyAiOutput(action: 'replace' | 'insert', md: string) {
     suppressEditorChange = true;
     editor.setDoc(md);
     suppressEditorChange = false;
-    preview.setDoc(md);
-    if (!dirty) { dirty = true; setTitle(); }
-    updateWordCount(md);
-    scheduleAutosave();
+    onSuppressedEditorChange(md, true);
   } else {
     const { state } = editor.view;
     const pos = state.selection.main.from;
@@ -1560,6 +1559,23 @@ async function startProjectWizard() {
     showProjectWizardConsent(folder);
     statusEl.textContent = t('pw.status.started');
   } catch (error) {
+    if (error instanceof Error && error.message === 'Project folder is not authorized') {
+      const grantedFolder = await window.api.openFolder();
+      if (!grantedFolder) return;
+      prefs.workspaceRoot = grantedFolder;
+      savePrefs(prefs);
+      leftPanel.setWorkspaceRoot(grantedFolder);
+      try {
+        await window.api.projectWizardStart(grantedFolder);
+        setUnifiedChatOpen(true);
+        showProjectWizardConsent(grantedFolder);
+        statusEl.textContent = t('pw.status.started');
+      } catch (retryError) {
+        console.error('Project Wizard failed', retryError);
+        statusEl.textContent = t('pw.status.failed');
+      }
+      return;
+    }
     console.error('Project Wizard failed', error);
     statusEl.textContent = t('pw.status.failed');
   }
@@ -1746,6 +1762,7 @@ function showRestoreBanner(snap: any) {
     }
     setTitle();
     updateWordCount(snap.doc ?? '');
+    scheduleSessionSnapshot();
     statusEl.textContent = '복구됨 — 이전 세션이 로드되었습니다.';
     root.remove();
   });

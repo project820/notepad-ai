@@ -137,6 +137,7 @@ export function savePrefs(prefs: Prefs) {
     const base = lastPersistedPrefs ?? stored;
     const merged = migratePrefs({ ...stored, ...changedPrefs(base, prefs) });
     localStorage.setItem(KEY, JSON.stringify(merged));
+    Object.assign(prefs, clonePrefs(merged));
     lastPersistedPrefs = clonePrefs(merged);
   } catch {
     /* ignore */

@@ -9,6 +9,8 @@ type ServiceFs = {
   readFile(filePath: string, encoding: 'utf8'): Promise<string>;
   readdir(dir: string, options: { withFileTypes: true }): Promise<unknown[]>;
   stat(filePath: string): Promise<{ size: number }>;
+  lstat(filePath: string): Promise<{ isSymbolicLink(): boolean }>;
+  realpath(filePath: string): Promise<string>;
 };
 
 export type ContextStackLoadResult = {
@@ -85,6 +87,7 @@ export function createWizardService(deps: WizardServiceDeps) {
       const markdown = renderOverviewMarkdown(draft);
 
       await deps.fs.mkdir(path.dirname(overviewPath), { recursive: true });
+      await ensureSafeOverviewTarget(input.projectFolder, overviewPath, deps.fs);
       await deps.fs.writeFile(overviewPath, markdown, 'utf8');
 
       const loaded = await deps.loadContextStack(input.projectFolder, overviewPath);
@@ -149,6 +152,39 @@ async function canReadNonEmptyFile(filePath: string, fs: Pick<ServiceFs, 'readFi
   } catch {
     return false;
   }
+}
+async function ensureSafeOverviewTarget(
+  projectFolder: string,
+  overviewPath: string,
+  fs: Pick<ServiceFs, 'lstat' | 'realpath'>,
+): Promise<void> {
+  const projectRoot = await fs.realpath(projectFolder);
+  let existingTarget = false;
+  try {
+    const targetStat = await fs.lstat(overviewPath);
+    if (targetStat.isSymbolicLink()) {
+      throw new Error('Refusing to write Overview.md through a symbolic link');
+    }
+    existingTarget = true;
+  } catch (err) {
+    if (!isNotFoundError(err)) throw err;
+  }
+
+  const targetRealpath = existingTarget
+    ? await fs.realpath(overviewPath)
+    : path.join(await fs.realpath(path.dirname(overviewPath)), path.basename(overviewPath));
+  if (!isPathWithinRoot(projectRoot, targetRealpath)) {
+    throw new Error('Overview.md target is outside the project folder');
+  }
+}
+
+function isNotFoundError(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && 'code' in err && err.code === 'ENOENT';
+}
+
+function isPathWithinRoot(root: string, target: string): boolean {
+  const relative = path.relative(root, target);
+  return relative.length > 0 && !relative.startsWith('..') && !path.isAbsolute(relative);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

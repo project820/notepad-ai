@@ -70,15 +70,8 @@ export class FileGrants {
     }
     return false;
   }
-  /**
-   * Roots a project wizard may use for this window: granted workspaces and the
-   * parent directories of individually granted files.
-   */
+  /** Roots a project wizard may use for this window: explicit workspace grants only. */
   projectWizardRoots(wcId: number): string[] {
-    const roots = new Set<string>(this.workspaces.get(wcId));
-    for (const filePath of this.files.get(wcId) ?? []) {
-      roots.add(path.dirname(filePath));
-    }
-    return [...roots];
+    return [...(this.workspaces.get(wcId) ?? [])];
   }
 }

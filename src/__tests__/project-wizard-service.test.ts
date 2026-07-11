@@ -5,6 +5,53 @@ import {
   isProjectWizardSaveApprovedDraftInput,
 } from '../main/project-wizard/service';
 
+function wizardServiceForTarget(target: 'new' | 'existing' | 'symlink') {
+  const writes = new Map<string, string>();
+  const service = createWizardService({
+    userDataPath: '/app',
+    fs: {
+      async mkdir() {},
+      async writeFile(filePath: string, content: string) {
+        writes.set(filePath, content);
+      },
+      async readFile(filePath: string) {
+        const content = writes.get(filePath);
+        if (content === undefined) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+        return content;
+      },
+      async readdir() {
+        return [] as any;
+      },
+      async stat() {
+        return { size: 0 } as any;
+      },
+      async lstat(filePath: string) {
+        if (filePath !== '/project/Overview.md' || target === 'new') {
+          throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+        }
+        return { isSymbolicLink: () => target === 'symlink' };
+      },
+      async realpath(filePath: string) {
+        return filePath.replace('/project', '/real/project');
+      },
+    },
+    now: () => '2026-05-15T14:40:32+09:00',
+    loadContextStack: async () => ({ ownerLoaded: true, systemlawLoaded: true, overviewLoaded: true }),
+  });
+  return { service, writes };
+}
+
+async function saveOverview(service: ReturnType<typeof createWizardService>) {
+  await service.start('/project');
+  return service.saveApprovedDraft({
+    projectFolder: '/project',
+    body: '## Purpose\nDemo.',
+    frontmatter: {},
+    inherits: true,
+    lastScanned: null,
+  });
+}
+
 describe('project wizard service', () => {
   it('starts a project wizard in consent stage without writing Overview.md', async () => {
     const writes: string[] = [];
@@ -23,6 +70,12 @@ describe('project wizard service', () => {
         },
         async stat() {
           return { size: 0 } as any;
+        },
+        async lstat() {
+          return { isSymbolicLink: () => false };
+        },
+        async realpath(filePath: string) {
+          return filePath;
         },
       },
       now: () => '2026-05-15T14:40:32+09:00',
@@ -59,6 +112,12 @@ describe('project wizard service', () => {
         },
         async stat() {
           return { size: 0 } as any;
+        },
+        async lstat() {
+          return { isSymbolicLink: () => false };
+        },
+        async realpath(filePath: string) {
+          return filePath;
         },
       },
       now: () => '2026-05-15T14:40:32+09:00',
@@ -99,6 +158,12 @@ describe('project wizard service', () => {
         async stat() {
           return { size: 0 } as any;
         },
+        async lstat() {
+          return { isSymbolicLink: () => false };
+        },
+        async realpath(filePath: string) {
+          return filePath;
+        },
       },
       now: () => '2026-05-15T14:40:32+09:00',
       loadContextStack: async () => ({ ownerLoaded: true, systemlawLoaded: true, overviewLoaded: true }),
@@ -121,6 +186,29 @@ describe('project wizard service', () => {
     });
   });
 
+  it('saves a new Overview.md target after resolving its parent inside the project', async () => {
+    const { service, writes } = wizardServiceForTarget('new');
+
+    await saveOverview(service);
+
+    expect(writes.get('/project/Overview.md')).toContain('# Overview');
+  });
+
+  it('saves an existing non-symlink Overview.md target inside the project', async () => {
+    const { service, writes } = wizardServiceForTarget('existing');
+
+    await saveOverview(service);
+
+    expect(writes.get('/project/Overview.md')).toContain('# Overview');
+  });
+
+  it('rejects an Overview.md symlink before writing outside the project', async () => {
+    const { service, writes } = wizardServiceForTarget('symlink');
+
+    await expect(saveOverview(service)).rejects.toThrow('symbolic link');
+
+    expect(writes.has('/project/Overview.md')).toBe(false);
+  });
   it('rejects saving an approved draft before the wizard starts', async () => {
     const service = createWizardService({
       userDataPath: '/app',
@@ -135,6 +223,12 @@ describe('project wizard service', () => {
         },
         async stat() {
           return { size: 0 } as any;
+        },
+        async lstat() {
+          return { isSymbolicLink: () => false };
+        },
+        async realpath(filePath: string) {
+          return filePath;
         },
       },
       now: () => '2026-05-15T14:40:32+09:00',

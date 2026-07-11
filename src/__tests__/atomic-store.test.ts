@@ -10,6 +10,7 @@ function fakeBackend(
   opts: {
     failWriteFile?: boolean;
     failRename?: boolean;
+    failFsyncFile?: boolean;
     failFsyncDir?: boolean;
     omitFsyncDir?: boolean;
   } = {},
@@ -46,6 +47,7 @@ function fakeBackend(
     },
     async fsyncFile(_p: string): Promise<void> {
       calls.push('fsyncFile');
+      if (opts.failFsyncFile) throw new Error('fsync failed: I/O error');
     },
     randomId(): string {
       const id = `id${counter++}`;
@@ -114,6 +116,16 @@ describe('atomicWrite', () => {
     expect(calls).not.toContain('rename'); // never reached the commit
   });
 
+  it('preserves the previous target when file fsync fails before rename', async () => {
+    const { backend, files, calls, unlinked } = fakeBackend({ failFsyncFile: true });
+    files.set('/data/session.json', 'previous');
+
+    await expect(atomicWrite('/data/session.json', 'new', { backend })).rejects.toThrow('I/O error');
+
+    expect(files.get('/data/session.json')).toBe('previous');
+    expect(calls).not.toContain('rename');
+    expect(unlinked).toEqual(['/data/session.json.id0.tmp']);
+  });
   // (e) happy path: rename commits the final data to the target.
   it('commits the final data to the target after a successful rename', async () => {
     const { backend, files } = fakeBackend();

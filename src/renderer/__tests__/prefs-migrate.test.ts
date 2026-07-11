@@ -72,7 +72,7 @@ describe('migratePrefs', () => {
   });
 });
 describe('savePrefs', () => {
-  it('merges a local field change with a newer change from another window', () => {
+  it('keeps another window change after two local saves', () => {
     const local = loadPrefs();
     localStorage.setItem(
       'notepad-ai:prefs:v1',
@@ -81,8 +81,10 @@ describe('savePrefs', () => {
 
     local.theme = 'dark';
     savePrefs(local);
+    local.previewLineNumbers = true;
+    savePrefs(local);
 
-    expect(loadPrefs()).toMatchObject({ theme: 'dark', fontSize: 'lg' });
+    expect(loadPrefs()).toMatchObject({ theme: 'dark', fontSize: 'lg', previewLineNumbers: true });
   });
 });
 

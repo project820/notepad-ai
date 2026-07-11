@@ -698,6 +698,7 @@ handleTrusted('file:save', async (event, args: { filePath: string | null; conten
   return saveMutex.run(saveKey, async () => {
     // Duplicate-path guard: another live window owns this path → block + focus the
     // owner, never silently overwrite (the requesting window stays dirty).
+    const priorClaim = rec?.currentPath ?? null;
     if (rec) {
       const decision = registry.resolvePathClaim(rec.windowId, finalTarget);
       if (decision.kind === 'focus-owner') {
@@ -714,6 +715,9 @@ handleTrusted('file:save', async (event, args: { filePath: string | null; conten
     try {
       await saveDocumentAtomically(finalTarget, args.content, { fs, backend: documentAtomicBackend });
     } catch (e) {
+      if (rec && priorClaim !== finalTarget) {
+        registry.restorePathClaim(rec.windowId, priorClaim);
+      }
       return { saved: false as const, error: e instanceof Error ? e.message : 'write-failed' };
     }
     return { saved: true as const, filePath: finalTarget };

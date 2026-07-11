@@ -145,6 +145,16 @@ describe('path ownership', () => {
     expect(reg.ownerOfPath('/a.md')).toBeNull();
     expect(reg.claimPath(2, '/a.md')).toBe(true); // now claimable
   });
+  it('restores the prior Save As claim when writing the new target fails', () => {
+    reg.claimPath(1, '/original.md');
+    const previousPath = reg.get(1)?.currentPath ?? null;
+    reg.claimPath(1, '/save-as.md');
+
+    reg.restorePathClaim(1, previousPath);
+
+    expect(reg.ownerOfPath('/original.md')?.windowId).toBe(1);
+    expect(reg.ownerOfPath('/save-as.md')).toBeNull();
+  });
   it('releases a path when the renderer snapshots a new document', () => {
     reg.claimPath(1, '/a.md');
 
