@@ -17,11 +17,15 @@ function toWindowSnapshot(id: string, raw: unknown): SessionWindowSnapshot {
   if (typeof r.dirty === 'boolean') win.dirty = r.dirty;
   return win;
 }
-
-export function registerSessionIpc({ registry, sinkFor }: { registry: WindowRegistry; sinkFor: (win: BrowserWindow) => OutboundSink }): void {
+export function registerSessionIpc({ registry, sinkFor, isSessionWriteFenced = () => false }: {
+  registry: WindowRegistry;
+  sinkFor: (win: BrowserWindow) => OutboundSink;
+  isSessionWriteFenced?: (windowKey: string) => boolean;
+}): void {
   handleTrusted('session:get', async (event) => ({ snapshot: registry.getByWebContents(event.sender.id)?.restoreSnapshot ?? null }));
   handleTrusted('session:write', async (event, snap: unknown) => {
     const rec = registry.getByWebContents(event.sender.id); if (!rec) return;
+    if (isSessionWriteFenced(rec.windowKey)) return;
     const win = toWindowSnapshot(rec.windowKey, snap); rec.lastSnapshot = win; registry.syncSnapshotPath(rec.windowId, win);
     const next = await mutateSessionAggregate((cur) => ({ ...upsertWindowSnapshot(cur, win), cleanExit: false }));
     console.log(`[session] write key=${rec.windowKey} windows=${next.windows.length}`);

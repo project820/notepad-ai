@@ -8,6 +8,8 @@ export type AppContext = {
   currentPath: string | null;
   pendingTitle: string | null;
   dirty: boolean;
+  /** Monotonic revision of the editor document, including programmatic edits. */
+  docRevision: number;
   previewMode: PreviewMode;
   activeSurface: ActiveSurface;
   editingInPreview: boolean;
@@ -32,6 +34,7 @@ export function createAppContext(statusEl: HTMLElement): AppContext {
     currentPath: null,
     pendingTitle: null,
     dirty: false,
+    docRevision: 0,
     previewMode: 'split',
     activeSurface: 'editor',
     editingInPreview: false,

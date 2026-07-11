@@ -7,18 +7,19 @@ import {
   shouldPreventBeforeQuit,
 } from '../main/close-guard';
 
-const dirtyNamed = { dirty: true, hasPath: true, docEmpty: false, locale: 'en' as const };
+const dirtyNamed = { dirty: true, hasPath: true, docEmpty: false, revision: 3, locale: 'en' as const };
 
 describe('close guard decisions', () => {
   it('only prompts for a dirty document that is not an empty untitled buffer', () => {
-    expect(needsCloseConfirmation({ dirty: false, hasPath: true, docEmpty: false, locale: 'en' })).toBe(false);
-    expect(needsCloseConfirmation({ dirty: true, hasPath: false, docEmpty: true, locale: 'en' })).toBe(false);
+    expect(needsCloseConfirmation({ dirty: false, hasPath: true, docEmpty: false, revision: 0, locale: 'en' })).toBe(false);
+    expect(needsCloseConfirmation({ dirty: true, hasPath: false, docEmpty: true, revision: 0, locale: 'en' })).toBe(false);
     expect(needsCloseConfirmation(dirtyNamed)).toBe(true);
   });
 
   it('uses the last edit-event snapshot when the live renderer does not answer', () => {
     expect(stateFromSnapshot({ dirty: true, path: null, doc: 'draft' })).toMatchObject({ dirty: true, hasPath: false, docEmpty: false });
-    expect(stateFromSnapshot(undefined)).toMatchObject({ dirty: false, hasPath: false, docEmpty: true });
+    expect(stateFromSnapshot(undefined)).toMatchObject({ dirty: false, hasPath: false, docEmpty: true, known: false });
+    expect(needsCloseConfirmation(stateFromSnapshot(undefined))).toBe(true);
   });
   it('holds quit while a close decision is unresolved and only allows the approved retry', () => {
     expect(shouldPreventBeforeQuit({ quitApproved: false, relaunchApproved: false })).toBe(true);
@@ -31,6 +32,14 @@ describe('close guard decisions', () => {
     await expect(resolveCloseGuard({ state: dirtyNamed, showDialog: async () => 'save', save })).resolves.toBe('allow');
     expect(save).toHaveBeenCalledOnce();
     await expect(resolveCloseGuard({ state: dirtyNamed, showDialog: async () => 'save', save: async () => false })).resolves.toBe('cancel');
+  });
+  it('keeps the window open when the save committed a stale revision', async () => {
+    await expect(resolveCloseGuard({
+      state: dirtyNamed,
+      showDialog: async () => 'save',
+      // Main supplies false after comparing committedRevision to the live state.
+      save: async () => false,
+    })).resolves.toBe('cancel');
   });
 
   it('distinguishes explicit discard from cancellation', async () => {

@@ -209,16 +209,22 @@ window.api.onCloseQueryState((requestId) => {
     dirty: ctx.dirty,
     hasPath: ctx.currentPath !== null,
     docEmpty: ctx.editor.getDoc().length === 0,
+    revision: ctx.docRevision,
     locale: getLocale(),
   });
 });
-window.api.onCloseSave((requestId) => {
+window.api.onCloseSave((requestId, requestedRevision) => {
   void (async () => {
-    await docLifecycle.save();
-    if (!ctx.dirty && sessionSnapshot) await sessionSnapshot.flushSessionSnapshot();
-    window.api.sendCloseSaveResult(requestId, !ctx.dirty);
+    const committedRevision = await docLifecycle.save();
+    const saved = committedRevision !== null && committedRevision >= requestedRevision;
+    if (saved && !ctx.dirty && sessionSnapshot) await sessionSnapshot.flushSessionSnapshot();
+    window.api.sendCloseSaveResult(requestId, {
+      saved,
+      // This is the actual document revision written, not merely the request.
+      committedRevision: saved ? committedRevision : null,
+    });
   })().catch(() => {
-    window.api.sendCloseSaveResult(requestId, false);
+    window.api.sendCloseSaveResult(requestId, { saved: false, committedRevision: null });
   });
 });
 window.api.windowReady();
@@ -238,7 +244,6 @@ window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e)
   if (prefs.theme === 'system') ctx.editor.applyTheme(e.matches);
 });
 window.addEventListener('beforeunload', () => {
-  if (ctx.dirty) void docLifecycle.save();
   scheduleSessionSnapshot();
 });
 

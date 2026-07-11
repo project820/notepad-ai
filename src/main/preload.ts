@@ -152,17 +152,18 @@ const api = {
     ipcRenderer.on('close:query-state', listener);
     return () => ipcRenderer.removeListener('close:query-state', listener);
   },
-  sendCloseState: (requestId: string, state: { dirty: boolean; hasPath: boolean; docEmpty: boolean; locale: 'en' | 'ko' | 'zh-Hans' | 'zh-Hant' | 'ja' }): void =>
+  sendCloseState: (requestId: string, state: { dirty: boolean; hasPath: boolean; docEmpty: boolean; revision: number; locale: 'en' | 'ko' | 'zh-Hans' | 'zh-Hant' | 'ja' }): void =>
     ipcRenderer.send('close:state', { requestId, ...state }),
-  onCloseSave: (cb: (requestId: string) => void): (() => void) => {
-    const listener = (_e: unknown, request: { requestId?: unknown }) => {
-      if (typeof request?.requestId === 'string') cb(request.requestId);
+  onCloseSave: (cb: (requestId: string, revision: number) => void): (() => void) => {
+    const listener = (_e: unknown, request: { requestId?: unknown; revision?: unknown }) => {
+      const revision = request?.revision;
+      if (typeof request?.requestId === 'string' && typeof revision === 'number' && Number.isSafeInteger(revision) && revision >= -1) cb(request.requestId, revision);
     };
     ipcRenderer.on('close:save', listener);
     return () => ipcRenderer.removeListener('close:save', listener);
   },
-  sendCloseSaveResult: (requestId: string, saved: boolean): void =>
-    ipcRenderer.send('close:save-result', { requestId, saved }),
+  sendCloseSaveResult: (requestId: string, result: { saved: boolean; committedRevision: number | null }): void =>
+    ipcRenderer.send('close:save-result', { requestId, ...result }),
   setCloseLocale: (locale: 'en' | 'ko' | 'zh-Hans' | 'zh-Hant' | 'ja'): void =>
     ipcRenderer.send('close:locale', locale),
 

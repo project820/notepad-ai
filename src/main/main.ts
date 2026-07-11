@@ -63,19 +63,16 @@ registerFileIpc({ registry, fileGrants, identityFs: nodeIdentityFs, saveMutex, b
 registerAuthIpc({ getRegistry });
 registerAiIpc({ getRegistry });
 registerWizardIpc({ fileGrants, projectWizardRoots, identityFs: nodeIdentityFs });
-registerSessionIpc({ registry, sinkFor: windows.sinkFor });
+registerSessionIpc({ registry, sinkFor: windows.sinkFor, isSessionWriteFenced: windows.isSessionWriteFenced });
 registerConvertIpc({ converterHost });
 handleTrusted('update:check', async () => checkForUpdate(app.getVersion()));
 handleTrusted('app:version', () => app.getVersion());
 handleTrusted('app:relaunch', async () => {
-  if (!(await windows.approveAllForQuit())) {
-    windows.clearCloseApprovals();
-    return;
-  }
-  relaunchApproved = true;
-  windows.preserveSessionOnClose();
-  app.relaunch();
-  app.quit();
+  await windows.approveAllForQuit('relaunch', async () => {
+    relaunchApproved = true;
+    app.relaunch();
+    app.quit();
+  });
 });
 handleTrusted('shell:open-external', async (_e, url: string) => { if (isAllowedExternalUrl(url)) await shell.openExternal(url); });
 registerOsIpc();
@@ -92,11 +89,7 @@ app.on('before-quit', (event) => {
   event.preventDefault();
   if (quitGuardPending) return;
   quitGuardPending = true;
-  void windows.approveAllForQuit().then(async (approved) => {
-    if (!approved) {
-      windows.clearCloseApprovals();
-      return;
-    }
+  void windows.approveAllForQuit('quit', async () => {
     await markCleanExitQueued();
     quitApproved = true;
     app.quit();

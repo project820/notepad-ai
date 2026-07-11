@@ -6,6 +6,9 @@ export type CloseGuardState = {
   dirty: boolean;
   hasPath: boolean;
   docEmpty: boolean;
+  revision: number;
+  /** False means the renderer did not provide a live answer; always fail closed. */
+  known?: boolean;
   locale: CloseGuardLocale;
 };
 
@@ -43,15 +46,17 @@ export function closeGuardChoiceFromButton(buttonIndex: number): CloseGuardChoic
 
 /** An untitled empty buffer is not a document that needs close confirmation. */
 export function needsCloseConfirmation(state: CloseGuardState): boolean {
-  return state.dirty && (state.hasPath || !state.docEmpty);
+  return state.known === false || (state.dirty && (state.hasPath || !state.docEmpty));
 }
 
-/** A renderer timeout may use the last persisted edit-event snapshot, never an invented clean state. */
+/** A renderer timeout may use a snapshot for dialog context, but never as approval to close. */
 export function stateFromSnapshot(snapshot: CloseGuardSnapshot | undefined): CloseGuardState {
   return {
     dirty: snapshot?.dirty === true,
     hasPath: typeof snapshot?.path === 'string',
     docEmpty: (snapshot?.doc?.length ?? 0) === 0,
+    revision: -1,
+    known: false,
     locale: 'en',
   };
 }

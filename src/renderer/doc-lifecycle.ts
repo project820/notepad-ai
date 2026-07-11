@@ -35,32 +35,33 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
     deps.dirtyEl.classList.toggle('dirty', ctx.dirty);
   }
 
-  async function save() {
-    const result = await deps.api.saveFile(ctx.currentPath, ctx.editor.getDoc());
+  async function saveTo(filePath: string | null): Promise<number | null> {
+    const revision = ctx.docRevision;
+    const result = await deps.api.saveFile(filePath, ctx.editor.getDoc());
     if (result.saved && result.filePath) {
       ctx.currentPath = result.filePath;
       ctx.pendingTitle = null;
-      ctx.dirty = false;
+      // A queued write may complete after another edit. It committed the older
+      // revision, but must not mark the newer document clean.
+      if (ctx.docRevision === revision) ctx.dirty = false;
       setTitle();
       ctx.setStatus(deps.t('status.saved').replace('{filePath}', result.filePath));
-    } else if (result.error === 'already-open') {
+      return revision;
+    }
+    if (result.error === 'already-open') {
       // Another window owns this path; main focused it. Keep dirty + path so the
       // user never silently loses their edit (no last-writer-wins).
       ctx.setStatus(deps.t('status.alreadyOpen'));
     }
+    return null;
   }
 
-  async function saveAs() {
-    const result = await deps.api.saveFile(null, ctx.editor.getDoc());
-    if (result.saved && result.filePath) {
-      ctx.currentPath = result.filePath;
-      ctx.pendingTitle = null;
-      ctx.dirty = false;
-      setTitle();
-      ctx.setStatus(deps.t('status.saved').replace('{filePath}', result.filePath));
-    } else if (result.error === 'already-open') {
-      ctx.setStatus(deps.t('status.alreadyOpen'));
-    }
+  async function save(): Promise<number | null> {
+    return saveTo(ctx.currentPath);
+  }
+
+  async function saveAs(): Promise<number | null> {
+    return saveTo(null);
   }
 
   function scheduleAutosave() {
@@ -73,6 +74,7 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
   const previewRenderThrottle = deps.createRafThrottle();
   function onDocChange(doc: string) {
     if (ctx.suppressEditorChange) return;
+    ctx.docRevision += 1;
     if (!ctx.dirty) {
       ctx.dirty = true;
       setTitle();
@@ -90,6 +92,7 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
   }
 
   function onSuppressedEditorChange(doc: string, syncPreview = false): void {
+    ctx.docRevision += 1;
     handleSuppressedDocumentChange(doc, {
       isDirty: () => ctx.dirty,
       markDirty: () => {
@@ -107,6 +110,7 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
     ctx.currentPath = null;
     ctx.pendingTitle = null;
     ctx.editor.setDoc('');
+    ctx.docRevision += 1;
     ctx.preview.setDoc('');
     ctx.dirty = false;
     setTitle();
@@ -147,13 +151,9 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
         const dir = ctx.currentPath.replace(/\/[^/]+$/, '');
         const newPath = `${dir}/${withExt}`;
         void (async () => {
-          const result = await deps.api.saveFile(newPath, ctx.editor.getDoc());
-          if (result.saved && result.filePath) {
-            ctx.currentPath = result.filePath;
-            ctx.pendingTitle = null;
-            ctx.dirty = false;
-            ctx.setStatus(deps.t('status.renamed').replace('{filePath}', result.filePath));
-            setTitle();
+          const revision = await saveTo(newPath);
+          if (revision !== null) {
+            ctx.setStatus(deps.t('status.renamed').replace('{filePath}', ctx.currentPath ?? newPath));
           }
         })();
       } else {
@@ -196,6 +196,7 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
         ctx.convertedHtml = null;
       }
       ctx.editor.setDoc(docMd);
+      ctx.docRevision += 1;
       if (ctx.showingConvertedHtml && ctx.convertedHtml) {
         // Converted HTML is sanitized into an inert fragment (never raw innerHTML).
         ctx.preview.el.replaceChildren(deps.buildConvertedHtmlFrame(ctx.convertedHtml));

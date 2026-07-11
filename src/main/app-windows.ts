@@ -21,6 +21,7 @@ import {
   type CloseGuardState,
 } from './close-guard';
 import { onTrusted } from './ipc-guard';
+import { CloseCoordinator, type CloseDecision, type CloseTarget } from './close-coordinator';
 
 const APP_DISPLAY_NAME = 'Notepad AI';
 const APP_STORAGE_NAME = 'notepad-ai';
@@ -49,9 +50,9 @@ type AppWindows = {
   sinkFor: (win: BrowserWindow) => OutboundSink;
   sendToFocused: (channel: string) => void;
   approveClose: (win: BrowserWindow) => Promise<boolean>;
-  approveAllForQuit: () => Promise<boolean>;
+  approveAllForQuit: (intent: 'quit' | 'relaunch', onCommit: () => Promise<void>) => Promise<boolean>;
   clearCloseApprovals: () => void;
-  preserveSessionOnClose: () => void;
+  isSessionWriteFenced: (windowKey: string) => boolean;
 };
 
 /**
@@ -94,27 +95,27 @@ export function createAppWindows({
   const pending: string[] = [];
   let preserveSessionOnClose = false;
   const approvedCloseWindowIds = new Set<number>();
+  const discardedWindowKeys = new Set<string>();
+  const coordinator = new CloseCoordinator();
   const pendingState = new Map<string, { webContentsId: number; resolve: (state: CloseGuardState | null) => void }>();
-  const pendingSave = new Map<string, { webContentsId: number; resolve: (saved: boolean) => void }>();
+  const pendingSave = new Map<string, { webContentsId: number; resolve: (result: { saved: boolean; committedRevision: number | null }) => void }>();
   const windowLocales = new Map<number, CloseGuardState['locale']>();
 
   const requestId = (kind: string, win: BrowserWindow) => `${kind}:${win.id}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
-  const waitFor = <T>(
-    pending: Map<string, { webContentsId: number; resolve: (value: T) => void }>,
+  const waitForState = (
     id: string,
     webContentsId: number,
     send: () => void,
-    fallback: T,
-  ) => new Promise<T>((resolve) => {
+  ) => new Promise<CloseGuardState | null>((resolve) => {
     const timer = setTimeout(() => {
-      pending.delete(id);
-      resolve(fallback);
+      pendingState.delete(id);
+      resolve(null);
     }, 400);
-    pending.set(id, {
+    pendingState.set(id, {
       webContentsId,
       resolve: (value) => {
         clearTimeout(timer);
-        pending.delete(id);
+        pendingState.delete(id);
         resolve(value);
       },
     });
@@ -124,12 +125,16 @@ export function createAppWindows({
   onTrusted('close:state', (event, raw: unknown) => {
     const value = raw as Record<string, unknown>;
     const id = typeof value?.requestId === 'string' ? value.requestId : '';
+    const revision = value.revision;
     const pending = pendingState.get(id);
     if (!pending || pending.webContentsId !== event.sender.id) return;
     if (
       typeof value.dirty !== 'boolean'
       || typeof value.hasPath !== 'boolean'
       || typeof value.docEmpty !== 'boolean'
+      || typeof revision !== 'number'
+      || !Number.isSafeInteger(revision)
+      || revision < 0
     ) {
       pending.resolve(null);
       return;
@@ -138,6 +143,8 @@ export function createAppWindows({
       dirty: value.dirty,
       hasPath: value.hasPath,
       docEmpty: value.docEmpty,
+      revision,
+      known: true,
       locale: normalizeCloseGuardLocale(value.locale),
     });
   });
@@ -146,7 +153,12 @@ export function createAppWindows({
     const id = typeof value?.requestId === 'string' ? value.requestId : '';
     const pending = pendingSave.get(id);
     if (!pending || pending.webContentsId !== event.sender.id) return;
-    pending.resolve(value.saved === true);
+    pending.resolve({
+      saved: value.saved === true,
+      committedRevision: Number.isSafeInteger(value.committedRevision) && (value.committedRevision as number) >= 0
+        ? value.committedRevision as number
+        : null,
+    });
   });
   onTrusted('close:locale', (event, locale: unknown) => {
     const rec = registry.getByWebContents(event.sender.id);
@@ -160,49 +172,70 @@ export function createAppWindows({
       return { ...fallback, locale: windowLocales.get(win.id) ?? fallback.locale };
     }
     const id = requestId('state', win);
-    const live = await waitFor(
-      pendingState,
-      id,
-      win.webContents.id,
-      () => win.webContents.send('close:query-state', { requestId: id }),
-      null,
-    );
+    const live = await waitForState(id, win.webContents.id, () => win.webContents.send('close:query-state', { requestId: id }));
     return live ?? { ...fallback, locale: windowLocales.get(win.id) ?? fallback.locale };
   };
 
-  const saveFromRenderer = async (win: BrowserWindow): Promise<boolean> => {
-    if (win.isDestroyed()) return false;
+  const saveFromRenderer = async (win: BrowserWindow, revision: number) => {
+    if (win.isDestroyed()) return { saved: false, committedRevision: null };
     const id = requestId('save', win);
-    return waitFor(
-      pendingSave,
-      id,
-      win.webContents.id,
-      () => win.webContents.send('close:save', { requestId: id }),
-      false,
-    );
+    return new Promise<{ saved: boolean; committedRevision: number | null }>((resolve) => {
+      const onDestroyed = () => pending.resolve({ saved: false, committedRevision: null });
+      const pending = {
+        webContentsId: win.webContents.id,
+        resolve: (result: { saved: boolean; committedRevision: number | null }) => {
+          win.removeListener('closed', onDestroyed);
+          pendingSave.delete(id);
+          resolve(result);
+        },
+      };
+      pendingSave.set(id, pending);
+      win.once('closed', onDestroyed);
+      win.webContents.send('close:save', { requestId: id, revision });
+    });
+  };
+
+  const decideClose = async (target: CloseTarget): Promise<CloseDecision> => {
+    const win = BrowserWindow.fromId(target.windowId);
+    if (!win || win.isDestroyed()) return 'allow';
+    const state = await queryCloseState(win);
+    const action = await resolveCloseGuard({
+      state,
+      showDialog: (labels) => showCloseDialog(win, labels),
+      save: async () => {
+        const result = await saveFromRenderer(win, state.revision);
+        if (!result.saved) return false;
+        const current = await queryCloseState(win);
+        return current.known === true && current.revision === result.committedRevision;
+      },
+    });
+    return action;
+  };
+
+  const targetsFor = (records: readonly WindowRecord[]): CloseTarget[] => records.map((rec) => ({ windowId: rec.windowId, windowKey: rec.windowKey }));
+
+  const commitCloseTransaction = async (
+    transaction: { intent: 'close' | 'quit' | 'relaunch'; targets: readonly CloseTarget[]; discards: readonly CloseTarget[] },
+    onCommit?: () => Promise<void>,
+  ) => {
+    preserveSessionOnClose = transaction.intent === 'relaunch';
+    for (const target of transaction.discards) discardedWindowKeys.add(target.windowKey);
+    await Promise.all(transaction.discards.map((target) => removeSessionWindow(target.windowKey)));
+    for (const target of transaction.targets) approvedCloseWindowIds.add(target.windowId);
+    await onCommit?.();
   };
 
   const approveClose = async (win: BrowserWindow): Promise<boolean> => {
     if (approvedCloseWindowIds.has(win.id)) return true;
     const rec = registry.get(win.id);
     if (!rec || win.isDestroyed()) return true;
-    const action = await resolveCloseGuard({
-      state: await queryCloseState(win),
-      showDialog: (labels) => showCloseDialog(win, labels),
-      save: () => saveFromRenderer(win),
-    });
-    if (action === 'cancel') return false;
-    if (action === 'discard') await removeSessionWindow(rec.windowKey);
-    approvedCloseWindowIds.add(win.id);
-    return true;
+    const result = await coordinator.request('close', targetsFor([rec]), decideClose, (transaction) => commitCloseTransaction(transaction));
+    return result.approved;
   };
 
-  const approveAllForQuit = async () => {
-    for (const rec of registry.all()) {
-      const win = windowFromRecord(rec);
-      if (win && !(await approveClose(win))) return false;
-    }
-    return true;
+  const approveAllForQuit = async (intent: 'quit' | 'relaunch', onCommit: () => Promise<void>) => {
+    const result = await coordinator.request(intent, targetsFor(registry.all()), decideClose, (transaction) => commitCloseTransaction(transaction, onCommit));
+    return result.approved && result.intent === intent;
   };
 
   const windowFromRecord = (rec: WindowRecord | null) => {
@@ -370,7 +403,7 @@ export function createAppWindows({
       projectWizardRoots.release(record.webContentsId);
       approvedCloseWindowIds.delete(win.id);
       windowLocales.delete(win.id);
-      if (!preserveSessionOnClose) {
+      if (!preserveSessionOnClose && !discardedWindowKeys.has(record.windowKey)) {
         void removeSessionWindow(record.windowKey).catch((error) => {
           console.error('[session] failed to remove closed window:', error);
         });
@@ -446,8 +479,6 @@ export function createAppWindows({
     approveClose,
     approveAllForQuit,
     clearCloseApprovals: () => approvedCloseWindowIds.clear(),
-    preserveSessionOnClose: () => {
-      preserveSessionOnClose = true;
-    },
+    isSessionWriteFenced: (windowKey) => discardedWindowKeys.has(windowKey),
   };
 }
