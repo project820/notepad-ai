@@ -18,12 +18,6 @@ export type StyleSetting = {
 
 export const DEFAULT_STYLE: StyleSetting = { difficulty: 'college', naturalness: 'balanced' };
 
-/** Humanize engine id bound to a provider (mirrors the main-process catalog). */
-function humanizeEngineIdForProvider(provider: string): string {
-  if (provider === 'claude') return 'claude';
-  if (provider === 'openrouter') return 'openrouter';
-  return 'openai';
-}
 
 /** Detect the dominant language by Hangul ratio (cheap heuristic). */
 export function detectLanguage(text: string): 'ko' | 'en' {

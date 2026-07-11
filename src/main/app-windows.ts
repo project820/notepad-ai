@@ -38,8 +38,13 @@ type AppWindows = {
   setLaunchWindowId: (id: number | null) => void;
 };
 
+/**
+ * Configure the production app identity. `NOTEPAD_AI_USERDATA` is a
+ * main-process-only seam for isolated Electron integration runs.
+ */
 export function configureAppIdentity(): void {
-  app.setPath('userData', path.join(app.getPath('appData'), APP_STORAGE_NAME));
+  const userData = process.env.NOTEPAD_AI_USERDATA || path.join(app.getPath('appData'), APP_STORAGE_NAME);
+  app.setPath('userData', userData);
   app.setName(APP_DISPLAY_NAME);
   app.setAboutPanelOptions({
     applicationName: APP_DISPLAY_NAME,
@@ -158,6 +163,10 @@ export function createAppWindows({
   };
 
   const createWindow = async (opts: { restore?: SessionWindowSnapshot; openFilePath?: string } = {}) => {
+    // NOTEPAD_AI_HIDE_WINDOWS is a main-process-only seam for integration
+    // runners: real windows still exist and render, but never steal the
+    // user's screen or focus during automated runs.
+    const hideForIntegrationRun = process.env.NOTEPAD_AI_HIDE_WINDOWS === '1';
     const win = new BrowserWindow({
       width: 1280,
       height: 820,
@@ -166,6 +175,7 @@ export function createAppWindows({
       title: APP_DISPLAY_NAME,
       titleBarStyle: 'hiddenInset',
       backgroundColor: '#1e1e1e',
+      ...(hideForIntegrationRun ? { show: false } : {}),
       webPreferences: {
         preload: path.join(__dirname, 'preload.js'),
         contextIsolation: true,

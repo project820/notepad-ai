@@ -35,8 +35,6 @@ export const CORPUS_FIXTURES = [
   'data-heavy',
 ] as const;
 
-/** The user's REAL handover source — supplied separately, NEVER synthesized. */
-const REAL_HANDOVER_FIXTURE = 'gentz-handover.md';
 
 type Pending =
   | { kind: 'none' }

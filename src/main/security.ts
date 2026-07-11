@@ -23,8 +23,6 @@ export const SECURITY_REASON = {
   API_NOT_EXPOSED: 'API_NOT_EXPOSED',
 } as const;
 
-/** Union of the {@link SECURITY_REASON} string codes. */
-type SecurityReason = (typeof SECURITY_REASON)[keyof typeof SECURITY_REASON];
 
 /** Vite dev server host/port the renderer is served from in development. */
 const DEV_HOST = 'localhost';

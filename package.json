@@ -19,7 +19,7 @@
     "test:html-export": "electron scripts/html-export-containment-runner.mjs",
     "test:security-e2e": "electron scripts/security-e2e-runner.mjs",
     "test:converter-e2e": "electron scripts/converter-e2e-runner.mjs",
-    "test:roundtrip-smoke": "electron scripts/roundtrip-smoke-runner.mjs",
+    "test:roundtrip-smoke": "node scripts/roundtrip-smoke-runner.mjs",
     "install:local": "npm run build && electron-builder --mac --dir && rm -rf '/Applications/Notepad AI.app' && ditto 'release/mac-arm64/Notepad AI.app' '/Applications/Notepad AI.app' && rm -rf release dist && echo 'installed to /Applications (build staging removed)'",
     "knip": "knip"
   },

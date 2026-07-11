@@ -18,7 +18,6 @@ const FALLBACK_MODELS = [
   'gpt-5.1-codex-mini',
 ];
 
-const DEFAULT_MODEL = 'gpt-5.4-mini';
 
 export type ModelInfo = { id: string; label?: string };
 

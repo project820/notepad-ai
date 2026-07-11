@@ -44,6 +44,11 @@ Before opening a PR, confirm all of the following pass:
 - [ ] `npm run typecheck` is clean
 - [ ] `npm run test` is green
 - [ ] `npm run build` succeeds
+- [ ] `npm run test:security-e2e` is green
+- [ ] `npm run test:converter-e2e` is green
+- [ ] `npm run test:html-export` is green
+- [ ] `npm run test:roundtrip-smoke` is green
+- [ ] `npm run knip` exits cleanly
 - [ ] `npm audit --omit=dev --audit-level=high` reports no high/critical
 - [ ] no secrets, `.env`, or internal/local-only files are added
 - [ ] new user-facing strings are localized, not hard-coded English

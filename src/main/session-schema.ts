@@ -23,23 +23,6 @@ type SessionUnifiedChatEntry =
 
 type SessionViewMode = 'split' | 'editor-only' | 'preview-only';
 
-/**
- * The legacy (pre multi-window) single-snapshot shape. This is the exact shape
- * `session-store` persisted before v0.3 and is what `migrateSessionSnapshot`
- * accepts as input when reading an old `session.json`.
- */
-export type LegacySessionSnapshot = {
-  savedAt: number;
-  doc: string;
-  currentPath: string | null;
-  pendingTitle: string | null;
-  splitRatio?: number;
-  viewMode?: SessionViewMode;
-  chatHistory?: SessionChatMessage[];
-  unifiedChatHistory?: SessionUnifiedChatEntry[];
-  model?: string;
-  cleanExit?: boolean;
-};
 
 /** One window's document state inside the v2 aggregate. */
 export type SessionWindowSnapshot = {

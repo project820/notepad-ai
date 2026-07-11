@@ -24,7 +24,6 @@ import { registerWizardIpc } from './ipc/wizard-ipc';
 import { createConverterHost, convertDocument, registerConvertIpc } from './convert';
 import { createAppWindows, configureAppIdentity } from './app-windows';
 import { buildMenu } from './menu';
-const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
 const registry = createWindowRegistry();
 const fileGrants = new FileGrants();
@@ -36,6 +35,7 @@ const nodeIdentityFs: IdentityFs = {
 };
 const documentAtomicBackend = nodeAtomicBackend();
 configureAppIdentity();
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
 const converterHost = createConverterHost();
 const windows = createAppWindows({
   registry,
