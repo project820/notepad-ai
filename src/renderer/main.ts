@@ -17,7 +17,7 @@ import { buildRestoreBanner } from './restore-banner';
 import { createSessionSnapshotScheduler } from './session-snapshot-scheduler';
 import { classifyLinkHref } from './link-policy';
 import { openLoginModal } from './login-modal';
-import { mountUnifiedChat, type ChatMode, type ChatAttachment, type ChatTextAttachment } from './unified-chat';
+import { mountUnifiedChat, type ChatMode, type ChatAttachment, type ChatTextAttachment, type ToolPanelGuard } from './unified-chat';
 import { clampChatWidth } from './chat-layout';
 import { openSettingsModal } from './settings-modal';
 import { restoreUnifiedThread, threadToTurns, type UnifiedChatItem } from './unified-chat-history';
@@ -48,19 +48,30 @@ import { mountHtmlExportWizard, type HtmlExportWizardHandle } from './html-expor
 import { HTML_EXPORT_CONTENT_INSTRUCTIONS } from './html-export-content-prompt';
 import { EditorSelection } from '@codemirror/state';
 
-type AuthSnapshot = {
+export type AuthWarningCode = 'secure_storage_unavailable';
+
+export type AuthSnapshot = {
   signedIn: boolean;
   email?: string;
   plan?: string;
   persisted?: boolean;
-  warning?: string;
+  warning?: AuthWarningCode;
   expiresAt?: number;
 };
 
-type LoginUpdate =
+export type LoginErrorCode =
+  | 'device_code_request_failed'
+  | 'device_code_response_invalid'
+  | 'cancelled'
+  | 'polling_failed'
+  | 'polling_status_error'
+  | 'timeout_or_incomplete_response'
+  | 'token_exchange_failed';
+
+export type LoginUpdate =
   | { kind: 'usercode'; userCode: string; verificationUri: string }
   | { kind: 'success'; auth: AuthSnapshot }
-  | { kind: 'error'; message: string };
+  | { kind: 'error'; code: LoginErrorCode; detail?: string };
 
 type ProjectWizardSaveApprovedDraftInput = {
   projectFolder: string;
@@ -1290,6 +1301,7 @@ async function sendUnified(
       t('chat.noProvider'),
     );
     statusEl.textContent = t('status.connectProvider');
+    unifiedChat.failRequest();
     unifiedChat.setStreaming(false);
     openSettings();
     return;
@@ -1335,12 +1347,14 @@ async function sendUnified(
       scheduleSessionSnapshot();
       cleanup();
       ucInflight = null;
+      unifiedChat.completeRequest();
       unifiedChat.setStreaming(false);
     } else if (e.kind === 'error') {
       stream.fail(e.message ?? t('status.aiError'));
       statusEl.textContent = e.message ?? t('status.aiError');
       cleanup();
       ucInflight = null;
+      unifiedChat.failRequest();
       unifiedChat.setStreaming(false);
     }
   });
@@ -1352,6 +1366,7 @@ async function sendUnified(
     stream.fail(err?.message ?? String(err));
     cleanup();
     ucInflight = null;
+    unifiedChat.failRequest();
     unifiedChat.setStreaming(false);
   }
 }
@@ -1398,8 +1413,8 @@ const unifiedChat = mountUnifiedChat(unifiedChatHost, {
     applyAiOutput('replace', next);
   },
   onCopy: (md) => void navigator.clipboard.writeText(md),
-  onProjectSetup: () => void startProjectWizard(),
-  onHtmlExport: () => void startHtmlExportWizard(),
+  onProjectSetup: (guard) => void startProjectWizard(guard),
+  onHtmlExport: (guard) => void startHtmlExportWizard(guard),
   onModeChange: (mode) => {
     if (mode === 'advise') syncAdviceSnapshot();
   },
@@ -1468,8 +1483,9 @@ function runHtmlGeneration(
 }
 
 /** Open the HTML-export wizard inside the unified chat panel (⑤). */
-async function startHtmlExportWizard() {
+async function startHtmlExportWizard(guard: ToolPanelGuard) {
   const hasAuth = await window.api.aiHasAnyAuth().catch(() => true);
+  if (!guard.isCurrent()) return;
   if (!hasAuth) {
     setUnifiedChatOpen(true);
     unifiedChat.addMessage(
@@ -1480,6 +1496,7 @@ async function startHtmlExportWizard() {
     openSettings();
     return;
   }
+  if (!guard.isCurrent()) return;
   setUnifiedChatOpen(true);
   unifiedChat.showPanel('<div class="he-host"></div>', undefined, () => {
     htmlExportWizard?.destroy();
@@ -1547,7 +1564,8 @@ window.addEventListener('mouseup', () => {
   document.body.style.userSelect = '';
   document.body.style.cursor = '';
 });
-async function startProjectWizard() {
+async function startProjectWizard(guard: ToolPanelGuard) {
+  if (!guard.isCurrent()) return;
   const folder = currentPath ? folderFromFilePath(currentPath) : '';
   if (!folder) {
     // AC5: project tab always reacts — show an in-panel notice instead of a
@@ -1559,10 +1577,12 @@ async function startProjectWizard() {
   }
   try {
     await window.api.projectWizardStart(folder);
+    if (!guard.isCurrent()) return;
     setUnifiedChatOpen(true);
     showProjectWizardConsent(folder);
     statusEl.textContent = t('pw.status.started');
   } catch (error) {
+    if (!guard.isCurrent()) return;
     if (error instanceof Error && error.message === 'Project folder is not authorized') {
       try {
         const projectFolder = await retryProjectWizardAfterFolderGrant(folder, {
@@ -1575,6 +1595,7 @@ async function startProjectWizard() {
           startProjectWizard: (projectFolder) => window.api.projectWizardStart(projectFolder),
         });
         if (!projectFolder) return;
+        if (!guard.isCurrent()) return;
         setUnifiedChatOpen(true);
         showProjectWizardConsent(projectFolder);
         statusEl.textContent = t('pw.status.started');

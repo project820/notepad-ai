@@ -162,7 +162,7 @@ describe('mountUnifiedChat — transient panel lifecycle (AC5: no lingering pane
     }
   });
 
-  it('switching project->html keeps the existing panel (only write/advise clear it)', () => {
+  it('switching project->html clears the stale project panel', () => {
     const { parent, handle } = mount({ onProjectSetup: vi.fn(), onHtmlExport: vi.fn() });
     const onDestroy = vi.fn();
     handle.showPanel('<div>p</div>', undefined, onDestroy);
@@ -170,9 +170,6 @@ describe('mountUnifiedChat — transient panel lifecycle (AC5: no lingering pane
     expect(onDestroy).not.toHaveBeenCalled();
     expect(parent.querySelectorAll('.uc-panel-msg').length).toBe(1);
     clickMode(parent, 'html');
-    expect(onDestroy).not.toHaveBeenCalled();
-    expect(parent.querySelectorAll('.uc-panel-msg').length).toBe(1);
-    clickMode(parent, 'write');
     expect(onDestroy).toHaveBeenCalledTimes(1);
     expect(parent.querySelectorAll('.uc-panel-msg').length).toBe(0);
   });

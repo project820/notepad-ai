@@ -1,13 +1,6 @@
 import { trapModalFocus } from './modal-a11y';
 import { t } from './i18n';
-
-type AuthSnapshot = {
-  signedIn: boolean;
-  email?: string;
-  plan?: string;
-  persisted?: boolean;
-  warning?: string;
-};
+import type { AuthSnapshot } from './main';
 
 function esc(s: string): string {
   return s
@@ -108,7 +101,7 @@ export function openLoginModal(cb: ModalCallbacks) {
         <div class="login-ok"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="4,10.5 8.5,15 16,6"/></svg></div>
         <p class="lead">${esc(t('login.success'))}</p>
         <p class="login-sub">${esc(update.auth.email ?? '')}${update.auth.plan ? ` · ${esc(update.auth.plan)}` : ''}</p>
-        ${update.auth.persisted === false && update.auth.warning ? `<p class="login-sub login-warn">${esc(update.auth.warning)}</p>` : ''}
+        ${update.auth.persisted === false && update.auth.warning ? `<p class="login-sub login-warn">${esc(t(`login.warning.${update.auth.warning}`))}</p>` : ''}
         <button class="login-cta" id="login-done">${esc(t('login.done'))}</button>
       `;
       body.querySelector('#login-done')?.addEventListener('click', () => {
@@ -126,7 +119,8 @@ export function openLoginModal(cb: ModalCallbacks) {
       body.innerHTML = `
         <div class="login-err">!</div>
         <p class="lead">${esc(t('login.failed'))}</p>
-        <p class="login-sub">${esc(update.message)}</p>
+        <p class="login-sub">${esc(t(`login.error.${update.code}`))}</p>
+        ${update.detail ? `<p class="login-sub">${esc(update.detail)}</p>` : ''}
         <button class="login-cta" id="login-retry">${esc(t('login.retry'))}</button>
       `;
       body.querySelector('#login-retry')?.addEventListener('click', () => {

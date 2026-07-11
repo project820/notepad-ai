@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { AiProviderErrorKind, AiProviderId, ModelRef, ProviderAuthStatus } from './ai/types';
 import type { FileTreeEntry } from '../shared/file-types';
+import type { AuthSnapshot, LoginUpdate } from './codex-auth';
 
 type OpenedFile = {
   filePath: string | null;
@@ -10,20 +11,6 @@ type OpenedFile = {
   error?: string;
   progress?: string;
 };
-
-type AuthSnapshot = {
-  signedIn: boolean;
-  email?: string;
-  plan?: string;
-  expiresAt?: number;
-  persisted?: boolean;
-  warning?: string;
-};
-
-type LoginUpdate =
-  | { kind: 'usercode'; userCode: string; verificationUri: string }
-  | { kind: 'success'; auth: AuthSnapshot }
-  | { kind: 'error'; message: string };
 
 type ProjectWizardSaveApprovedDraftInput = {
   projectFolder: string;

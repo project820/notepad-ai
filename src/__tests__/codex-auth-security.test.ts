@@ -165,7 +165,7 @@ describe('codex-auth token refresh lifecycle (H-21/H-22)', () => {
     }) as unknown as typeof fetch;
 
     const { startLogin, cancelLogin } = await import('../main/codex-auth');
-    const updates: Array<{ kind: string; message?: string }> = [];
+    const updates: Array<{ kind: string; code?: string }> = [];
     await startLogin((u) => {
       updates.push(u);
       if (u.kind === 'usercode') cancelLogin(); // cancel the moment the code is shown
@@ -173,7 +173,7 @@ describe('codex-auth token refresh lifecycle (H-21/H-22)', () => {
 
     expect(updates.some((u) => u.kind === 'usercode')).toBe(true);
     // The flow must end with a terminal cancel — never hang the renderer's login.
-    expect(updates.at(-1)).toEqual({ kind: 'error', message: 'Login cancelled.' });
+    expect(updates.at(-1)).toEqual({ kind: 'error', code: 'cancelled' });
   });
 });
 

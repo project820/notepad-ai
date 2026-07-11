@@ -40,6 +40,11 @@ export type ChatAttachment = { mime: string; base64: string; bytes: number; name
 /** A pending non-image file attachment, already decoded to text for AI context. */
 export type ChatTextAttachment = { name: string; text: string; bytes: number };
 
+/** Valid only while the tab activation that started a tool handler remains selected. */
+export type ToolPanelGuard = {
+  isCurrent: () => boolean;
+};
+
 export type UnifiedChatHandlers = {
   /** Send the composed message (with any image attachments) in the active mode. */
   onSend: (
@@ -55,9 +60,9 @@ export type UnifiedChatHandlers = {
   onReplace: (text: string) => void;
   onCopy: (text: string) => void;
   /** Start the relocated Project Wizard ('project' mode). */
-  onProjectSetup?: () => void;
+  onProjectSetup?: (guard: ToolPanelGuard) => void;
   /** Open the HTML-export wizard (its own tab). */
-  onHtmlExport?: () => void;
+  onHtmlExport?: (guard: ToolPanelGuard) => void;
   /** Notify the host when the active tab changes (write/advise/project/html). */
   onModeChange?: (mode: ChatMode) => void;
   /** Advise tab: user pressed "sync now" to re-snapshot the live document. */
@@ -99,6 +104,10 @@ export type UnifiedChatHandle = {
   setAdviceSync: (label: string) => void;
   /** Reflect whether a single assistant response is being generated. */
   setStreaming: (streaming: boolean) => void;
+  /** Discard the payload captured for the active request after successful completion. */
+  completeRequest: () => void;
+  /** Restore the payload captured for the active request after terminal failure. */
+  failRequest: () => void;
   /** Add a pending image attachment to the composer (paste/file/programmatic). */
   addAttachment: (att: ChatAttachment) => void;
   destroy: () => void;
@@ -180,13 +189,17 @@ export function mountUnifiedChat(parent: HTMLElement, handlers: UnifiedChatHandl
   let sending = false;
   const adviseStatus = parent.querySelector<HTMLElement>('.uc-advise-status')!;
   let mode: ChatMode = 'write';
+  let toolActivation = 0;
   const chips = parent.querySelector<HTMLElement>('.uc-chips')!;
   const fileInput = parent.querySelector<HTMLInputElement>('.uc-file')!;
   type PendingItem = { kind: 'image'; img: ChatAttachment } | { kind: 'text'; txt: ChatTextAttachment };
   const pending: PendingItem[] = [];
+  let activeRequest: { text: string; pending: PendingItem[] } | null = null;
   const MAX_ATTACHMENTS = 6;
   const MAX_IMAGES = 4;
   const imageCount = () => pending.reduce((n, p) => n + (p.kind === 'image' ? 1 : 0), 0);
+  const activeImageCount = () =>
+    activeRequest?.pending.reduce((n, p) => n + (p.kind === 'image' ? 1 : 0), 0) ?? 0;
   const esc = (s: string) =>
     s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
@@ -202,13 +215,13 @@ export function mountUnifiedChat(parent: HTMLElement, handlers: UnifiedChatHandl
   }
 
   function addAttachment(att: ChatAttachment) {
-    if (imageCount() >= MAX_IMAGES || pending.length >= MAX_ATTACHMENTS) return;
+    if (imageCount() + activeImageCount() >= MAX_IMAGES || pending.length + (activeRequest?.pending.length ?? 0) >= MAX_ATTACHMENTS) return;
     pending.push({ kind: 'image', img: att });
     renderChips();
   }
 
   function addTextFile(txt: ChatTextAttachment) {
-    if (pending.length >= MAX_ATTACHMENTS) return;
+    if (pending.length + (activeRequest?.pending.length ?? 0) >= MAX_ATTACHMENTS) return;
     pending.push({ kind: 'text', txt });
     renderChips();
   }
@@ -405,18 +418,24 @@ export function mountUnifiedChat(parent: HTMLElement, handlers: UnifiedChatHandl
   };
 
   const activateMode = (btn: HTMLButtonElement) => {
+    const previousMode = mode;
     mode = (btn.dataset.mode as ChatMode) ?? 'write';
+    const activation = ++toolActivation;
+    const guard: ToolPanelGuard = {
+      isCurrent: () => toolActivation === activation && mode === (btn.dataset.mode as ChatMode),
+    };
     for (const tab of parent.querySelectorAll<HTMLButtonElement>('.uc-mode')) {
       const active = tab === btn;
       tab.setAttribute('aria-selected', String(active));
       tab.tabIndex = active ? 0 : -1;
     }
     panel.setAttribute('aria-labelledby', btn.id);
-    // Leaving project/html drops their transient panel (AC5: no lingering panel).
-    if (mode === 'write' || mode === 'advise') clearPanel();
+    const enteringTool = mode === 'project' || mode === 'html';
+    const leavingTool = previousMode === 'project' || previousMode === 'html';
+    if (!enteringTool || leavingTool) clearPanel();
     handlers.onModeChange?.(mode);
-    if (mode === 'project') handlers.onProjectSetup?.();
-    else if (mode === 'html') handlers.onHtmlExport?.();
+    if (mode === 'project') handlers.onProjectSetup?.(guard);
+    else if (mode === 'html') handlers.onHtmlExport?.(guard);
     updateChrome();
   };
 
@@ -458,15 +477,21 @@ export function mountUnifiedChat(parent: HTMLElement, handlers: UnifiedChatHandl
     // wipe the user's text from them (would be silent text loss).
     if (sending || mode === 'project' || mode === 'html') return;
     const text = input.value.trim();
-    const images = pending.filter((p): p is { kind: 'image'; img: ChatAttachment } => p.kind === 'image').map((p) => p.img);
-    const textFiles = pending.filter((p): p is { kind: 'text'; txt: ChatTextAttachment } => p.kind === 'text').map((p) => p.txt);
+    const request = { text, pending: [...pending] };
+    const images = request.pending
+      .filter((p): p is { kind: 'image'; img: ChatAttachment } => p.kind === 'image')
+      .map((p) => p.img);
+    const textFiles = request.pending
+      .filter((p): p is { kind: 'text'; txt: ChatTextAttachment } => p.kind === 'text')
+      .map((p) => p.txt);
     // Allow an attachment-only turn (e.g. "OCR this" / "summarize this file").
-    if (!text && pending.length === 0) return;
+    if (!text && request.pending.length === 0) return;
+    activeRequest = request;
     setStreaming(true);
-    handlers.onSend(text, mode, images.length ? images : undefined, textFiles.length ? textFiles : undefined);
     input.value = '';
     pending.length = 0;
     renderChips();
+    handlers.onSend(text, mode, images.length ? images : undefined, textFiles.length ? textFiles : undefined);
   };
 
   const onComposerExtraClick = (e: Event) => {
@@ -551,6 +576,20 @@ export function mountUnifiedChat(parent: HTMLElement, handlers: UnifiedChatHandl
       adviseStatus.textContent = label;
     },
     setStreaming,
+    completeRequest: () => {
+      activeRequest = null;
+      setStreaming(false);
+    },
+    failRequest: () => {
+      const request = activeRequest;
+      activeRequest = null;
+      setStreaming(false);
+      if (!request) return;
+      const draft = input.value;
+      input.value = draft ? `${request.text}\n\n${draft}` : request.text;
+      pending.unshift(...request.pending);
+      renderChips();
+    },
     addAttachment,
     showPanel,
     clearPanel,

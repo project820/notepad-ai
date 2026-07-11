@@ -2,11 +2,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { mountProviderSettingsPanel, type ProviderStatusView } from '../provider-settings-panel';
+import { openSettingsModal } from '../settings-modal';
 import { mountStyleSettingPanel } from '../style-setting-panel';
 import { DEFAULT_STYLE } from '../humanize-engine';
+import { setLocale } from '../i18n';
 
 afterEach(() => {
   document.body.innerHTML = '';
+  setLocale('en');
   vi.restoreAllMocks();
 });
 
@@ -172,5 +175,19 @@ describe('mountProviderSettingsPanel — local providers (G003)', () => {
     expect(parent.querySelector('input[data-prov-key="ollama"]')).toBeNull();
     expect(handlers.onSaveKey).not.toHaveBeenCalled();
     expect(handlers.onDeleteKey).not.toHaveBeenCalled();
+  });
+});
+describe('openSettingsModal — accessibility', () => {
+  it('localizes the dialog and close button accessible labels in Korean', () => {
+    setLocale('ko');
+
+    openSettingsModal({ onSetCustomModel: vi.fn() });
+
+    const dialog = document.querySelector<HTMLElement>('.settings-modal')!;
+    const close = document.querySelector<HTMLButtonElement>('#settings-close')!;
+    expect(dialog.getAttribute('aria-label')).toBe('설정');
+    expect(close.getAttribute('aria-label')).toBe('닫기');
+
+    close.click();
   });
 });

@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { openLoginModal } from '../login-modal';
+import { setLocale } from '../i18n';
 
 function setupApi() {
   let cb: ((u: unknown) => void) | undefined;
@@ -17,6 +18,7 @@ function setupApi() {
 
 beforeEach(() => {
   document.body.innerHTML = '';
+  setLocale('en');
 });
 
 describe('login-modal dynamic-value escaping (S4)', () => {
@@ -29,13 +31,24 @@ describe('login-modal dynamic-value escaping (S4)', () => {
     expect(body.textContent).toContain('<img src=x onerror=alert(1)>');
   });
 
-  it('escapes an HTML-like error message', () => {
+  it('escapes diagnostic detail while localizing the primary error', () => {
     const { emit } = setupApi();
     openLoginModal({ onAfterLogin: vi.fn() });
-    emit({ kind: 'error', message: '<script>alert(1)</script>' });
+    emit({ kind: 'error', code: 'device_code_request_failed', detail: '<script>alert(1)</script>' });
     const body = document.querySelector('#login-body')!;
     expect(body.querySelector('script')).toBeNull();
+    expect(body.textContent).toContain("Couldn't request a device code.");
     expect(body.textContent).toContain('<script>alert(1)</script>');
+  });
+
+  it('renders the error code through the active non-English locale', () => {
+    const { emit } = setupApi();
+    setLocale('ko');
+    openLoginModal({ onAfterLogin: vi.fn() });
+    emit({ kind: 'error', code: 'timeout_or_incomplete_response' });
+    const body = document.querySelector('#login-body')!;
+    expect(body.textContent).toContain('로그인 시간이 초과되었거나 완료되지 않았습니다.');
+    expect(body.textContent).not.toContain('login.error.');
   });
 
   it('escapes the device usercode + verification URI', () => {
@@ -46,10 +59,10 @@ describe('login-modal dynamic-value escaping (S4)', () => {
     expect(body.querySelector('img')).toBeNull();
   });
 
-  it('surfaces the memory-only warning when persisted is false', () => {
+  it('surfaces the localized memory-only warning when persisted is false', () => {
     const { emit } = setupApi();
     openLoginModal({ onAfterLogin: vi.fn() });
-    emit({ kind: 'success', auth: { signedIn: true, email: 'a@b.com', persisted: false, warning: 'Secure storage is unavailable. Sign-in will last only until the app quits.' } });
+    emit({ kind: 'success', auth: { signedIn: true, email: 'a@b.com', persisted: false, warning: 'secure_storage_unavailable' } });
     expect(document.querySelector('.login-warn')?.textContent).toContain('Secure storage is unavailable');
   });
 });

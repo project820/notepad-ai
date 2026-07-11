@@ -24,6 +24,8 @@ const REDIRECT_URI = `${ISSUER}/deviceauth/callback`;
 const REFRESH_SKEW_SECONDS = 120;
 const REFRESH_TIMEOUT_MS = 20_000;
 
+export type AuthWarningCode = 'secure_storage_unavailable';
+
 export type AuthSnapshot = {
   signedIn: boolean;
   email?: string;
@@ -31,8 +33,8 @@ export type AuthSnapshot = {
   expiresAt?: number;
   /** True when tokens are persisted to encrypted disk; false = memory-only (session). Non-secret. */
   persisted?: boolean;
-  /** Non-secret warning surfaced to the renderer (e.g. secure storage unavailable). */
-  warning?: string;
+  /** Non-secret warning code surfaced to the renderer. */
+  warning?: AuthWarningCode;
 };
 
 type StoredAuth = {
@@ -159,10 +161,19 @@ function extractEmailPlan(idToken?: string): { email?: string; plan?: string } {
 // Public: login flow
 // ---------------------------------------------------------------
 
+export type LoginErrorCode =
+  | 'device_code_request_failed'
+  | 'device_code_response_invalid'
+  | 'cancelled'
+  | 'polling_failed'
+  | 'polling_status_error'
+  | 'timeout_or_incomplete_response'
+  | 'token_exchange_failed';
+
 export type LoginUpdate =
   | { kind: 'usercode'; userCode: string; verificationUri: string }
   | { kind: 'success'; auth: AuthSnapshot }
-  | { kind: 'error'; message: string };
+  | { kind: 'error'; code: LoginErrorCode; detail?: string };
 
 let activeLoginAbort: AbortController | null = null;
 
@@ -172,6 +183,7 @@ export async function startLogin(onUpdate: (u: LoginUpdate) => void): Promise<vo
   const signal = activeLoginAbort.signal;
 
   let usercodeResp: any;
+  let parsingUsercodeResponse = false;
   try {
     const r = await fetch(USERCODE_URL, {
       method: 'POST',
@@ -180,24 +192,40 @@ export async function startLogin(onUpdate: (u: LoginUpdate) => void): Promise<vo
       signal,
     });
     if (!r.ok) throw new Error(`usercode HTTP ${r.status}`);
+    parsingUsercodeResponse = true;
     usercodeResp = await r.json();
   } catch (e: any) {
-    onUpdate({ kind: 'error', message: `Couldn't request device code: ${e.message ?? e}` });
+    onUpdate({
+      kind: 'error',
+      code: signal.aborted
+        ? 'cancelled'
+        : parsingUsercodeResponse
+          ? 'device_code_response_invalid'
+          : 'device_code_request_failed',
+      ...(signal.aborted ? {} : { detail: String(e.message ?? e) }),
+    });
     return;
   }
 
-  const userCode = usercodeResp.user_code as string;
-  const deviceAuthId = usercodeResp.device_auth_id as string;
+  if (
+    !usercodeResp ||
+    typeof usercodeResp !== 'object' ||
+    typeof usercodeResp.user_code !== 'string' ||
+    usercodeResp.user_code.length === 0 ||
+    typeof usercodeResp.device_auth_id !== 'string' ||
+    usercodeResp.device_auth_id.length === 0
+  ) {
+    onUpdate({ kind: 'error', code: 'device_code_response_invalid' });
+    return;
+  }
+
+  const userCode = usercodeResp.user_code;
+  const deviceAuthId = usercodeResp.device_auth_id;
   // Clamp the server-supplied poll interval to a sane 3–30s window. `parseInt`
   // can return NaN (and `Math.max(3, NaN)` is NaN → setTimeout(…, NaN) would
   // hammer the endpoint with ~0ms polls); Number.isFinite guards against that (H-21).
   const parsedInterval = Number.parseInt(String(usercodeResp.interval ?? '5'), 10);
   const pollInterval = (Number.isFinite(parsedInterval) ? Math.min(Math.max(parsedInterval, 3), 30) : 5) * 1000;
-
-  if (!userCode || !deviceAuthId) {
-    onUpdate({ kind: 'error', message: 'Device code response missing required fields.' });
-    return;
-  }
 
   onUpdate({ kind: 'usercode', userCode, verificationUri: DEVICE_PAGE });
   // Open the device-auth page in the user's default browser.
@@ -207,9 +235,9 @@ export async function startLogin(onUpdate: (u: LoginUpdate) => void): Promise<vo
   let codeResp: { authorization_code?: string; code_verifier?: string } | null = null;
 
   while (Date.now() < deadline) {
-    if (signal.aborted) return onUpdate({ kind: 'error', message: 'Login cancelled.' });
+    if (signal.aborted) return onUpdate({ kind: 'error', code: 'cancelled' });
     await new Promise((res) => setTimeout(res, pollInterval));
-    if (signal.aborted) return onUpdate({ kind: 'error', message: 'Login cancelled.' });
+    if (signal.aborted) return onUpdate({ kind: 'error', code: 'cancelled' });
     let r: Response;
     try {
       r = await fetch(DEVICE_TOKEN_URL, {
@@ -221,21 +249,30 @@ export async function startLogin(onUpdate: (u: LoginUpdate) => void): Promise<vo
     } catch (e: any) {
       // An abort is a user cancel, not a network error — emit a terminal cancel
       // so the renderer's login flow resolves instead of hanging (P1 login cancel).
-      if (signal.aborted) return onUpdate({ kind: 'error', message: 'Login cancelled.' });
-      onUpdate({ kind: 'error', message: `Polling error: ${e.message ?? e}` });
+      if (signal.aborted) return onUpdate({ kind: 'error', code: 'cancelled' });
+      onUpdate({ kind: 'error', code: 'polling_failed', detail: String(e.message ?? e) });
       return;
     }
     if (r.status === 200) {
-      codeResp = await r.json();
+      try {
+        codeResp = await r.json();
+      } catch (e: any) {
+        onUpdate({
+          kind: 'error',
+          code: signal.aborted ? 'cancelled' : 'timeout_or_incomplete_response',
+          ...(signal.aborted ? {} : { detail: String(e.message ?? e) }),
+        });
+        return;
+      }
       break;
     }
     if (r.status === 403 || r.status === 404) continue;
-    onUpdate({ kind: 'error', message: `Polling returned HTTP ${r.status}` });
+    onUpdate({ kind: 'error', code: 'polling_status_error', detail: `HTTP ${r.status}` });
     return;
   }
 
   if (!codeResp?.authorization_code || !codeResp?.code_verifier) {
-    onUpdate({ kind: 'error', message: 'Login timed out or incomplete response.' });
+    onUpdate({ kind: 'error', code: 'timeout_or_incomplete_response' });
     return;
   }
 
@@ -257,7 +294,11 @@ export async function startLogin(onUpdate: (u: LoginUpdate) => void): Promise<vo
     if (!r.ok) throw new Error(`token exchange HTTP ${r.status}: ${await r.text()}`);
     tokens = await r.json();
   } catch (e: any) {
-    onUpdate({ kind: 'error', message: `Token exchange failed: ${e.message ?? e}` });
+    onUpdate({
+      kind: 'error',
+      code: signal.aborted ? 'cancelled' : 'token_exchange_failed',
+      ...(signal.aborted ? {} : { detail: String(e.message ?? e) }),
+    });
     return;
   }
 
@@ -282,9 +323,7 @@ export async function startLogin(onUpdate: (u: LoginUpdate) => void): Promise<vo
       plan,
       expiresAt: stored.expires_in ? stored.obtained_at + stored.expires_in : undefined,
       persisted,
-      ...(persisted
-        ? {}
-        : { warning: 'Secure storage is unavailable. Sign-in will last only until the app quits.' }),
+      ...(persisted ? {} : { warning: 'secure_storage_unavailable' }),
     },
   });
 }

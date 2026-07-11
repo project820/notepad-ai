@@ -93,10 +93,10 @@ export function openSettingsModal(deps: SettingsModalDeps): void {
   const root = document.createElement('div');
   root.className = 'settings-modal-root';
   root.innerHTML = `
-    <div class="settings-modal" role="dialog" aria-label="Settings">
+    <div class="settings-modal" role="dialog" aria-label="${t('settings.title')}">
       <div class="settings-modal-header">
         <div class="settings-modal-title">${t('settings.title')}</div>
-        <button class="settings-modal-close" id="settings-close" aria-label="Close">
+        <button class="settings-modal-close" id="settings-close" aria-label="${t('login.close')}">
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><line x1="2.5" y1="2.5" x2="9.5" y2="9.5"/><line x1="9.5" y1="2.5" x2="2.5" y2="9.5"/></svg>
         </button>
       </div>

@@ -117,6 +117,34 @@ describe('mountUnifiedChat — modes', () => {
     parent.querySelector<HTMLButtonElement>('.uc-mode[data-mode="html"]')!.click();
     expect(handlers.onHtmlExport).toHaveBeenCalledTimes(1);
   });
+  it('does not let a deferred Project handler replace the active HTML tool panel', async () => {
+    let releaseProject!: () => void;
+    const projectReady = new Promise<void>((resolve) => {
+      releaseProject = resolve;
+    });
+    let handle!: ReturnType<typeof mountUnifiedChat>;
+    const mounted = mount({
+      onProjectSetup: async (guard) => {
+        await projectReady;
+        if (guard.isCurrent()) handle.showPanel('<div data-panel="project">Project</div>');
+      },
+      onHtmlExport: (guard) => {
+        if (guard.isCurrent()) handle.showPanel('<div data-panel="html">HTML</div>');
+      },
+    });
+    handle = mounted.handle;
+
+    mounted.parent.querySelector<HTMLButtonElement>('.uc-mode[data-mode="project"]')!.click();
+    mounted.parent.querySelector<HTMLButtonElement>('.uc-mode[data-mode="html"]')!.click();
+    expect(mounted.parent.querySelector('[data-panel="html"]')).not.toBeNull();
+
+    releaseProject();
+    await projectReady;
+    await Promise.resolve();
+
+    expect(mounted.parent.querySelector('[data-panel="project"]')).toBeNull();
+    expect(mounted.parent.querySelector('[data-panel="html"]')).not.toBeNull();
+  });
   it('replaces the composer with guidance in tool tabs and preserves the draft on return', () => {
     const { parent } = mount({ onHtmlExport: vi.fn() });
     const composer = parent.querySelector<HTMLElement>('.uc-composer')!;
@@ -370,6 +398,26 @@ describe('mountUnifiedChat — image attachments (G007 AC14)', () => {
     expect(handlers.onSend).toHaveBeenCalledWith('OCR this', 'write', [att], undefined);
     expect(parent.querySelector<HTMLElement>('.uc-chips')!.querySelectorAll('.uc-chip').length).toBe(0);
   });
+  it('restores a failed request payload and discards it after completion', () => {
+    const { parent, handle } = mount();
+    const input = parent.querySelector<HTMLTextAreaElement>('.uc-input')!;
+    handle.addAttachment(att);
+    input.value = 'Retry this exactly';
+
+    parent.querySelector<HTMLButtonElement>('.uc-send')!.click();
+    expect(input.value).toBe('');
+    expect(parent.querySelectorAll('.uc-chip')).toHaveLength(0);
+
+    handle.failRequest();
+    expect(input.value).toBe('Retry this exactly');
+    expect(parent.querySelector('.uc-chip')?.textContent).toContain('shot.png');
+
+    parent.querySelector<HTMLButtonElement>('.uc-send')!.click();
+    handle.completeRequest();
+    handle.failRequest();
+    expect(input.value).toBe('');
+    expect(parent.querySelectorAll('.uc-chip')).toHaveLength(0);
+  });
 
   it('allows an image-only turn (empty text but attachment present)', () => {
     const { parent, handlers, handle } = mount();
@@ -393,7 +441,7 @@ describe('mountUnifiedChat — non-image file attachments (minor #2)', () => {
   const tick = () => new Promise((r) => setTimeout(r, 10));
 
   it('attaches a readable text file and passes it as a textFiles context on send', async () => {
-    const { parent, handlers } = mount();
+    const { parent, handlers, handle } = mount();
     const fileInput = parent.querySelector<HTMLInputElement>('.uc-file')!;
     const file = new File(['col1,col2\n1,2'], 'data.csv', { type: 'text/csv' });
     setFiles(fileInput, [file]);
@@ -405,6 +453,9 @@ describe('mountUnifiedChat — non-image file attachments (minor #2)', () => {
     expect(handlers.onSend).toHaveBeenCalledWith('summarize', 'write', undefined, [
       { name: 'data.csv', text: 'col1,col2\n1,2', bytes: file.size },
     ]);
+    handle.failRequest();
+    expect(parent.querySelector<HTMLTextAreaElement>('.uc-input')!.value).toBe('summarize');
+    expect(parent.querySelector('.uc-chip')?.textContent).toContain('data.csv');
   });
 
   it('routes a convertible document (PDF) through convertFile → text', async () => {
