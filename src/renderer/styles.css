@@ -1591,6 +1591,17 @@ html[data-theme='dark'] .pm-item-selected {
   padding: 10px 12px;
   border-top: 1px solid var(--color-hairline);
 }
+.uc-composer[hidden] { display: none; }
+.uc-tool-notice {
+  box-sizing: border-box;
+  min-height: 76px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--color-hairline);
+  color: var(--color-mute);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.uc-tool-notice[hidden] { display: none; }
 .uc-input {
   flex: 1;
   resize: none;

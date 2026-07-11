@@ -96,6 +96,26 @@ describe('mountUnifiedChat — modes', () => {
     parent.querySelector<HTMLButtonElement>('.uc-mode[data-mode="html"]')!.click();
     expect(handlers.onHtmlExport).toHaveBeenCalledTimes(1);
   });
+  it('replaces the composer with guidance in tool tabs and preserves the draft on return', () => {
+    const { parent } = mount({ onHtmlExport: vi.fn() });
+    const composer = parent.querySelector<HTMLElement>('.uc-composer')!;
+    const notice = parent.querySelector<HTMLElement>('.uc-tool-notice')!;
+    const input = parent.querySelector<HTMLTextAreaElement>('.uc-input')!;
+    input.value = 'keep this draft';
+
+    parent.querySelector<HTMLButtonElement>('.uc-mode[data-mode="project"]')!.click();
+    expect(composer.hidden).toBe(true);
+    expect(notice.hidden).toBe(false);
+    expect(notice.textContent).toContain('Overview.md');
+
+    parent.querySelector<HTMLButtonElement>('.uc-mode[data-mode="html"]')!.click();
+    expect(composer.hidden).toBe(true);
+    expect(notice.textContent).toContain('HTML');
+
+    parent.querySelector<HTMLButtonElement>('.uc-mode[data-mode="write"]')!.click();
+    expect(composer.hidden).toBe(false);
+    expect(input.value).toBe('keep this draft');
+  });
 
   it('switching to write clears a transient panel and notifies onModeChange', () => {
     const onModeChange = vi.fn();

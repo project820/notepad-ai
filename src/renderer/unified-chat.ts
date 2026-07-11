@@ -140,6 +140,7 @@ export function renderUnifiedChat(): string {
     <button class="uc-advise-resync" type="button">${t('uc.advise.resync')}</button>
   </div>
   <div class="uc-chips" hidden></div>
+  <div class="uc-tool-notice" hidden aria-live="polite"></div>
   <div class="uc-composer">
     <button class="uc-attach" type="button" data-tooltip="${t('uc.attach')}" aria-label="${t('uc.attach')}">+</button>
     <input class="uc-file" type="file" accept="image/png,image/jpeg,image/webp,.txt,.md,.markdown,.mdx,.csv,.tsv,.json,.yaml,.yml,.xml,.html,.css,.log,.pdf,.docx,.xlsx,.xls,.hwp,.hwpx,text/*" multiple hidden />
@@ -168,6 +169,8 @@ export function mountUnifiedChat(parent: HTMLElement, handlers: UnifiedChatHandl
   const input = parent.querySelector<HTMLTextAreaElement>('.uc-input')!;
   const writeHelp = parent.querySelector<HTMLElement>('.uc-write-help')!;
   const adviseBar = parent.querySelector<HTMLElement>('.uc-advise-bar')!;
+  const toolNotice = parent.querySelector<HTMLElement>('.uc-tool-notice')!;
+  const composer = parent.querySelector<HTMLElement>('.uc-composer')!;
   const adviseStatus = parent.querySelector<HTMLElement>('.uc-advise-status')!;
   let mode: ChatMode = 'write';
   const chips = parent.querySelector<HTMLElement>('.uc-chips')!;
@@ -237,8 +240,12 @@ export function mountUnifiedChat(parent: HTMLElement, handlers: UnifiedChatHandl
   /** Write help shows only on an empty Write thread; the advise bar only on Advise. */
   function updateChrome() {
     const empty = !thread.querySelector('.uc-msg') && !thread.querySelector('.uc-separator');
+    const toolMode = mode === 'project' || mode === 'html';
     writeHelp.hidden = !(mode === 'write' && empty);
     adviseBar.hidden = mode !== 'advise';
+    composer.hidden = toolMode;
+    toolNotice.hidden = !toolMode;
+    if (toolMode) toolNotice.textContent = t(mode === 'project' ? 'uc.tool.project' : 'uc.tool.html');
   }
 
   function scrollToEnd() {
