@@ -9,7 +9,7 @@ import { FileGrants } from './file-grants';
 import { KeyedMutex } from './keyed-mutex';
 import { type IdentityFs } from './path-identity';
 import { nodeAtomicBackend } from './atomic-write';
-import { getSessionAggregate, markCleanExitQueued, resetSessionAggregate } from './session-store';
+import { getSessionAggregate, markCleanExitQueued, mutateSessionAggregate, resetSessionAggregate } from './session-store';
 import { createWindowRegistry } from './window-registry';
 import { ProjectWizardRootStore } from './project-wizard/access';
 import { isAllowedExternalUrl } from './safe-external';
@@ -23,7 +23,9 @@ import { registerSessionIpc } from './ipc/session-ipc';
 import { registerWizardIpc } from './ipc/wizard-ipc';
 import { createConverterHost, convertDocument, registerConvertIpc } from './convert';
 import { createAppWindows, configureAppIdentity } from './app-windows';
+import { removeWindowSnapshot } from './session-schema';
 import { shouldUseMockKeychain } from './lifecycle-flags';
+import { shouldPreventBeforeQuit } from './close-guard';
 import { buildMenu } from './menu';
 
 const registry = createWindowRegistry();
@@ -51,6 +53,9 @@ const windows = createAppWindows({
   convertDocument: (ext, buf) => convertDocument(converterHost, ext, buf),
   abortChatsForWebContents,
   hasSingleInstanceLock,
+  removeSessionWindow: async (windowKey) => {
+    await mutateSessionAggregate((current) => removeWindowSnapshot(current, windowKey));
+  },
 });
 
 // All IPC handlers are registered at module load, before app.whenReady().
@@ -62,15 +67,44 @@ registerSessionIpc({ registry, sinkFor: windows.sinkFor });
 registerConvertIpc({ converterHost });
 handleTrusted('update:check', async () => checkForUpdate(app.getVersion()));
 handleTrusted('app:version', () => app.getVersion());
-handleTrusted('app:relaunch', () => { app.relaunch(); app.exit(0); });
+handleTrusted('app:relaunch', async () => {
+  if (!(await windows.approveAllForQuit())) {
+    windows.clearCloseApprovals();
+    return;
+  }
+  relaunchApproved = true;
+  app.relaunch();
+  app.quit();
+});
 handleTrusted('shell:open-external', async (_e, url: string) => { if (isAllowedExternalUrl(url)) await shell.openExternal(url); });
 registerOsIpc();
 registerHtmlExportIpc({ windowForWebContents: (id) => windows.windowFromRecord(registry.getByWebContents(id)) });
 
-app.on('before-quit', () => {
-  // Mark the aggregate as a clean exit so the next launch starts fresh (no restore).
-  void markCleanExitQueued();
+let quitGuardPending = false;
+let quitApproved = false;
+let relaunchApproved = false;
 
+app.on('before-quit', (event) => {
+  if (!shouldPreventBeforeQuit({ quitApproved, relaunchApproved })) return;
+  // This must happen synchronously: native dialogs are async and Electron would
+  // otherwise start tearing windows down underneath the pending dialog.
+  event.preventDefault();
+  if (quitGuardPending) return;
+  quitGuardPending = true;
+  void windows.approveAllForQuit().then(async (approved) => {
+    if (!approved) {
+      windows.clearCloseApprovals();
+      return;
+    }
+    await markCleanExitQueued();
+    quitApproved = true;
+    app.quit();
+  }).catch((error) => {
+    windows.clearCloseApprovals();
+    console.error('[close] quit guard failed:', error);
+  }).finally(() => {
+    quitGuardPending = false;
+  });
 });
 app.whenReady().then(async () => {
   void prewarmCliSpawnPath();

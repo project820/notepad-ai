@@ -202,6 +202,21 @@ docLifecycle.wireFileOpened();
 
 
 docLifecycle.wireMenuActions(cyclePreviewMode);
+window.api.onCloseQueryState((requestId) => {
+  window.api.sendCloseState(requestId, {
+    dirty: ctx.dirty,
+    hasPath: ctx.currentPath !== null,
+    docEmpty: ctx.editor.getDoc().length === 0,
+    locale: getLocale(),
+  });
+});
+window.api.onCloseSave((requestId) => {
+  void docLifecycle.save().then(() => {
+    window.api.sendCloseSaveResult(requestId, !ctx.dirty);
+  }).catch(() => {
+    window.api.sendCloseSaveResult(requestId, false);
+  });
+});
 window.api.windowReady();
 document.addEventListener('keydown', (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key === 't' && !e.shiftKey) {

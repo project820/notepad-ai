@@ -145,6 +145,24 @@ const api = {
   sessionGet: (): Promise<any> => ipcRenderer.invoke('session:get'),
   sessionWrite: (snap: any): Promise<void> => ipcRenderer.invoke('session:write', snap),
   sessionClear: (): Promise<void> => ipcRenderer.invoke('session:clear'),
+  onCloseQueryState: (cb: (requestId: string) => void): (() => void) => {
+    const listener = (_e: unknown, request: { requestId?: unknown }) => {
+      if (typeof request?.requestId === 'string') cb(request.requestId);
+    };
+    ipcRenderer.on('close:query-state', listener);
+    return () => ipcRenderer.removeListener('close:query-state', listener);
+  },
+  sendCloseState: (requestId: string, state: { dirty: boolean; hasPath: boolean; docEmpty: boolean; locale: 'en' | 'ko' | 'zh-Hans' | 'zh-Hant' | 'ja' }): void =>
+    ipcRenderer.send('close:state', { requestId, ...state }),
+  onCloseSave: (cb: (requestId: string) => void): (() => void) => {
+    const listener = (_e: unknown, request: { requestId?: unknown }) => {
+      if (typeof request?.requestId === 'string') cb(request.requestId);
+    };
+    ipcRenderer.on('close:save', listener);
+    return () => ipcRenderer.removeListener('close:save', listener);
+  },
+  sendCloseSaveResult: (requestId: string, saved: boolean): void =>
+    ipcRenderer.send('close:save-result', { requestId, saved }),
 
   checkForUpdate: (): Promise<{ updateAvailable: boolean; currentVersion: string; latestVersion: string; url: string } | null> =>
     ipcRenderer.invoke('update:check'),
