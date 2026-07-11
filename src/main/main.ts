@@ -23,6 +23,7 @@ import { registerSessionIpc } from './ipc/session-ipc';
 import { registerWizardIpc } from './ipc/wizard-ipc';
 import { createConverterHost, convertDocument, registerConvertIpc } from './convert';
 import { createAppWindows, configureAppIdentity } from './app-windows';
+import { shouldUseMockKeychain } from './lifecycle-flags';
 import { buildMenu } from './menu';
 
 const registry = createWindowRegistry();
@@ -34,12 +35,12 @@ const nodeIdentityFs: IdentityFs = {
   stat: async (p) => { const s = await fs.stat(p); return { dev: s.dev, ino: s.ino }; },
 };
 const documentAtomicBackend = nodeAtomicBackend();
-// Isolated integration runs (NOTEPAD_AI_USERDATA seam) must NEVER touch the
-// user's real macOS Keychain: every new/unsigned Electron binary re-triggers
-// the "Safe Storage" access prompt, and staged upgrade batteries turn that
-// into a password-prompt storm. Chromium's mock keychain keeps safeStorage
-// functional in-memory for the test process only.
-if (process.env.NOTEPAD_AI_USERDATA) app.commandLine.appendSwitch('use-mock-keychain');
+// Isolated integration runs must not touch the user's real macOS Keychain:
+// every new/unsigned Electron binary can re-trigger the "Safe Storage" access
+// prompt, creating a password-prompt storm. Chromium's mock keychain uses a
+// known test password; encrypted blobs still persist in the isolated userData
+// directory.
+if (shouldUseMockKeychain(process.env)) app.commandLine.appendSwitch('use-mock-keychain');
 configureAppIdentity();
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 const converterHost = createConverterHost();
@@ -81,16 +82,20 @@ app.whenReady().then(async () => {
     /* OCR stays unconfigured; runOcr will surface an actionable error if invoked */
   }
   buildMenu({ createWindow: windows.createWindow, handleOpen: windows.handleOpen, sendToFocused: windows.sendToFocused });
-  windows.setReady();
   const restored = await restorePreviousWindows();
   if (windows.hasPendingOpenFiles()) {
+    windows.setReady();
     windows.flushPendingOpenFiles();
   } else if (!restored) {
-    const win = await windows.createWindow();
-    windows.setLaunchWindowId(win.id);
+    await windows.createWindow({ isLaunchWindow: true });
+    windows.setReady();
+    if (windows.hasPendingOpenFiles()) windows.flushPendingOpenFiles();
+  } else {
+    windows.setReady();
+    if (windows.hasPendingOpenFiles()) windows.flushPendingOpenFiles();
   }
   app.on('activate', () => {
-    if (registry.all().length === 0) void windows.createWindow().then((win) => windows.setLaunchWindowId(win.id));
+    if (registry.all().length === 0) void windows.createWindow({ isLaunchWindow: true });
   });
 });
 

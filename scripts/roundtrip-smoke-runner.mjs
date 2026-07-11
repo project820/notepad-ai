@@ -51,6 +51,7 @@ async function runElectronWorker(phase) {
   if (!documentPath) throw new Error('NOTEPAD_AI_ROUNDTRIP_DOCUMENT is required in Electron worker mode');
   const builtMain = resolve(REPO, 'dist/main/main.js');
   require(builtMain);
+  if (phase === 'save') app.emit('open-file', { preventDefault() {} }, documentPath);
   await app.whenReady();
   const win = await waitFor('initial BrowserWindow creation', () => BrowserWindow.getAllWindows()[0] ?? null);
   await waitFor('renderer CodeMirror initialization', () =>
@@ -58,12 +59,14 @@ async function runElectronWorker(phase) {
   );
 
   if (phase === 'save') {
-    app.emit('open-file', { preventDefault() {} }, documentPath);
     await waitFor('opened file reaches the rendered editor', () =>
       win.webContents.executeJavaScript(
         `Array.from(document.querySelectorAll('.cm-line')).map((line) => line.textContent || '').join('\\n').includes(${JSON.stringify('Opened through the app.')})`,
       ),
     );
+    const liveWindowCount = BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed()).length;
+    if (liveWindowCount !== 1) throw new Error(`open-file startup created ${liveWindowCount} windows; expected exactly one`);
+    console.log('[roundtrip-smoke] phase-1-open-file-window-count=1');
     win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'A', modifiers: ['meta'] });
     win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'A', modifiers: ['meta'] });
     await delay(30);
@@ -136,6 +139,7 @@ if (workerPhase) {
         ...process.env,
         NOTEPAD_AI_ROUNDTRIP_PHASE: phase,
         NOTEPAD_AI_USERDATA: userData,
+        NOTEPAD_AI_INTEGRATION_TEST: '1',
         NOTEPAD_AI_HIDE_WINDOWS: '1',
         NOTEPAD_AI_ROUNDTRIP_DOCUMENT: roundtripDocument,
         ELECTRON_ENABLE_LOGGING: '1',
@@ -177,6 +181,7 @@ if (workerPhase) {
     const first = launchPhase('save');
     await waitFor('phase 1 snapshot flush', () => first.logs.join('').includes('phase-1-ready'));
     check('opened, edited, and saved through the production Electron app', first.logs.join('').includes('phase-1-ready'));
+    check('early open-file delivery creates exactly one window', first.logs.join('').includes('phase-1-open-file-window-count=1'));
     check('saved file round-trips edited content byte-exactly', readFileSync(roundtripDocument).equals(Buffer.from(editedContent, 'utf8')));
     first.child.kill('SIGKILL');
     await waitForExit(first.child);

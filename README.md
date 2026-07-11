@@ -22,7 +22,7 @@
    ```bash
    xattr -dr com.apple.quarantine "/Applications/Notepad AI.app"
    ```
-4. 함께 제공되는 `install-guide.html`를 브라우저로 열면 슬라이드형 안내를 볼 수 있습니다.
+4. 자세한 화면 안내는 저장소의 `install-guide.html`를 브라우저로 열어 볼 수 있습니다.
 
 > **Apple Silicon 전용**입니다(Intel Mac 미지원).
 
@@ -72,7 +72,7 @@
 
 ## 개발
 
-이 프로젝트는 Node.js 22+와 Electron 43 / electron-builder 26을 사용합니다. 일반 개발
+이 프로젝트는 Node.js >= 22.12.0와 Electron 43 / electron-builder 26을 사용합니다. 일반 개발
 빌드는 빠른 반복을 위해 OCR 패키징 검사 없이 실행하며, DMG·로컬 설치·CI에서는
 `tessdata` 사전 검사를 먼저 실행합니다.
 

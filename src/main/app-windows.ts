@@ -9,6 +9,7 @@ import { isAllowedExternalUrl } from './safe-external';
 import { ProjectWizardRootStore } from './project-wizard/access';
 import { sendWhenReady, type OutboundSink, type WindowRecord, type WindowRegistry } from './window-registry';
 import type { SessionWindowSnapshot } from './session-schema';
+import { shouldPublishLaunchWindow, type CreateWindowOptions } from './lifecycle-flags';
 import type { ConvertDocument } from './convert';
 
 const APP_DISPLAY_NAME = 'Notepad AI';
@@ -26,7 +27,7 @@ type AppWindowsDeps = {
 };
 
 type AppWindows = {
-  createWindow: (opts?: { restore?: SessionWindowSnapshot; openFilePath?: string }) => Promise<BrowserWindow>;
+  createWindow: (opts?: CreateWindowOptions & { restore?: SessionWindowSnapshot }) => Promise<BrowserWindow>;
   openFilePath: (path: string, win: BrowserWindow) => Promise<void>;
   handleOpen: () => Promise<void>;
   setReady: () => void;
@@ -35,7 +36,6 @@ type AppWindows = {
   windowFromRecord: (rec: WindowRecord | null) => BrowserWindow | null;
   sinkFor: (win: BrowserWindow) => OutboundSink;
   sendToFocused: (channel: string) => void;
-  setLaunchWindowId: (id: number | null) => void;
 };
 
 /**
@@ -162,7 +162,7 @@ export function createAppWindows({
     if (rec) registry.claimPath(rec.windowId, filePath);
   };
 
-  const createWindow = async (opts: { restore?: SessionWindowSnapshot; openFilePath?: string } = {}) => {
+  const createWindow = async (opts: CreateWindowOptions & { restore?: SessionWindowSnapshot } = {}) => {
     // NOTEPAD_AI_HIDE_WINDOWS is a main-process-only seam for integration
     // runners: real windows still exist and render, but never steal the
     // user's screen or focus during automated runs.
@@ -196,8 +196,8 @@ export function createAppWindows({
     };
     registry.register(record);
     // Electron can deliver an open-file event while the initial window is loading.
-    // Publish the blank launch window before loadFile resolves so that event reuses it.
-    if (!opts.restore && launchWindowId == null) launchWindowId = win.id;
+    // Only lifecycle-created blank windows are eligible for that reuse.
+    if (shouldPublishLaunchWindow(opts) && launchWindowId == null) launchWindowId = win.id;
     if (opts.restore?.path) {
       registry.claimPath(win.id, opts.restore.path);
       fileGrants.grantFile(win.webContents.id, opts.restore.path);
@@ -273,8 +273,5 @@ export function createAppWindows({
     windowFromRecord,
     sinkFor,
     sendToFocused,
-    setLaunchWindowId: (id) => {
-      launchWindowId = id;
-    },
   };
 }

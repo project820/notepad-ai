@@ -32,6 +32,9 @@
   ],
   "author": "Notepad AI contributors",
   "license": "MIT",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "build": {
     "appId": "com.notepad-ai.app",
     "productName": "Notepad AI",

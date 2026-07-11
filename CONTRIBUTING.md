@@ -6,7 +6,7 @@ Markdown editor built on Electron + CodeMirror 6 + markdown-it.
 ## Prerequisites
 
 - macOS on Apple Silicon (arm64)
-- Node.js 22+
+- Node.js >= 22.12.0
 - npm
 
 ## Install, build, test

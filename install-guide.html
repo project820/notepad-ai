@@ -386,16 +386,16 @@
     <div style="text-align: center; padding: 24px 0;">
       <div class="icon-img">AI</div>
       <h1 style="margin-top: 24px;">Notepad AI 설치 가이드</h1>
-      <p class="sub">오픈소스 마크다운 편집기 · 열 단계면 끝납니다</p>
+      <p class="sub">오픈소스 마크다운 편집기 · 몇 단계면 시작할 수 있습니다</p>
     </div>
     <div class="feature-grid">
-      <div class="feature"><div class="emoji">📝</div><div class="name">한 번 클릭 서식</div><div class="desc">B / I / H1 등 툴바로 워드처럼 편집. 리치 프리뷰에서 직접 수정도 OK.</div></div>
-      <div class="feature"><div class="emoji">📂</div><div class="name">HWP / DOCX 가져오기</div><div class="desc">HWP·HWPX·DOCX·PDF·XLSX를 마크다운으로 자동 변환</div></div>
-      <div class="feature"><div class="emoji">✦</div><div class="name">AI 글쓰기 도우미</div><div class="desc">개인 ChatGPT Plus 계정으로 문장 교정·요약·문서 작성 보조</div></div>
-      <div class="feature"><div class="emoji">🍎</div><div class="name">Mac 전용 (Apple Silicon)</div><div class="desc">macOS 13 이상에서 동작. M1/M2/M3/M4 최적화.</div></div>
+      <div class="feature"><div class="emoji">📝</div><div class="name">마크다운과 리치 프리뷰</div><div class="desc">툴바와 실시간 프리뷰로 편하게 쓰고, 원본 마크다운은 그대로 유지합니다.</div></div>
+      <div class="feature"><div class="emoji">📂</div><div class="name">문서 가져오기</div><div class="desc">HWP·HWPX·DOCX·PDF·XLSX 문서를 마크다운으로 변환해 편집합니다.</div></div>
+      <div class="feature"><div class="emoji">✦</div><div class="name">선택형 AI 도우미</div><div class="desc">ChatGPT, Claude, Grok, OpenRouter 또는 로컬 모델을 연결해 글쓰기를 돕습니다.</div></div>
+      <div class="feature"><div class="emoji">🍎</div><div class="name">Apple Silicon Mac용</div><div class="desc">개인 문서 편집과 로컬 AI 사용을 위한 macOS 앱입니다.</div></div>
     </div>
     <div class="callout">
-      ⏱ 설치 약 <strong>2분</strong>, AI 로그인 약 <strong>1분</strong>. 처음 한 번만 수고가 필요합니다.
+      처음 설치한 뒤에는 문서를 열거나 새 문서를 만들어 바로 작업할 수 있습니다. AI 연결은 필요할 때 설정하세요.
     </div>
   </section>
 
@@ -403,13 +403,13 @@
   <section class="slide" data-slide="2">
     <span class="step-num">Step 1 / 5</span>
     <h1>DMG 파일 다운로드</h1>
-    <p>GitHub Releases 페이지에서 <code>Notepad AI-0.1.0-arm64.dmg</code>를 내려받습니다.</p>
+    <p>GitHub Releases 페이지에서 <code>Notepad.AI-&lt;version&gt;-arm64.dmg</code> 파일을 내려받습니다.</p>
     <div class="visual">
       <div style="display:flex; align-items:center; gap:18px; font-size: 15px;">
         <div style="width:74px;height:74px;border-radius:14px;background:linear-gradient(135deg,#aaa,#666);color:white;display:flex;align-items:center;justify-content:center;font-size:30px;font-weight:600;">DMG</div>
         <div>
-          <div style="font-weight:600;">Notepad AI-0.1.0-arm64.dmg</div>
-          <div style="color:var(--muted); font-size:13px;">약 220MB · macOS 13+ · Apple Silicon</div>
+          <div style="font-weight:600;">Notepad.AI-&lt;version&gt;-arm64.dmg</div>
+          <div style="color:var(--muted); font-size:13px;">Apple Silicon Mac용 DMG</div>
         </div>
       </div>
     </div>
@@ -446,7 +446,7 @@
   <section class="slide" data-slide="4">
     <span class="step-num">Step 3 / 5</span>
     <h1>처음 실행 — Gatekeeper 우회</h1>
-    <p>Notepad AI는 오픈소스 프로젝트라 Apple 개발자 서명 비용을 들이지 않았습니다. macOS가 "확인되지 않은 개발자" 경고를 띄울 텐데, 한 번만 우회하면 됩니다.</p>
+    <p>배포 DMG는 현재 코드 서명이 되어 있지 않습니다. 신뢰할 수 있는 공식 Releases에서 받은 경우, macOS의 첫 실행 확인을 한 번만 통과하면 됩니다.</p>
     <h2>방법 A — 우클릭 → 열기 (권장)</h2>
     <p>1. <code>Applications</code> 폴더에서 <strong>Notepad AI</strong> 아이콘을 <kbd>Control</kbd> + 클릭 (또는 우클릭)<br/>2. 메뉴에서 "<strong>열기</strong>" 선택.</p>
     <div class="visual" style="gap:24px; display:flex; align-items:center; justify-content:center;">
@@ -512,42 +512,29 @@
     </div>
   </section>
 
-  <!-- Slide 7: AI Login (F7) -->
+  <!-- Slide 7: Optional AI setup -->
   <section class="slide" data-slide="7">
-    <h1>AI 기능 활성화 — ChatGPT 로그인</h1>
-    <p>앱이 처음 실행되면 AI 로그인 창이 자동으로 나타납니다. <strong>개인 ChatGPT Plus 계정</strong>을 사용합니다.</p>
-
-    <div class="callout">
-      AI 기능 없이도 편집기는 완전히 동작합니다. 로그인은 나중에 <kbd>F7</kbd>로 다시 열 수 있습니다.
-    </div>
-
-    <div class="visual">
-      <div class="login-flow">
-        <div class="login-step">
-          <div class="num">1</div>
-          <div>"로그인" 버튼 클릭 → 브라우저가 <strong>auth.openai.com</strong>으로 이동</div>
-        </div>
-        <div class="login-step">
-          <div class="num">2</div>
-          <div>앱에 표시되는 코드를 브라우저에 입력</div>
-        </div>
-        <div class="code-box">ABCD-1234</div>
-        <div class="login-step">
-          <div class="num">3</div>
-          <div>ChatGPT 계정으로 로그인 → 완료</div>
-        </div>
+    <h1>AI 기능 연결 (선택)</h1>
+    <p>편집기는 AI를 연결하지 않아도 완전히 사용할 수 있습니다. AI 버튼에서 사용할 연결 방식을 고르고 안내에 따라 설정하세요.</p>
+    <div class="ai-grid">
+      <div class="ai-card">
+        <div class="title">구독 또는 API 연결</div>
+        <div class="desc">ChatGPT 구독 로그인, Claude·Grok 로컬 CLI, Anthropic·OpenRouter API 키를 지원합니다.</div>
+      </div>
+      <div class="ai-card">
+        <div class="title">로컬 모델</div>
+        <div class="desc">Ollama 또는 LM Studio를 실행해 두면 설치된 모델을 찾아 연결할 수 있습니다.</div>
       </div>
     </div>
-
-    <div class="callout ok">
-      ✅ 로그인 정보는 <strong>macOS Keychain</strong>에 안전하게 저장됩니다. 재실행해도 자동 로그인.
+    <div class="callout">
+      API 키와 로그인 정보는 macOS Keychain으로 암호화해 저장합니다. 연결 방식과 모델은 설정에서 언제든 바꿀 수 있습니다.
     </div>
   </section>
 
   <!-- Slide 8: Import HWP/DOCX -->
   <section class="slide" data-slide="8">
-    <h1>HWP / DOCX 파일 가져오기</h1>
-    <p>기존 문서를 마크다운으로 변환해 편집할 수 있습니다. 메뉴 <strong>파일 → 가져오기</strong> 또는 <kbd>⌘ + O</kbd>로 파일을 선택하세요.</p>
+    <h1>문서 가져오기</h1>
+    <p>기존 문서를 마크다운으로 변환해 편집할 수 있습니다. 메뉴 <strong>파일 → 열기…</strong> 또는 <kbd>⌘ + O</kbd>로 파일을 선택하세요.</p>
 
     <h2>지원 형식</h2>
     <div class="format-grid">
@@ -559,45 +546,37 @@
     </div>
 
     <div class="callout">
-      변환 후 오른쪽 <strong>리치 프리뷰</strong>에서 원본 서식을 확인할 수 있습니다. 상태바의 "<strong>HTML 보기</strong>" 토글로 kordoc의 원본 렌더링도 확인 가능.
+      변환 결과는 마크다운으로 열립니다. 원본의 복잡한 서식은 문서 종류에 따라 일부 달라질 수 있습니다.
     </div>
-
     <div class="callout warn">
-      ⚠️ DRM이 걸린 HWP 파일은 변환되지 않을 수 있습니다.<br/>
-      이미지만 있는 스캔 PDF도 텍스트 추출이 불가합니다 (OCR 미지원).
+      DRM이 걸린 문서나 이미지뿐인 스캔 PDF는 변환되지 않거나 결과가 제한될 수 있습니다.
     </div>
   </section>
 
   <!-- Slide 9: AI Features -->
   <section class="slide" data-slide="9">
     <h1>AI 기능 소개</h1>
-    <p>로그인 후 네 가지 AI 도우미를 사용할 수 있습니다.</p>
-
+    <p>연결한 모델을 문서 작업에 맞춰 선택해 사용할 수 있습니다.</p>
     <div class="ai-grid">
       <div class="ai-card">
-        <div class="shortcut">⌘⇧A  또는  텍스트 선택 → ✦ 버튼</div>
-        <div class="title">블록 AI — 문장 수정</div>
-        <div class="desc">선택한 텍스트를 3가지 대안으로 다시 씁니다. 마음에 드는 것을 "적용"하면 즉시 교체.</div>
+        <div class="title">통합 채팅</div>
+        <div class="desc">작성, 상담, 프로젝트 설정, HTML 생성을 한 패널에서 사용합니다.</div>
       </div>
       <div class="ai-card">
-        <div class="shortcut">⌘J</div>
-        <div class="title">사이드 채팅 — 문서 상담</div>
-        <div class="desc">오른쪽 패널에서 AI와 질문/답변. 문서를 직접 수정하지 않고 조언만 받을 때.</div>
+        <div class="title">블록 AI</div>
+        <div class="desc">선택한 문장을 다듬거나 대안을 받아 문서에 적용합니다.</div>
       </div>
       <div class="ai-card">
-        <div class="shortcut">⌘ ;</div>
-        <div class="title">하단 채팅 — 초안 작성</div>
-        <div class="desc">화면 아래 채팅창에서 초안 요청. "적용" 버튼으로 에디터에 바로 삽입.</div>
+        <div class="title">이미지와 OCR</div>
+        <div class="desc">이미지를 첨부하면 비전 모델을 사용하거나 기기 내 OCR로 텍스트를 읽습니다.</div>
       </div>
       <div class="ai-card">
-        <div class="shortcut">F6</div>
-        <div class="title">글쓰기 수준 조절</div>
-        <div class="desc">초등~전문가 5단계. 설정하면 모든 AI 답변의 문체가 해당 수준에 맞춰집니다.</div>
+        <div class="title">HTML 내보내기</div>
+        <div class="desc">문서를 스타일이 적용된 독립형 HTML 페이지나 슬라이드로 만듭니다.</div>
       </div>
     </div>
-
     <div class="callout">
-      💡 툴바 오른쪽 끝 <strong>✦ 모델 버튼</strong>을 클릭하면 사용할 AI 모델을 선택할 수 있습니다.
+      모델은 기능별로 따로 선택할 수 있으며, 로컬 모델을 쓰면 문서를 외부 서비스로 보내지 않아도 됩니다.
     </div>
   </section>
 
@@ -616,13 +595,9 @@
 
     <h2>자주 쓰는 단축키</h2>
     <div class="keys">
-      <span class="k">⌘ B / I / E / K</span><span>굵게 / 이탤릭 / 인라인 코드 / 링크</span>
-      <span class="k">⌘ T</span><span>표 삽입</span>
-      <span class="k">⌘ P</span><span>화면 보기 전환 (양쪽 / 리치만 / RAW만)</span>
-      <span class="k">⌘ S / O</span><span>저장 / 파일 열기 (가져오기 포함)</span>
-      <span class="k">⌘ J / ⌘ ;</span><span>사이드 채팅 / 하단 채팅</span>
-      <span class="k">⌘ ⇧ A</span><span>블록 AI (선택 영역 재작성)</span>
-      <span class="k">F6 / F7</span><span>글쓰기 수준 / AI 로그인</span>
+      <span class="k">⌘ N / ⌘ O</span><span>새 문서 / 문서 열기</span>
+      <span class="k">⌘ S / ⇧⌘ S</span><span>저장 / 다른 이름으로 저장</span>
+      <span class="k">⌘ P</span><span>프리뷰 보기 전환</span>
     </div>
 
     <h2>개인 설정</h2>
