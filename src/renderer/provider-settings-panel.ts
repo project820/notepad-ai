@@ -21,16 +21,19 @@
  */
 
 import { t } from './i18n';
-import type { AiProviderId, AuthKind } from '../main/ai/types';
+import type { AiProviderId, AuthKind, ProviderAuthStatus } from '../main/ai/types';
 
 export type ProviderStatusView = {
   provider: AiProviderId;
   label: string;
   authKind: AuthKind;
   connected: boolean;
+  connectionSource?: ProviderAuthStatus['connectionSource'];
   accountLabel?: string;
   keyLast4?: string;
   error?: string;
+  /** Escaped secondary diagnostic; never replaces localized primary status copy. */
+  errorDetail?: string;
   /** Local providers only: current configured base URL. */
   localUrl?: string;
   /** Local providers only: default base URL (drives the reset button). */
@@ -43,6 +46,8 @@ export type ProviderStatusView = {
 
 export type ProviderSettingsRenderOptions = {
   statuses: ProviderStatusView[];
+  /** The provider-status IPC request failed; distinct from a successful empty response. */
+  loadError?: string;
 };
 
 export type ProviderSettingsOptions = ProviderSettingsRenderOptions & {
@@ -55,6 +60,7 @@ export type ProviderSettingsOptions = ProviderSettingsRenderOptions & {
   onSaveLocalUrl?: (provider: 'ollama' | 'lmstudio', url: string) => void;
   /** Reset a local provider's server URL to its default. */
   onResetLocalUrl?: (provider: 'ollama' | 'lmstudio') => void;
+  onRetryStatus?: () => void;
 };
 
 export type ProviderSettingsHandle = {
@@ -84,8 +90,8 @@ function statusLine(s: ProviderStatusView): string {
     return `<span class="prov-status prov-status-off">${escapeHTML(t('settings.prov.notConnected'))}</span>`;
   }
   const detail =
-    s.authKind === 'cli'
-      ? 'CLI'
+    s.authKind === 'cli' || s.connectionSource === 'cli'
+      ? escapeHTML(t('settings.prov.cliConnected'))
       : s.authKind === 'oauth'
         ? s.accountLabel
           ? escapeHTML(s.accountLabel)
@@ -157,9 +163,11 @@ export function renderProviderSettingsPanel(opts: ProviderSettingsRenderOptions)
   const anyLocalModels = statuses.some((s) => s.authKind === 'local' && (s.localModelCount ?? 0) > 0);
   const anyUsable = anyCloudConnected || anyLocalModels;
 
-  const zeroAuthNotice = anyUsable
-    ? ''
-    : `<div class="prov-zero-auth" role="alert">${escapeHTML(t('settings.prov.zeroAuth'))}</div>`;
+  const zeroAuthNotice = opts.loadError
+    ? `<div class="prov-load-error" role="alert">${escapeHTML(opts.loadError)} <button class="prov-btn" data-prov-action="retry-status" type="button">${escapeHTML(t('settings.prov.retry'))}</button></div>`
+    : anyUsable
+      ? ''
+      : `<div class="prov-zero-auth" role="alert">${escapeHTML(t('settings.prov.zeroAuth'))}</div>`;
   const rows = statuses
     .map((s) => {
       const isLocal = s.authKind === 'local';
@@ -170,6 +178,7 @@ export function renderProviderSettingsPanel(opts: ProviderSettingsRenderOptions)
       ${statusLine(s)}
     </div>
     ${s.error ? `<div class="prov-error" role="alert">${escapeHTML(s.error)}</div>` : ''}
+    ${s.errorDetail ? `<div class="prov-error-detail">${escapeHTML(s.errorDetail)}</div>` : ''}
     <div class="prov-controls">${providerControls(s)}</div>
     ${s.hint ? `<div class="prov-local-note">${escapeHTML(s.hint)}</div>` : ''}
     ${footer}
@@ -195,6 +204,7 @@ export function mountProviderSettingsPanel(
     if (!btn) return;
     const action = btn.dataset.provAction;
     const prov = btn.dataset.prov as AiProviderId | undefined;
+    if (action === 'retry-status') return opts.onRetryStatus?.();
     if (action === 'signin') return opts.onChatgptSignIn();
     if (action === 'signout') return opts.onChatgptSignOut();
     if (action === 'save-key' && (prov === 'claude' || prov === 'openrouter')) {

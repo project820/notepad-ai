@@ -66,12 +66,12 @@ const GROK_SETUP_STATUS: ProviderAuthStatus = {
   errorCode: 'grok_cli_setup_required',
 };
 
-function installProviderStatusApi() {
+function installProviderStatusApi(aiProvidersStatus = vi.fn().mockResolvedValue([GROK_SETUP_STATUS])) {
   const apiWindow = window as unknown as { api?: unknown };
   const hadApi = Object.prototype.hasOwnProperty.call(window, 'api');
   const previousApi = apiWindow.api;
   apiWindow.api = {
-    aiProvidersStatus: vi.fn().mockResolvedValue([GROK_SETUP_STATUS]),
+    aiProvidersStatus,
     localAiGetConfig: vi.fn().mockResolvedValue({
       ollama: 'http://127.0.0.1:11434',
       lmstudio: 'http://127.0.0.1:1234',
@@ -297,6 +297,122 @@ describe('openSettingsModal — accessibility', () => {
       document.querySelector<HTMLButtonElement>('#settings-close')?.click();
       restoreApi();
       setLocale('en');
+    }
+  });
+  it('renders Claude setup guidance exactly once', async () => {
+    const restoreApi = installProviderStatusApi(
+      vi.fn().mockResolvedValue([{
+        provider: 'claude',
+        label: 'Claude',
+        authKind: 'api_key',
+        connected: false,
+        errorCode: 'claude_cli_setup_required',
+      } satisfies ProviderAuthStatus]),
+    );
+    try {
+      openSettingsModal({ onSetCustomModel: vi.fn() });
+      await flushSettingsRender();
+
+      expect(document.querySelectorAll('.prov-error')).toHaveLength(1);
+      expect(document.querySelector('.prov-error')?.textContent?.match(/claude login/g)).toHaveLength(1);
+      expect(document.querySelectorAll('.prov-local-note')).toHaveLength(0);
+    } finally {
+      document.querySelector<HTMLButtonElement>('#settings-close')?.click();
+      restoreApi();
+    }
+  });
+
+  it('shows CLI connectivity without claiming Claude has an API key', async () => {
+    const restoreApi = installProviderStatusApi(
+      vi.fn().mockResolvedValue([{
+        provider: 'claude',
+        label: 'Claude (CLI)',
+        authKind: 'api_key',
+        connected: true,
+        connectionSource: 'cli',
+      } satisfies ProviderAuthStatus]),
+    );
+    try {
+      openSettingsModal({ onSetCustomModel: vi.fn() });
+      await flushSettingsRender();
+
+      expect(document.querySelector('.prov-status')?.textContent).toContain('Connected through your local CLI');
+      expect(document.querySelector('.prov-status')?.textContent).not.toContain('Key set');
+      expect(document.querySelectorAll('.prov-local-note')).toHaveLength(1);
+    } finally {
+      document.querySelector<HTMLButtonElement>('#settings-close')?.click();
+      restoreApi();
+    }
+  });
+
+  it('shows a retryable load failure instead of zero-auth guidance', async () => {
+    const aiProvidersStatus = vi.fn()
+      .mockRejectedValueOnce(new Error('IPC unavailable'))
+      .mockResolvedValueOnce([]);
+    const restoreApi = installProviderStatusApi(aiProvidersStatus);
+    try {
+      openSettingsModal({ onSetCustomModel: vi.fn() });
+      await flushSettingsRender();
+
+      expect(document.querySelector('.prov-load-error')?.textContent).toContain('Could not load provider status');
+      expect(document.querySelector('.prov-zero-auth')).toBeNull();
+
+      document.querySelector<HTMLButtonElement>('[data-prov-action="retry-status"]')!.click();
+      await flushSettingsRender();
+
+      expect(aiProvidersStatus).toHaveBeenCalledTimes(2);
+      expect(document.querySelector('.prov-zero-auth')).not.toBeNull();
+    } finally {
+      document.querySelector<HTMLButtonElement>('#settings-close')?.click();
+      restoreApi();
+    }
+  });
+
+  it('uses localized unknown-error copy and escapes the raw diagnostic detail', async () => {
+    const rawError = '<img src=x onerror=alert(1)>';
+    const restoreApi = installProviderStatusApi(
+      vi.fn().mockResolvedValue([{
+        provider: 'openrouter',
+        label: 'OpenRouter',
+        authKind: 'api_key',
+        connected: false,
+        error: rawError,
+      } satisfies ProviderAuthStatus]),
+    );
+    try {
+      openSettingsModal({ onSetCustomModel: vi.fn() });
+      await flushSettingsRender();
+
+      expect(document.querySelector('.prov-error')?.textContent).toBe('We could not determine this provider’s status. Try again.');
+      expect(document.querySelector('.prov-error-detail')?.textContent).toBe(rawError);
+      expect(document.querySelector('.prov-error-detail img')).toBeNull();
+    } finally {
+      document.querySelector<HTMLButtonElement>('#settings-close')?.click();
+      restoreApi();
+    }
+  });
+
+  it('renders Grok installed-but-auth-unverified guidance exactly once', async () => {
+    const restoreApi = installProviderStatusApi(
+      vi.fn().mockResolvedValue([{
+        provider: 'grok',
+        label: 'Grok (CLI)',
+        authKind: 'cli',
+        connected: false,
+        installed: true,
+        errorCode: 'grok_cli_auth_unknown',
+      } satisfies ProviderAuthStatus]),
+    );
+    try {
+      openSettingsModal({ onSetCustomModel: vi.fn() });
+      await flushSettingsRender();
+
+      const error = document.querySelector('.prov-error')!;
+      expect(error.textContent?.match(/grok login/g)).toHaveLength(1);
+      expect(document.querySelectorAll('.prov-local-note')).toHaveLength(0);
+    } finally {
+      document.querySelector<HTMLButtonElement>('#settings-close')?.click();
+      restoreApi();
     }
   });
 });

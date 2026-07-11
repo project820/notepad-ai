@@ -36,13 +36,16 @@ export type ModelRef = {
 
 export type ProviderAuthStatusCode =
   | 'claude_cli_setup_required'
-  | 'grok_cli_setup_required';
+  | 'grok_cli_setup_required'
+  | 'grok_cli_auth_unknown';
 
 /** A renderer-safe provider auth status. Never contains secret material. */
 export type ProviderAuthStatus = {
   provider: AiProviderId;
   authKind: AuthKind;
   connected: boolean;
+  /** Active authenticated transport, distinct from the settings control capability. */
+  connectionSource?: 'oauth' | 'api_key' | 'cli';
   /** Human label, e.g. "ChatGPT", "Claude (API key)". */
   label: string;
   /** Account identity for OAuth (email/plan) when available. */
@@ -57,6 +60,8 @@ export type ProviderAuthStatus = {
   error?: string;
   /** Stable setup status code; the renderer maps it to localized user copy. */
   errorCode?: ProviderAuthStatusCode;
+  /** Whether the provider CLI is installed, when independently known. */
+  installed?: boolean;
 };
 
 export type ChatTurn = { role: 'user' | 'assistant'; text: string };

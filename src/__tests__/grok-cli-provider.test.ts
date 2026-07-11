@@ -99,7 +99,7 @@ describe('GrokCliProvider', () => {
 });
 
 describe('GrokCliProvider auth + models', () => {
-  it('reports connected when the grok CLI probe exits 0', async () => {
+  it('reports installed-but-auth-unverified when the version probe exits 0', async () => {
     const spawn = () => {
       const c = new FakeChild();
       queueMicrotask(() => c.doClose(0));
@@ -107,8 +107,13 @@ describe('GrokCliProvider auth + models', () => {
     };
     const provider = new GrokCliProvider({ spawn });
     const status = await provider.getAuthStatus();
-    expect(status).toMatchObject({ provider: 'grok', authKind: 'cli', connected: true });
-    expect(status.errorCode).toBeUndefined();
+    expect(status).toMatchObject({
+      provider: 'grok',
+      authKind: 'cli',
+      connected: false,
+      installed: true,
+      errorCode: 'grok_cli_auth_unknown',
+    });
   });
   it('reports a stable setup status code when the CLI is absent', async () => {
     const spawn = () => {
@@ -118,8 +123,7 @@ describe('GrokCliProvider auth + models', () => {
     };
     const provider = new GrokCliProvider({ spawn });
     const status = await provider.getAuthStatus();
-    expect(status.connected).toBe(false);
-    expect(status).toMatchObject({ errorCode: 'grok_cli_setup_required' });
+    expect(status).toMatchObject({ installed: false, errorCode: 'grok_cli_setup_required' });
     expect(status.error).toBeUndefined();
   });
   it('lists a single default Grok CLI model', async () => {

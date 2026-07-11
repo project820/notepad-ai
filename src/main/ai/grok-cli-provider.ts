@@ -76,12 +76,15 @@ export class GrokCliProvider implements AiProvider {
       env: await buildMinimalEnv(),
       cwd: os.tmpdir(),
     });
+    // `grok --version` only proves installation. Grok has no documented cheap,
+    // non-interactive auth probe, so never infer a signed-in session from it.
     return {
       provider: 'grok',
       authKind: 'cli',
-      connected: r.available,
+      connected: false,
       label: 'Grok (CLI)',
-      errorCode: r.available ? undefined : 'grok_cli_setup_required',
+      installed: r.available,
+      errorCode: r.available ? 'grok_cli_auth_unknown' : 'grok_cli_setup_required',
     };
   }
 

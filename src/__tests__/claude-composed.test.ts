@@ -66,6 +66,21 @@ describe('ComposedClaudeProvider (CLI-first + API fallback)', () => {
     };
     return { promise, getChild: () => child!, waitChild, events, getSpawnCalls: () => spawnCalls };
   }
+  it('reports a CLI connection source without implying that an API key is set', async () => {
+    const spawn = () => {
+      const child = new FakeChild();
+      queueMicrotask(() => child.doClose(0));
+      return child;
+    };
+    const status = await new ComposedClaudeProvider(noKeyStore, spawn).getAuthStatus();
+    expect(status).toMatchObject({
+      provider: 'claude',
+      authKind: 'api_key',
+      connected: true,
+      connectionSource: 'cli',
+    });
+    expect(status.keyLast4).toBeUndefined();
+  });
 
   it('uses the CLI on success and does NOT fall back to the API (no auth error)', async () => {
     const h = run();

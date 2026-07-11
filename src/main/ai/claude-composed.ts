@@ -31,11 +31,17 @@ export class ComposedClaudeProvider implements AiProvider {
     const apiStatus = await this.api.getAuthStatus();
     if (apiStatus.connected) {
       // API key present — but the CLI is still preferred when available.
-      return { ...apiStatus, label: 'Claude (CLI-first · API key)' };
+      return { ...apiStatus, connectionSource: 'api_key', label: 'Claude (CLI-first · API key)' };
     }
     // No API key: still usable (cost-free) when the claude CLI is installed.
     if (await this.cli.isAvailable()) {
-      return { provider: 'claude', authKind: 'api_key', connected: true, label: 'Claude (CLI)' };
+      return {
+        provider: 'claude',
+        authKind: 'api_key',
+        connected: true,
+        connectionSource: 'cli',
+        label: 'Claude (CLI)',
+      };
     }
     // Neither path available — guide the (free) CLI login first, key as fallback.
     return {
