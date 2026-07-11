@@ -117,7 +117,7 @@
     "@types/turndown": "^5.0.6",
     "concurrently": "^9.1.0",
     "cross-env": "^7.0.3",
-    "electron": "^36.9.5",
+    "electron": "^37.10.3",
     "electron-builder": "^26.15.6",
     "esbuild": "0.21.5",
     "happy-dom": "^20.10.6",
