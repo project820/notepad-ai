@@ -1882,6 +1882,7 @@ html[data-theme='dark'] .pm-item-selected {
 .prov-status { font-size: 12px; }
 .prov-status-on { color: var(--color-badge-success); }
 .prov-status-off { color: var(--color-ash); }
+.prov-status-unknown { color: var(--color-mute); }
 .prov-error { color: var(--color-primary); font-size: 12px; margin-top: 6px; }
 .prov-local-note { color: var(--color-mute); font-size: 12px; margin-top: 8px; line-height: 1.4; }
 .prov-controls, .prov-custom { display: flex; gap: 8px; margin-top: 8px; align-items: center; flex-wrap: wrap; }

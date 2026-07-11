@@ -82,6 +82,7 @@ export class GrokCliProvider implements AiProvider {
       provider: 'grok',
       authKind: 'cli',
       connected: false,
+      ...(r.available ? { authUnverified: true } : {}),
       label: 'Grok (CLI)',
       installed: r.available,
       errorCode: r.available ? 'grok_cli_auth_unknown' : 'grok_cli_setup_required',

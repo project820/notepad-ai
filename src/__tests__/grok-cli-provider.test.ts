@@ -111,6 +111,7 @@ describe('GrokCliProvider auth + models', () => {
       provider: 'grok',
       authKind: 'cli',
       connected: false,
+      authUnverified: true,
       installed: true,
       errorCode: 'grok_cli_auth_unknown',
     });
@@ -123,8 +124,12 @@ describe('GrokCliProvider auth + models', () => {
     };
     const provider = new GrokCliProvider({ spawn });
     const status = await provider.getAuthStatus();
-    expect(status).toMatchObject({ installed: false, errorCode: 'grok_cli_setup_required' });
-    expect(status.error).toBeUndefined();
+    expect(status).toMatchObject({
+      connected: false,
+      installed: false,
+      errorCode: 'grok_cli_setup_required',
+    });
+    expect(status.authUnverified).toBeUndefined();
   });
   it('lists a single default Grok CLI model', async () => {
     const provider = new GrokCliProvider({ spawn: () => new FakeChild() });

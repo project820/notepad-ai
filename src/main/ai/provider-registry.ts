@@ -71,8 +71,8 @@ export class ProviderRegistry {
 
   async hasAnyAuth(): Promise<boolean> {
     const statuses = await this.getAuthStatuses();
-    // A cloud provider (oauth/api_key) reporting connected means usable.
-    if (statuses.some((s) => s.connected && s.authKind !== 'local')) return true;
+    // A cloud provider reporting connected or auth-unverified may be usable.
+    if (statuses.some((s) => (s.connected || s.authUnverified) && s.authKind !== 'local')) return true;
     // Local providers always report `connected: true` (discovery, not auth), so
     // they must NOT alone satisfy "has auth" — only count them when the server is
     // actually up AND has discovered models (mirrors the renderer's zero-auth notice).
@@ -183,12 +183,15 @@ export class ProviderRegistry {
     // not as a misleading auth error.
     if (provider.authKind !== 'local') {
       const status = await provider.getAuthStatus();
-      if (!status.connected) {
+      if (!status.connected && !status.authUnverified) {
         onEvent({
           kind: 'error',
           // CLI providers carry actionable install/login guidance in status.error;
           // prefer it over the generic sign-in/key message (G006).
-          message: status.error ?? `${status.label} is not connected. Open AI settings to sign in or add a key.`,
+          message: status.error
+            ?? (status.errorCode === 'grok_cli_setup_required'
+              ? 'Grok CLI is unavailable. Install it and run `grok login` in a terminal.'
+              : `${status.label} is not connected. Open AI settings to sign in or add a key.`),
           errorKind: 'auth',
         });
         return;

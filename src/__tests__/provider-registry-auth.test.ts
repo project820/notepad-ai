@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { ProviderRegistry, type ProviderMap } from '../main/ai/provider-registry';
-import type { AiProvider, AiProviderId, AuthKind, ModelRef, ProviderAuthStatus } from '../main/ai/types';
+import type { AiChatEvent, AiChatRequest, AiProvider, AiProviderId, AuthKind, ModelRef, ProviderAuthStatus } from '../main/ai/types';
 import type { LocalModelCache } from '../main/ai/local-model-cache';
 import type { ApiKeyStore } from '../main/ai/api-key-store';
 
@@ -71,5 +71,102 @@ describe('ProviderRegistry.hasAnyAuth — local is discovery, not auth', () => {
     };
     const reg = new ProviderRegistry(noKeys, map, cacheWith([]));
     expect(await reg.hasAnyAuth()).toBe(false);
+  });
+});
+function grokProvider(
+  status: ProviderAuthStatus,
+  onStream: (req: AiChatRequest, onEvent: (e: AiChatEvent) => void) => void = () => {},
+): AiProvider & { streamCalls: number } {
+  const result: AiProvider & { streamCalls: number } = {
+    id: 'grok',
+    authKind: 'cli',
+    streamCalls: 0,
+    async getAuthStatus() {
+      return status;
+    },
+    async listModels() {
+      return [];
+    },
+    async streamChat(req, onEvent) {
+      result.streamCalls++;
+      onStream(req, onEvent);
+    },
+  };
+  return result;
+}
+
+const grokRequest: AiChatRequest = {
+  instructions: 'system',
+  history: [],
+  userText: 'hello',
+  model: { provider: 'grok', id: 'grok' },
+};
+
+describe('ProviderRegistry — Grok CLI readiness', () => {
+  it('blocks a missing CLI with setup guidance without invoking streamChat', async () => {
+    const grok = grokProvider({
+      provider: 'grok',
+      authKind: 'cli',
+      connected: false,
+      label: 'Grok (CLI)',
+      installed: false,
+      errorCode: 'grok_cli_setup_required',
+    });
+    const events: AiChatEvent[] = [];
+
+    await new ProviderRegistry(noKeys, { grok }, cacheWith([])).streamProviderChat(grokRequest, (event) => events.push(event));
+
+    expect(grok.streamCalls).toBe(0);
+    expect(events).toEqual([{
+      kind: 'error',
+      message: 'Grok CLI is unavailable. Install it and run `grok login` in a terminal.',
+      errorKind: 'auth',
+    }]);
+  });
+
+  it('attempts an installed CLI with unverified auth and preserves its command failure', async () => {
+    const commandFailure: AiChatEvent = {
+      kind: 'error',
+      message: 'Grok CLI: sign in required',
+      errorKind: 'auth',
+    };
+    const grok = grokProvider({
+      provider: 'grok',
+      authKind: 'cli',
+      connected: false,
+      authUnverified: true,
+      label: 'Grok (CLI)',
+      installed: true,
+      errorCode: 'grok_cli_auth_unknown',
+    }, (_req, onEvent) => onEvent(commandFailure));
+    const events: AiChatEvent[] = [];
+
+    await new ProviderRegistry(noKeys, { grok }, cacheWith([])).streamProviderChat(grokRequest, (event) => events.push(event));
+
+    expect(grok.streamCalls).toBe(1);
+    expect(events).toEqual([commandFailure]);
+  });
+
+  it('counts only an installed, unverified Grok CLI as usable auth', async () => {
+    const installed = grokProvider({
+      provider: 'grok',
+      authKind: 'cli',
+      connected: false,
+      authUnverified: true,
+      label: 'Grok (CLI)',
+      installed: true,
+      errorCode: 'grok_cli_auth_unknown',
+    });
+    const missing = grokProvider({
+      provider: 'grok',
+      authKind: 'cli',
+      connected: false,
+      label: 'Grok (CLI)',
+      installed: false,
+      errorCode: 'grok_cli_setup_required',
+    });
+
+    await expect(new ProviderRegistry(noKeys, { grok: installed }, cacheWith([])).hasAnyAuth()).resolves.toBe(true);
+    await expect(new ProviderRegistry(noKeys, { grok: missing }, cacheWith([])).hasAnyAuth()).resolves.toBe(false);
   });
 });

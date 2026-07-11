@@ -129,6 +129,19 @@ describe('i18n — 5 locales (#3)', () => {
       }
     }
   });
+  it('localizes the unverified CLI status in all five locales', () => {
+    const expected: Record<string, string> = {
+      en: 'Status unverified — ready if you are signed in via `grok login`',
+      ko: '`grok login`으로 로그인했다면 사용할 준비가 되었지만 상태를 확인할 수 없습니다',
+      'zh-Hans': '状态未经验证 — 如果您已通过 `grok login` 登录，即可使用',
+      'zh-Hant': '狀態未經驗證 — 如果您已透過 `grok login` 登入，即可使用',
+      ja: '状態を確認できません — `grok login` でサインイン済みなら使用できます',
+    };
+    for (const [loc, label] of Object.entries(expected)) {
+      setLocale(loc as Locale);
+      expect(t('settings.prov.unverified'), `settings.prov.unverified @ ${loc}`).toBe(label);
+    }
+  });
 
   it('exposes v0.4 file-tree panel keys in all five locales (G005)', () => {
     const expected: Record<string, Record<string, string>> = {

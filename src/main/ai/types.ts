@@ -62,6 +62,8 @@ export type ProviderAuthStatus = {
   errorCode?: ProviderAuthStatusCode;
   /** Whether the provider CLI is installed, when independently known. */
   installed?: boolean;
+  /** True when authentication cannot be verified but the provider may be usable. */
+  authUnverified?: boolean;
 };
 
 export type ChatTurn = { role: 'user' | 'assistant'; text: string };

@@ -28,6 +28,8 @@ export type ProviderStatusView = {
   label: string;
   authKind: AuthKind;
   connected: boolean;
+  /** True when authentication cannot be verified but the provider may be usable. */
+  authUnverified?: boolean;
   connectionSource?: ProviderAuthStatus['connectionSource'];
   accountLabel?: string;
   keyLast4?: string;
@@ -85,6 +87,9 @@ function statusLine(s: ProviderStatusView): string {
       return `<span class="prov-status prov-status-on">${escapeHTML(t('settings.local.modelsFound'))}</span>`;
     }
     return '';
+  }
+  if (s.authUnverified) {
+    return `<span class="prov-status prov-status-unknown">${escapeHTML(t('settings.prov.unverified'))}</span>`;
   }
   if (!s.connected) {
     return `<span class="prov-status prov-status-off">${escapeHTML(t('settings.prov.notConnected'))}</span>`;
@@ -156,12 +161,13 @@ function customModelControl(s: ProviderStatusView): string {
 
 export function renderProviderSettingsPanel(opts: ProviderSettingsRenderOptions): string {
   const statuses = opts.statuses ?? [];
-  // The onboarding notice tracks cloud auth and discovered local models — local
-  // providers report a static `connected: true`, so they alone must not silence
-  // the cloud sign-in nudge, but a working local server (models found) should.
-  const anyCloudConnected = statuses.some((s) => s.authKind !== 'local' && s.connected);
+  // The onboarding notice tracks usable cloud auth and discovered local models —
+  // local providers report a static `connected: true`, so they alone must not
+  // silence the cloud sign-in nudge, but a working local server (models found)
+  // should.
+  const anyCloudUsable = statuses.some((s) => s.authKind !== 'local' && (s.connected || s.authUnverified));
   const anyLocalModels = statuses.some((s) => s.authKind === 'local' && (s.localModelCount ?? 0) > 0);
-  const anyUsable = anyCloudConnected || anyLocalModels;
+  const anyUsable = anyCloudUsable || anyLocalModels;
 
   const zeroAuthNotice = opts.loadError
     ? `<div class="prov-load-error" role="alert">${escapeHTML(opts.loadError)} <button class="prov-btn" data-prov-action="retry-status" type="button">${escapeHTML(t('settings.prov.retry'))}</button></div>`

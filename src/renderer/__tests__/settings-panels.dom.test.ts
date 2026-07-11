@@ -399,6 +399,7 @@ describe('openSettingsModal — accessibility', () => {
         label: 'Grok (CLI)',
         authKind: 'cli',
         connected: false,
+        authUnverified: true,
         installed: true,
         errorCode: 'grok_cli_auth_unknown',
       } satisfies ProviderAuthStatus]),
@@ -407,8 +408,13 @@ describe('openSettingsModal — accessibility', () => {
       openSettingsModal({ onSetCustomModel: vi.fn() });
       await flushSettingsRender();
 
-      const error = document.querySelector('.prov-error')!;
-      expect(error.textContent?.match(/grok login/g)).toHaveLength(1);
+      const status = document.querySelector<HTMLElement>('.prov-status')!;
+      expect(status.textContent).toBe('Status unverified — ready if you are signed in via `grok login`');
+      expect(status.classList.contains('prov-status-unknown')).toBe(true);
+      expect(status.textContent).not.toContain('Not connected');
+      expect(document.querySelectorAll('.prov-error')).toHaveLength(1);
+      expect(document.querySelector('.prov-error')?.textContent?.match(/grok login/g)).toHaveLength(1);
+      expect(document.querySelector('.prov-zero-auth')).toBeNull();
       expect(document.querySelectorAll('.prov-local-note')).toHaveLength(0);
     } finally {
       document.querySelector<HTMLButtonElement>('#settings-close')?.click();

@@ -272,6 +272,7 @@ export const DICTS: Record<Locale, Dict> = {
     // AI provider settings
     'settings.prov.title': 'AI providers',
     'settings.prov.notConnected': 'Not connected',
+    'settings.prov.unverified': 'Status unverified — ready if you are signed in via `grok login`',
     'settings.prov.signedIn': 'Signed in',
     'settings.prov.keySet': 'Key set',
     'settings.prov.connected': 'Connected · {detail}',
@@ -549,6 +550,7 @@ export const DICTS: Record<Locale, Dict> = {
     // AI provider settings
     'settings.prov.title': 'AI 제공자',
     'settings.prov.notConnected': '연결 안 됨',
+    'settings.prov.unverified': '`grok login`으로 로그인했다면 사용할 준비가 되었지만 상태를 확인할 수 없습니다',
     'settings.prov.signedIn': '로그인됨',
     'settings.prov.keySet': '키 설정됨',
     'settings.prov.connected': '연결됨 · {detail}',
@@ -686,6 +688,7 @@ export const DICTS: Record<Locale, Dict> = {
     // AI provider settings
     'settings.prov.title': 'AI 提供商',
     'settings.prov.notConnected': '未连接',
+    'settings.prov.unverified': '状态未经验证 — 如果您已通过 `grok login` 登录，即可使用',
     'settings.prov.signedIn': '已登录',
     'settings.prov.keySet': '已设置密钥',
     'settings.prov.connected': '已连接 · {detail}',
@@ -823,6 +826,7 @@ export const DICTS: Record<Locale, Dict> = {
     // AI provider settings
     'settings.prov.title': 'AI 供應商',
     'settings.prov.notConnected': '未連線',
+    'settings.prov.unverified': '狀態未經驗證 — 如果您已透過 `grok login` 登入，即可使用',
     'settings.prov.signedIn': '已登入',
     'settings.prov.keySet': '已設定金鑰',
     'settings.prov.connected': '已連線 · {detail}',
@@ -960,6 +964,7 @@ export const DICTS: Record<Locale, Dict> = {
     // AI provider settings
     'settings.prov.title': 'AI プロバイダー',
     'settings.prov.notConnected': '未接続',
+    'settings.prov.unverified': '状態を確認できません — `grok login` でサインイン済みなら使用できます',
     'settings.prov.signedIn': 'サインイン済み',
     'settings.prov.keySet': 'キー設定済み',
     'settings.prov.connected': '接続済み · {detail}',

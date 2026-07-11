@@ -186,4 +186,21 @@ describe('renderProviderSettingsPanel — CLI providers (G006)', () => {
     const html = renderProviderSettingsPanel({ statuses: grokConnected });
     expect(html).not.toContain('No AI provider connected');
   });
+  it('renders an installed CLI with unverified auth as usable without a disconnected badge', () => {
+    const html = renderProviderSettingsPanel({
+      statuses: [{
+        provider: 'grok',
+        label: 'Grok (CLI)',
+        authKind: 'cli',
+        connected: false,
+        authUnverified: true,
+        error: 'Grok CLI is installed, but its sign-in status could not be verified.',
+      }],
+    });
+    expect(html).toContain('Status unverified — ready if you are signed in via `grok login`');
+    expect(html).toContain('prov-status-unknown');
+    expect(html).not.toContain('Not connected');
+    expect(html).not.toContain('No AI provider connected');
+    expect((html.match(/prov-local-note/g) ?? [])).toHaveLength(0);
+  });
 });

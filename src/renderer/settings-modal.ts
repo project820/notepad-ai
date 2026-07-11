@@ -66,6 +66,7 @@ function toView(s: ProviderAuthStatus, local: LocalViewContext): ProviderStatusV
       authKind: 'cli',
       connected: s.connected,
       connectionSource: s.connectionSource,
+      authUnverified: s.authUnverified,
       error: localizedProviderStatusError(s),
       errorDetail: s.error,
     };
