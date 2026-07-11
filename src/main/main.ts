@@ -68,7 +68,7 @@ app.on('before-quit', () => {
 app.whenReady().then(async () => {
   void prewarmCliSpawnPath();
   const iconPath = path.resolve(__dirname, '../../build/icon.png');
-  if (process.platform === 'darwin' && require('node:fs').existsSync(iconPath)) app.dock.setIcon(iconPath);
+  if (process.platform === 'darwin' && require('node:fs').existsSync(iconPath)) app.dock?.setIcon(iconPath);
   try {
     configureOcr(resolveOcrAssetPaths({ appPath: app.getAppPath(), resourcesPath: process.resourcesPath, packaged: app.isPackaged }));
   } catch {
