@@ -1,11 +1,18 @@
+import { promises as nodeFs } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, it, expect } from 'vitest';
 import { saveWizardState, loadWizardState, type StateFs } from '../main/project-wizard/state-store';
 import type { WizardState } from '../main/project-wizard/types';
 
 function memoryFs() {
   const files = new Map<string, string>();
+  const dirs = new Set(['/project', '/app']);
   const fs: StateFs = {
-    async mkdir() {},
+    async mkdir(dir) {
+      dirs.add(path.dirname(dir));
+      dirs.add(dir);
+    },
     async writeFile(filePath, content) {
       files.set(filePath, content);
     },
@@ -13,6 +20,14 @@ function memoryFs() {
       const value = files.get(filePath);
       if (value === undefined) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
       return value;
+    },
+    async lstat(filePath) {
+      if (dirs.has(filePath) || files.has(filePath)) return { isSymbolicLink: () => false };
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    },
+    async realpath(filePath) {
+      if (dirs.has(filePath) || files.has(filePath)) return filePath;
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
     },
   };
   return { fs, files };
@@ -67,5 +82,29 @@ describe('wizard state store', () => {
     const { fs } = memoryFs();
 
     await expect(loadWizardState('/project', '/app/wizard.json', fs)).resolves.toBeNull();
+  });
+  it('refuses a project metadata directory symlink that escapes the project root', async () => {
+    const root = await nodeFs.mkdtemp(path.join(os.tmpdir(), 'notepad-ai-wizard-state-'));
+    const outside = await nodeFs.mkdtemp(path.join(os.tmpdir(), 'notepad-ai-wizard-outside-'));
+    const appStatePath = path.join(root, 'app', 'wizard-state.json');
+    try {
+      await nodeFs.symlink(outside, path.join(root, '.notepad-ai'));
+      const fs: StateFs = {
+        mkdir: async (dir, opts) => {
+          await nodeFs.mkdir(dir, opts);
+        },
+        writeFile: (filePath, content, encoding) => nodeFs.writeFile(filePath, content, encoding),
+        readFile: (filePath, encoding) => nodeFs.readFile(filePath, encoding),
+        lstat: (filePath) => nodeFs.lstat(filePath),
+        realpath: (filePath) => nodeFs.realpath(filePath),
+      };
+
+      await expect(saveWizardState({ ...state, projectFolder: root, overviewPath: path.join(root, 'Overview.md') }, appStatePath, fs))
+        .rejects.toThrow('symbolic link');
+      await expect(nodeFs.access(path.join(outside, 'wizard-state.json'))).rejects.toThrow();
+    } finally {
+      await nodeFs.rm(root, { recursive: true, force: true });
+      await nodeFs.rm(outside, { recursive: true, force: true });
+    }
   });
 });

@@ -44,6 +44,8 @@ export function createWizardService(deps: WizardServiceDeps) {
       await deps.fs.writeFile(filePath, content, encoding);
     },
     readFile: (filePath, encoding) => deps.fs.readFile(filePath, encoding),
+    lstat: (filePath) => deps.fs.lstat(filePath),
+    realpath: (filePath) => deps.fs.realpath(filePath),
   };
 
   return {

@@ -48,7 +48,7 @@ export type ProviderSettingsRenderOptions = {
 export type ProviderSettingsOptions = ProviderSettingsRenderOptions & {
   onChatgptSignIn: () => void;
   onChatgptSignOut: () => void;
-  onSaveKey: (provider: 'claude' | 'openrouter', key: string) => void;
+  onSaveKey: (provider: 'claude' | 'openrouter', key: string) => Promise<void> | void;
   onDeleteKey: (provider: 'claude' | 'openrouter') => void;
   onSetCustomModel: (provider: AiProviderId, modelId: string) => void;
   /** Persist a local provider's server URL (validated localhost in main). */
@@ -198,8 +198,21 @@ export function mountProviderSettingsPanel(
     if (action === 'save-key' && (prov === 'claude' || prov === 'openrouter')) {
       const input = parent.querySelector<HTMLInputElement>(`input[data-prov-key="${prov}"]`);
       const key = input?.value.trim() ?? '';
-      if (key) opts.onSaveKey(prov, key);
-      if (input) input.value = '';
+      if (!key || !input) return;
+      void Promise.resolve(opts.onSaveKey(prov, key))
+        .then(() => {
+          input.value = '';
+        })
+        .catch(() => {
+          const row = input.closest<HTMLElement>('[data-prov-row]');
+          row?.querySelector('.prov-error[data-prov-save-error]')?.remove();
+          const error = document.createElement('div');
+          error.className = 'prov-error';
+          error.dataset.provSaveError = '';
+          error.setAttribute('role', 'alert');
+          error.textContent = 'Unable to save API key. Try again.';
+          row?.querySelector('.prov-row-head')?.insertAdjacentElement('afterend', error);
+        });
       return;
     }
     if (action === 'delete-key' && (prov === 'claude' || prov === 'openrouter')) {

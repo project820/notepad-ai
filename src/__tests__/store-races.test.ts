@@ -56,6 +56,29 @@ describe('ApiKeyStore — single-flight + serialized mutations (H-25)', () => {
     ]);
     expect(h.reads).toBe(1);
   });
+  it('keeps the prior key active when the atomic backend fsync fails', async () => {
+    let stored = Buffer.from(JSON.stringify({ claude: 'old-key-1234' }), 'utf-8');
+    const backend: KeyStoreBackend = {
+      isEncryptionAvailable: () => true,
+      encryptString: (value) => Buffer.from(value, 'utf-8'),
+      decryptString: (value) => value.toString('utf-8'),
+      readFile: async () => stored,
+      writeFile: async () => {
+        throw new Error('fsync failed');
+      },
+      removeFile: async () => {},
+    };
+    const store = new ApiKeyStore(backend);
+
+    await expect(store.setApiKey('claude', 'new-key-5678')).rejects.toThrow('fsync failed');
+    await expect(store.getKeyStatus('claude')).resolves.toEqual({
+      connected: true,
+      keyLast4: '1234',
+      persisted: true,
+    });
+    const freshStore = new ApiKeyStore(backend);
+    await expect(freshStore.getApiKey('claude')).resolves.toBe('old-key-1234');
+  });
 });
 
 function makeLocalBackend(initial: string | null = null) {

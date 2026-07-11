@@ -173,11 +173,7 @@ export function openSettingsModal(deps: SettingsModalDeps): void {
         void renderProviders();
       },
       onSaveKey: async (provider, key) => {
-        try {
-          await window.api.aiSetApiKey(provider, key);
-        } catch {
-          /* error surfaces via providers-status on next render */
-        }
+        await window.api.aiSetApiKey(provider, key);
         deps.onAfterAuthChange?.();
         void renderProviders();
       },

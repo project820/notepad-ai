@@ -39,12 +39,13 @@ describe('mountProviderSettingsPanel — interactions', () => {
     expect(handlers.onChatgptSignOut).toHaveBeenCalledTimes(1);
   });
 
-  it('saves a Claude API key from its input and clears the field', () => {
+  it('saves a Claude API key from its input and clears the field after a successful save', async () => {
     const { parent, handlers } = mountProviders();
     const input = parent.querySelector<HTMLInputElement>('input[data-prov-key="claude"]')!;
     input.value = 'sk-claude-key';
     parent.querySelector<HTMLButtonElement>('[data-prov-action="save-key"][data-prov="claude"]')!.click();
     expect(handlers.onSaveKey).toHaveBeenCalledWith('claude', 'sk-claude-key');
+    await Promise.resolve();
     expect(input.value).toBe('');
   });
 
@@ -52,6 +53,19 @@ describe('mountProviderSettingsPanel — interactions', () => {
     const { parent, handlers } = mountProviders();
     parent.querySelector<HTMLButtonElement>('[data-prov-action="save-key"][data-prov="openrouter"]')!.click();
     expect(handlers.onSaveKey).not.toHaveBeenCalled();
+  });
+  it('retains the API key input and shows an error when persistence fails', async () => {
+    const { parent } = mountProviders({
+      onSaveKey: vi.fn(() => Promise.reject(new Error('fsync failed'))),
+    });
+    const input = parent.querySelector<HTMLInputElement>('input[data-prov-key="claude"]')!;
+    input.value = 'sk-claude-key';
+    parent.querySelector<HTMLButtonElement>('[data-prov-action="save-key"][data-prov="claude"]')!.click();
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(input.value).toBe('sk-claude-key');
+    expect(parent.querySelector('.prov-error[data-prov-save-error]')?.textContent).toContain('Unable to save API key');
   });
 
   it('sets a custom model id', () => {

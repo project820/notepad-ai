@@ -38,6 +38,7 @@ import {
   renderProjectWizardConsent,
   type ManualExplanationQuestion,
 } from './project-wizard-panel';
+import { retryProjectWizardAfterFolderGrant } from './project-wizard-access-recovery';
 import { installBlockAi } from './block-ai';
 import { installTooltips } from './tooltips';
 import { wireWordmark } from './header-wordmark';
@@ -1101,11 +1102,10 @@ themeMql.addEventListener('change', (e) => {
 });
 
 window.addEventListener('beforeunload', () => {
-  // Best-effort flush before a window unload. We must NOT call preventDefault()/returnValue here:
-  // in Electron that silently cancels the quit (no dialog), so the app would only
-  // close via force-quit. Autosave + the session snapshot already preserve work.
+  // Queue the normal snapshot debounce; quit-time session durability belongs to
+  // the Phase 0-b main-process close transaction, not this renderer hook.
   if (dirty) void save();
-  void flushSessionSnapshot();
+  scheduleSessionSnapshot();
 });
 
 setTitle();
@@ -1560,15 +1560,19 @@ async function startProjectWizard() {
     statusEl.textContent = t('pw.status.started');
   } catch (error) {
     if (error instanceof Error && error.message === 'Project folder is not authorized') {
-      const grantedFolder = await window.api.openFolder();
-      if (!grantedFolder) return;
-      prefs.workspaceRoot = grantedFolder;
-      savePrefs(prefs);
-      leftPanel.setWorkspaceRoot(grantedFolder);
       try {
-        await window.api.projectWizardStart(grantedFolder);
+        const projectFolder = await retryProjectWizardAfterFolderGrant(folder, {
+          openFolder: () => window.api.openFolder(),
+          grantWorkspace: (grantedFolder) => {
+            prefs.workspaceRoot = grantedFolder;
+            savePrefs(prefs);
+            leftPanel.setWorkspaceRoot(grantedFolder);
+          },
+          startProjectWizard: (projectFolder) => window.api.projectWizardStart(projectFolder),
+        });
+        if (!projectFolder) return;
         setUnifiedChatOpen(true);
-        showProjectWizardConsent(grantedFolder);
+        showProjectWizardConsent(projectFolder);
         statusEl.textContent = t('pw.status.started');
       } catch (retryError) {
         console.error('Project Wizard failed', retryError);

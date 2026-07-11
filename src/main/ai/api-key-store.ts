@@ -66,8 +66,8 @@ export class ApiKeyStore {
     return this.loadPromise;
   }
 
-  private async persistDisk(): Promise<void> {
-    const json = JSON.stringify(this.disk);
+  private async persistDisk(disk: PersistShape): Promise<void> {
+    const json = JSON.stringify(disk);
     const buf = this.backend.encryptString(json);
     await this.backend.writeFile(buf);
   }
@@ -87,15 +87,17 @@ export class ApiKeyStore {
   async setApiKey(provider: AiProviderId, key: string): Promise<{ persisted: boolean }> {
     const trimmed = key.trim();
     if (!trimmed) throw new Error('API key must not be empty.');
-    this.memory.set(provider, trimmed);
     if (!this.backend.isEncryptionAvailable()) {
       // REFUSE PERSIST: never write plaintext to disk.
+      this.memory.set(provider, trimmed);
       return { persisted: false };
     }
     return this.mutate(async () => {
       await this.loadDisk();
-      this.disk[provider] = trimmed;
-      await this.persistDisk();
+      const candidate = { ...this.disk, [provider]: trimmed };
+      await this.persistDisk(candidate);
+      this.disk = candidate;
+      this.memory.set(provider, trimmed);
       return { persisted: true };
     });
   }
@@ -108,15 +110,21 @@ export class ApiKeyStore {
   }
 
   async deleteApiKey(provider: AiProviderId): Promise<void> {
-    this.memory.delete(provider);
+    if (!this.backend.isEncryptionAvailable()) {
+      this.memory.delete(provider);
+      return;
+    }
     await this.mutate(async () => {
       await this.loadDisk();
-      if (this.disk[provider] !== undefined) {
-        delete this.disk[provider];
-        if (this.backend.isEncryptionAvailable()) {
-          await this.persistDisk();
-        }
+      if (this.disk[provider] === undefined) {
+        this.memory.delete(provider);
+        return;
       }
+      const candidate = { ...this.disk };
+      delete candidate[provider];
+      await this.persistDisk(candidate);
+      this.disk = candidate;
+      this.memory.delete(provider);
     });
   }
 
