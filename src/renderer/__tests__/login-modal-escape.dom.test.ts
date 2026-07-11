@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { openLoginModal } from '../login-modal';
-import { setLocale } from '../i18n';
+import { setLocale, type Locale } from '../i18n';
 
 function setupApi() {
   let cb: ((u: unknown) => void) | undefined;
@@ -20,6 +20,22 @@ beforeEach(() => {
   document.body.innerHTML = '';
   setLocale('en');
 });
+afterEach(() => {
+  document.querySelector<HTMLButtonElement>('#login-close')?.click();
+  document.body.innerHTML = '';
+  setLocale('en');
+});
+
+const LOGIN_ERROR_EXPECTATIONS: ReadonlyArray<{ locale: Locale; copy: string }> = [
+  { locale: 'en', copy: "Couldn't request a device code. Check your connection and try again." },
+  { locale: 'ko', copy: '디바이스 코드를 요청하지 못했습니다. 연결을 확인한 후 다시 시도하세요.' },
+  { locale: 'zh-Hans', copy: '无法请求设备代码。请检查网络连接后重试。' },
+  { locale: 'zh-Hant', copy: '無法請求裝置代碼。請檢查網路連線後再試一次。' },
+  { locale: 'ja', copy: 'デバイスコードを要求できませんでした。接続を確認して、もう一度お試しください。' },
+];
+
+const EN_LOGIN_ERROR = LOGIN_ERROR_EXPECTATIONS[0].copy;
+const HTML_LIKE_DETAIL = '<script>alert(1)</script>';
 
 describe('login-modal dynamic-value escaping (S4)', () => {
   it('renders an HTML-like email as text, not markup', () => {
@@ -31,24 +47,29 @@ describe('login-modal dynamic-value escaping (S4)', () => {
     expect(body.textContent).toContain('<img src=x onerror=alert(1)>');
   });
 
-  it('escapes diagnostic detail while localizing the primary error', () => {
-    const { emit } = setupApi();
-    openLoginModal({ onAfterLogin: vi.fn() });
-    emit({ kind: 'error', code: 'device_code_request_failed', detail: '<script>alert(1)</script>' });
-    const body = document.querySelector('#login-body')!;
-    expect(body.querySelector('script')).toBeNull();
-    expect(body.textContent).toContain("Couldn't request a device code.");
-    expect(body.textContent).toContain('<script>alert(1)</script>');
-  });
+  it('escapes diagnostics and localizes device-code errors across all five locales', () => {
+    try {
+      for (const { locale, copy } of LOGIN_ERROR_EXPECTATIONS) {
+        setLocale(locale);
+        const { emit } = setupApi();
+        openLoginModal({ onAfterLogin: vi.fn() });
+        emit({ kind: 'error', code: 'device_code_request_failed', detail: HTML_LIKE_DETAIL });
 
-  it('renders the error code through the active non-English locale', () => {
-    const { emit } = setupApi();
-    setLocale('ko');
-    openLoginModal({ onAfterLogin: vi.fn() });
-    emit({ kind: 'error', code: 'timeout_or_incomplete_response' });
-    const body = document.querySelector('#login-body')!;
-    expect(body.textContent).toContain('로그인 시간이 초과되었거나 완료되지 않았습니다.');
-    expect(body.textContent).not.toContain('login.error.');
+        const body = document.querySelector('#login-body')!;
+        const primaryError = body.querySelector('.login-sub')!;
+        expect(primaryError.textContent, `primary error @ ${locale}`).toBe(copy);
+        expect(body.textContent).not.toContain('login.error.device_code_request_failed');
+        expect(body.querySelector('script')).toBeNull();
+        expect(body.textContent).toContain(HTML_LIKE_DETAIL);
+        if (locale !== 'en') expect(body.textContent).not.toContain(EN_LOGIN_ERROR);
+
+        document.querySelector<HTMLButtonElement>('#login-close')!.click();
+        expect(document.querySelector('.login-modal-root')).toBeNull();
+      }
+    } finally {
+      document.querySelector<HTMLButtonElement>('#login-close')?.click();
+      setLocale('en');
+    }
   });
 
   it('escapes the device usercode + verification URI', () => {

@@ -64,6 +64,14 @@ describe('i18n — 5 locales (#3)', () => {
     setLocale('zh-Hant');
     expect(t('menu.lang.zhHant')).toBe('繁體中文');
   });
+  it('uses Traditional Chinese row terminology in the destructive row confirmation (G007)', () => {
+    setLocale('zh-Hant');
+    const confirmation = t('table.confirmDeleteRow');
+
+    expect(confirmation).toBe('刪除此行？其中有資料。');
+    expect(confirmation).toContain('刪除此行');
+    expect(confirmation).not.toContain('刪除此列');
+  });
 
   it('falls back to English for an unknown key', () => {
     setLocale('ja');

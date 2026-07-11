@@ -5,7 +5,8 @@ import { mountProviderSettingsPanel, type ProviderStatusView } from '../provider
 import { openSettingsModal } from '../settings-modal';
 import { mountStyleSettingPanel } from '../style-setting-panel';
 import { DEFAULT_STYLE } from '../humanize-engine';
-import { setLocale } from '../i18n';
+import { setLocale, type Locale } from '../i18n';
+import type { ProviderAuthStatus } from '../../main/ai/types';
 
 afterEach(() => {
   document.body.innerHTML = '';
@@ -18,6 +19,79 @@ const statuses: ProviderStatusView[] = [
   { provider: 'claude', label: 'Claude', authKind: 'api_key', connected: false },
   { provider: 'openrouter', label: 'OpenRouter', authKind: 'api_key', connected: false },
 ];
+const SETTINGS_LOCALE_EXPECTATIONS: ReadonlyArray<{
+  locale: Locale;
+  dialog: string;
+  close: string;
+  grokSetupError: string;
+}> = [
+  {
+    locale: 'en',
+    dialog: 'Settings',
+    close: 'Close',
+    grokSetupError: 'Grok CLI is unavailable. Install it and run `grok login` in a terminal, then reopen the app.',
+  },
+  {
+    locale: 'ko',
+    dialog: '설정',
+    close: '닫기',
+    grokSetupError: 'Grok CLI를 사용할 수 없습니다. 설치한 뒤 터미널에서 `grok login`을 실행하고 앱을 다시 여세요.',
+  },
+  {
+    locale: 'zh-Hans',
+    dialog: '设置',
+    close: '关闭',
+    grokSetupError: 'Grok CLI 不可用。请安装后在终端运行 `grok login`，然后重新打开应用。',
+  },
+  {
+    locale: 'zh-Hant',
+    dialog: '設定',
+    close: '關閉',
+    grokSetupError: 'Grok CLI 無法使用。請安裝後在終端機執行 `grok login`，然後重新開啟應用程式。',
+  },
+  {
+    locale: 'ja',
+    dialog: '設定',
+    close: '閉じる',
+    grokSetupError: 'Grok CLI は利用できません。インストール後にターミナルで `grok login` を実行し、アプリを開き直してください。',
+  },
+];
+
+const EN_GROK_SETUP_ERROR = SETTINGS_LOCALE_EXPECTATIONS[0].grokSetupError;
+const GROK_SETUP_STATUS: ProviderAuthStatus = {
+  provider: 'grok',
+  label: 'Grok (CLI)',
+  authKind: 'cli',
+  connected: false,
+  errorCode: 'grok_cli_setup_required',
+};
+
+function installProviderStatusApi() {
+  const apiWindow = window as unknown as { api?: unknown };
+  const hadApi = Object.prototype.hasOwnProperty.call(window, 'api');
+  const previousApi = apiWindow.api;
+  apiWindow.api = {
+    aiProvidersStatus: vi.fn().mockResolvedValue([GROK_SETUP_STATUS]),
+    localAiGetConfig: vi.fn().mockResolvedValue({
+      ollama: 'http://127.0.0.1:11434',
+      lmstudio: 'http://127.0.0.1:1234',
+    }),
+    aiModels: vi.fn().mockResolvedValue([]),
+    mdHandlerStatus: vi.fn().mockResolvedValue({ supported: false, registered: false }),
+  };
+
+  return () => {
+    if (hadApi) apiWindow.api = previousApi;
+    else Reflect.deleteProperty(apiWindow, 'api');
+  };
+}
+
+async function flushSettingsRender() {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+}
 
 function mountProviders(over: Partial<Parameters<typeof mountProviderSettingsPanel>[1]> = {}) {
   const parent = document.createElement('div');
@@ -178,44 +252,51 @@ describe('mountProviderSettingsPanel — local providers (G003)', () => {
   });
 });
 describe('openSettingsModal — accessibility', () => {
-  it('localizes the dialog and close button accessible labels in Korean', () => {
-    setLocale('ko');
+  it('localizes dialog and close accessible labels across all five locales', () => {
+    try {
+      for (const { locale, dialog: dialogLabel, close: closeLabel } of SETTINGS_LOCALE_EXPECTATIONS) {
+        setLocale(locale);
+        openSettingsModal({ onSetCustomModel: vi.fn() });
 
-    openSettingsModal({ onSetCustomModel: vi.fn() });
+        const dialog = document.querySelector<HTMLElement>('.settings-modal')!;
+        const close = document.querySelector<HTMLButtonElement>('#settings-close')!;
+        expect(dialog.getAttribute('aria-label'), `dialog label @ ${locale}`).toBe(dialogLabel);
+        expect(close.getAttribute('aria-label'), `close label @ ${locale}`).toBe(closeLabel);
 
-    const dialog = document.querySelector<HTMLElement>('.settings-modal')!;
-    const close = document.querySelector<HTMLButtonElement>('#settings-close')!;
-    expect(dialog.getAttribute('aria-label')).toBe('설정');
-    expect(close.getAttribute('aria-label')).toBe('닫기');
-
-    close.click();
+        close.click();
+        expect(document.querySelector('.settings-modal-root')).toBeNull();
+      }
+    } finally {
+      document.querySelector<HTMLButtonElement>('#settings-close')?.click();
+      setLocale('en');
+    }
   });
-  it('localizes stable provider setup codes before rendering them', async () => {
-    setLocale('ko');
-    (window as unknown as { api: unknown }).api = {
-      aiProvidersStatus: vi.fn().mockResolvedValue([
-        {
-          provider: 'grok',
-          label: 'Grok (CLI)',
-          authKind: 'cli',
-          connected: false,
-          errorCode: 'grok_cli_setup_required',
-        },
-      ]),
-      localAiGetConfig: vi.fn().mockResolvedValue({
-        ollama: 'http://127.0.0.1:11434',
-        lmstudio: 'http://127.0.0.1:1234',
-      }),
-      aiModels: vi.fn().mockResolvedValue([]),
-      mdHandlerStatus: vi.fn().mockResolvedValue({ supported: false, registered: false }),
-    };
 
-    openSettingsModal({ onSetCustomModel: vi.fn() });
-    await new Promise((resolve) => setTimeout(resolve, 0));
+  it('localizes stable provider setup codes across all five locales', async () => {
+    const restoreApi = installProviderStatusApi();
+    try {
+      for (const { locale, grokSetupError } of SETTINGS_LOCALE_EXPECTATIONS) {
+        setLocale(locale);
+        openSettingsModal({ onSetCustomModel: vi.fn() });
+        await flushSettingsRender();
 
-    const error = document.querySelector('.prov-error')!;
-    expect(error.textContent).toContain('Grok CLI를 사용할 수 없습니다.');
-    expect(error.textContent).not.toContain('Grok CLI is unavailable');
-    expect(document.querySelectorAll('.prov-local-note')).toHaveLength(0);
+        const error = document.querySelector<HTMLElement>('.prov-error')!;
+        expect(error.textContent, `Grok setup error @ ${locale}`).toBe(grokSetupError);
+        expect(error.textContent).not.toContain('settings.prov.error.grokCliSetupRequired');
+        expect(error.textContent?.match(/grok login/g)).toHaveLength(1);
+        expect(document.querySelectorAll('.prov-local-note')).toHaveLength(0);
+        if (locale !== 'en') {
+          expect(error.textContent).not.toContain(EN_GROK_SETUP_ERROR);
+          expect(error.textContent).not.toContain('Grok CLI is unavailable');
+        }
+
+        document.querySelector<HTMLButtonElement>('#settings-close')!.click();
+        expect(document.querySelector('.settings-modal-root')).toBeNull();
+      }
+    } finally {
+      document.querySelector<HTMLButtonElement>('#settings-close')?.click();
+      restoreApi();
+      setLocale('en');
+    }
   });
 });
