@@ -193,6 +193,7 @@ describe('renderProviderSettingsPanel — CLI providers (G006)', () => {
         label: 'Grok (CLI)',
         authKind: 'cli',
         connected: false,
+        installed: true,
         authUnverified: true,
         error: 'Grok CLI is installed, but its sign-in status could not be verified. Run `grok login` in a terminal, then reopen the app.',
       }],
@@ -203,5 +204,24 @@ describe('renderProviderSettingsPanel — CLI providers (G006)', () => {
     expect(html).not.toContain('Not connected');
     expect(html).not.toContain('No AI provider connected');
     expect((html.match(/prov-local-note/g) ?? [])).toHaveLength(0);
+  });
+  it('a contradictory unverified-but-not-installed shape stays non-usable (mirrors the registry gate)', () => {
+    const html = renderProviderSettingsPanel({
+      statuses: [{
+        provider: 'grok',
+        label: 'Grok (CLI)',
+        authKind: 'cli',
+        connected: false,
+        installed: false,
+        authUnverified: true,
+        error: 'Grok CLI is unavailable. Install it and run `grok login` in a terminal, then reopen the app.',
+      }],
+    });
+    // Onboarding stays visible and the row reads as a coherent missing-CLI state,
+    // never as an unverified-but-ready provider.
+    expect(html).toContain('No AI provider connected');
+    expect(html).not.toContain('prov-status-unknown');
+    expect(html).not.toContain('Status unverified');
+    expect(html).toContain('Not connected');
   });
 });

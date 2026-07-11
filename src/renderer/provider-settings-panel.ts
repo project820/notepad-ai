@@ -30,6 +30,8 @@ export type ProviderStatusView = {
   connected: boolean;
   /** True when authentication cannot be verified but the provider may be usable. */
   authUnverified?: boolean;
+  /** CLI providers: whether the executable was found (installation, not auth). */
+  installed?: boolean;
   connectionSource?: ProviderAuthStatus['connectionSource'];
   accountLabel?: string;
   keyLast4?: string;
@@ -78,6 +80,14 @@ function escapeHTML(raw: string): string {
     .replace(/'/g, '&#39;');
 }
 
+// Mirrors the registry's isAttemptableStatus(): usable means connected, or a
+// CLI whose executable is installed but whose auth cannot be verified. A
+// contradictory shape (unverified but not installed) is NOT usable and must
+// not suppress onboarding or render an unverified badge.
+function isAttemptableView(s: ProviderStatusView): boolean {
+  return s.connected || (s.authKind === 'cli' && s.installed === true && s.authUnverified === true);
+}
+
 function statusLine(s: ProviderStatusView): string {
   if (s.authKind === 'local') {
     // Local servers are discovery, not auth: only surface a positive "models
@@ -88,7 +98,7 @@ function statusLine(s: ProviderStatusView): string {
     }
     return '';
   }
-  if (s.authUnverified) {
+  if (s.authKind === 'cli' && s.installed === true && s.authUnverified) {
     return `<span class="prov-status prov-status-unknown">${escapeHTML(t('settings.prov.unverified'))}</span>`;
   }
   if (!s.connected) {
@@ -165,7 +175,7 @@ export function renderProviderSettingsPanel(opts: ProviderSettingsRenderOptions)
   // local providers report a static `connected: true`, so they alone must not
   // silence the cloud sign-in nudge, but a working local server (models found)
   // should.
-  const anyCloudUsable = statuses.some((s) => s.authKind !== 'local' && (s.connected || s.authUnverified));
+  const anyCloudUsable = statuses.some((s) => s.authKind !== 'local' && isAttemptableView(s));
   const anyLocalModels = statuses.some((s) => s.authKind === 'local' && (s.localModelCount ?? 0) > 0);
   const anyUsable = anyCloudUsable || anyLocalModels;
 

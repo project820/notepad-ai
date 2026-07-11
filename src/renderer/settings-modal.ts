@@ -67,6 +67,7 @@ function toView(s: ProviderAuthStatus, local: LocalViewContext): ProviderStatusV
       connected: s.connected,
       connectionSource: s.connectionSource,
       authUnverified: s.authUnverified,
+      installed: s.installed,
       error: localizedProviderStatusError(s),
       errorDetail: s.error,
     };

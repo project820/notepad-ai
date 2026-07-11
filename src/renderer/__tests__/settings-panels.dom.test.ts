@@ -478,4 +478,31 @@ describe('openSettingsModal — accessibility', () => {
       setLocale('en');
     }
   });
+
+  it('keeps onboarding visible for a contradictory unverified-but-not-installed status (registry parity)', async () => {
+    const restoreApi = installProviderStatusApi(
+      vi.fn().mockResolvedValue([{
+        provider: 'grok',
+        label: 'Grok (CLI)',
+        authKind: 'cli',
+        connected: false,
+        authUnverified: true,
+        installed: false,
+        errorCode: 'grok_cli_setup_required',
+      } satisfies ProviderAuthStatus]),
+    );
+    try {
+      openSettingsModal({ onSetCustomModel: vi.fn() });
+      await flushSettingsRender();
+
+      // Mirrors ProviderRegistry.isAttemptableStatus(): not installed means not
+      // usable — zero-auth onboarding stays, and no unverified badge renders.
+      expect(document.querySelector('.prov-zero-auth')).not.toBeNull();
+      expect(document.querySelector('.prov-status-unknown')).toBeNull();
+      expect(document.querySelector('.prov-status')?.classList.contains('prov-status-off')).toBe(true);
+    } finally {
+      document.querySelector<HTMLButtonElement>('#settings-close')?.click();
+      restoreApi();
+    }
+  });
 });
