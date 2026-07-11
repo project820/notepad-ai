@@ -206,6 +206,47 @@ describe('codex-auth token refresh lifecycle (H-21/H-22)', () => {
       vi.useRealTimers();
     }
   });
+  it.each([
+    ['null body', 'null'],
+    ['empty object', '{}'],
+    ['empty access_token', JSON.stringify({ access_token: '' })],
+    ['non-string access_token', JSON.stringify({ access_token: 42 })],
+  ])('emits a terminal token_exchange_failed on a malformed 2xx token payload (%s)', async (_name, body) => {
+    vi.useFakeTimers();
+    try {
+      global.fetch = vi.fn(async (url: unknown) => {
+        const endpoint = String(url);
+        if (endpoint.includes('usercode')) {
+          return new Response(
+            JSON.stringify({ user_code: 'ABC', device_auth_id: 'dev1', interval: '3' }),
+            { status: 200 },
+          );
+        }
+        if (endpoint.includes('deviceauth/token')) {
+          return new Response(JSON.stringify({ authorization_code: 'code', code_verifier: 'verifier' }), {
+            status: 200,
+          });
+        }
+        return new Response(body, { status: 200 });
+      }) as unknown as typeof fetch;
+
+      const { startLogin } = await import('../main/codex-auth');
+      const updates: Array<{ kind: string; code?: string; detail?: string }> = [];
+      const login = startLogin((u) => updates.push(u));
+      await vi.advanceTimersByTimeAsync(3_000);
+
+      // The flow must terminate the login promise AND end on a terminal error —
+      // a malformed 2xx grant must never hang or report a tokenless success.
+      await expect(login).resolves.toBeUndefined();
+      const last = updates.at(-1)!;
+      expect(last.kind).toBe('error');
+      expect(last.code).toBe('token_exchange_failed');
+      expect(updates.some((u) => u.kind === 'success')).toBe(false);
+      expect(h.writeFile).not.toHaveBeenCalled(); // nothing persisted for a bad grant
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('codex-auth forced refresh (Bug A: 401 hard refresh)', () => {
