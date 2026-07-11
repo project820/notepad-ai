@@ -96,6 +96,7 @@ export function createAppWindows({
   const approvedCloseWindowIds = new Set<number>();
   const pendingState = new Map<string, { webContentsId: number; resolve: (state: CloseGuardState | null) => void }>();
   const pendingSave = new Map<string, { webContentsId: number; resolve: (saved: boolean) => void }>();
+  const windowLocales = new Map<number, CloseGuardState['locale']>();
 
   const requestId = (kind: string, win: BrowserWindow) => `${kind}:${win.id}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
   const waitFor = <T>(
@@ -147,18 +148,26 @@ export function createAppWindows({
     if (!pending || pending.webContentsId !== event.sender.id) return;
     pending.resolve(value.saved === true);
   });
+  onTrusted('close:locale', (event, locale: unknown) => {
+    const rec = registry.getByWebContents(event.sender.id);
+    if (rec) windowLocales.set(rec.windowId, normalizeCloseGuardLocale(locale));
+  });
 
   const queryCloseState = async (win: BrowserWindow): Promise<CloseGuardState> => {
     const rec = registry.get(win.id);
-    if (!rec || !rec.ready || win.isDestroyed()) return stateFromSnapshot(rec?.lastSnapshot);
+    const fallback = stateFromSnapshot(rec?.lastSnapshot);
+    if (!rec || !rec.ready || win.isDestroyed()) {
+      return { ...fallback, locale: windowLocales.get(win.id) ?? fallback.locale };
+    }
     const id = requestId('state', win);
-    return (await waitFor(
+    const live = await waitFor(
       pendingState,
       id,
       win.webContents.id,
       () => win.webContents.send('close:query-state', { requestId: id }),
       null,
-    )) ?? stateFromSnapshot(rec.lastSnapshot);
+    );
+    return live ?? { ...fallback, locale: windowLocales.get(win.id) ?? fallback.locale };
   };
 
   const saveFromRenderer = async (win: BrowserWindow): Promise<boolean> => {
@@ -360,6 +369,7 @@ export function createAppWindows({
       fileGrants.release(record.webContentsId);
       projectWizardRoots.release(record.webContentsId);
       approvedCloseWindowIds.delete(win.id);
+      windowLocales.delete(win.id);
       if (!preserveSessionOnClose) {
         void removeSessionWindow(record.windowKey).catch((error) => {
           console.error('[session] failed to remove closed window:', error);

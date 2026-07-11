@@ -163,6 +163,8 @@ const api = {
   },
   sendCloseSaveResult: (requestId: string, saved: boolean): void =>
     ipcRenderer.send('close:save-result', { requestId, saved }),
+  setCloseLocale: (locale: 'en' | 'ko' | 'zh-Hans' | 'zh-Hant' | 'ja'): void =>
+    ipcRenderer.send('close:locale', locale),
 
   checkForUpdate: (): Promise<{ updateAvailable: boolean; currentVersion: string; latestVersion: string; url: string } | null> =>
     ipcRenderer.invoke('update:check'),

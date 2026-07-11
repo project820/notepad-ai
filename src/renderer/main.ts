@@ -202,6 +202,8 @@ docLifecycle.wireFileOpened();
 
 
 docLifecycle.wireMenuActions(cyclePreviewMode);
+window.api.setCloseLocale(getLocale());
+onLocaleChange((locale) => window.api.setCloseLocale(locale));
 window.api.onCloseQueryState((requestId) => {
   window.api.sendCloseState(requestId, {
     dirty: ctx.dirty,
