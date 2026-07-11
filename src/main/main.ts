@@ -14,7 +14,6 @@ import {
   MAX_CONVERT_BYTES,
   checkBase64SizePrecap,
   checkMagicBytes,
-  withWallClockTimeout,
 } from './converter-bounds';
 import { isTrustedAppUrl, SECURITY_REASON } from './security';
 import { handleTrusted, onTrusted } from './ipc-guard';
@@ -22,6 +21,7 @@ import { FileGrants } from './file-grants';
 import { KeyedMutex } from './keyed-mutex';
 import { canonicalNewTarget, isRealpathWithinRoot, type IdentityFs } from './path-identity';
 import { ConverterHost, type WorkerTransport } from './converter-host';
+import { convertDocument as convertIsolatedDocument } from './converter-service';
 import {
   getSessionAggregate,
   mutateSessionAggregate,
@@ -124,44 +124,12 @@ const converterHost = new ConverterHost((): WorkerTransport => {
   };
 }, { timeoutMs: CONVERT_TIMEOUT_MS });
 
-/**
- * Convert a document to markdown/html. Primary path is the isolated worker; if the
- * worker is unavailable/crashes/times out, fall back to a bounded in-main parse so
- * the feature never hard-breaks. Callers apply the Phase 0 size/precap first.
- */
+/** Convert a document to markdown/html through the isolated utility-process worker. */
 async function convertDocument(
   ext: string,
   buf: Buffer,
 ): Promise<{ ok: boolean; markdown?: string; html?: string; error?: string }> {
-  try {
-    const r = await converterHost.runConvert(ext, buf);
-    return r.ok ? { ok: true, markdown: r.markdown, html: r.html } : { ok: false, error: r.error };
-  } catch (workerErr) {
-    console.warn('[converter] isolated worker failed; falling back to in-main parse:', workerErr);
-    try {
-      const nativeImport: (s: string) => Promise<any> = new Function('s', 'return import(s)') as any;
-      const kordoc = await nativeImport('kordoc');
-      const parseFn = kordoc.parse ?? kordoc.default?.parse;
-      const renderHtml = kordoc.renderHtml ?? kordoc.default?.renderHtml;
-      if (typeof parseFn !== 'function') return { ok: false, error: 'Document converter unavailable.' };
-      const r = await withWallClockTimeout<any>(() => parseFn(buf, { removeHeaderFooter: true }), CONVERT_TIMEOUT_MS);
-      if (r?.success && typeof r.markdown === 'string') {
-        let html: string | undefined;
-        if (typeof renderHtml === 'function') {
-          try {
-            html = renderHtml(r.markdown, { preset: 'gov-formal' });
-          } catch {
-            /* raw markdown fallback */
-          }
-        }
-        return { ok: true, markdown: r.markdown, html };
-      }
-      const msg = ('error' in (r ?? {}) && (r as any).error?.message) || 'unknown error';
-      return { ok: false, error: `Could not convert ${ext.toUpperCase()}: ${msg}` };
-    } catch (e: any) {
-      return { ok: false, error: `Failed to convert ${ext.toUpperCase()}: ${e?.message ?? e}` };
-    }
-  }
+  return convertIsolatedDocument(converterHost, ext, buf);
 }
 let appIsReady = false;
 /** The blank window created on a normal launch; the first macOS open-file may reuse it. */

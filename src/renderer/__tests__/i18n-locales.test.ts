@@ -151,6 +151,13 @@ describe('i18n — 5 locales (#3)', () => {
         'zh-Hant': '已在另一個視窗中開啟 — 已切換到該視窗。',
         ja: '別のウィンドウで既に開いています — そのウィンドウに切り替えました。',
       },
+      'file.convert.workerFailed': {
+        en: 'The document converter stopped unexpectedly. Please try again.',
+        ko: '문서 변환기가 예기치 않게 중지되었습니다. 다시 시도해주세요.',
+        'zh-Hans': '文档转换器意外停止。请重试。',
+        'zh-Hant': '文件轉換器意外停止。請再試一次。',
+        ja: '文書コンバーターが予期せず停止しました。もう一度お試しください。',
+      },
     };
     for (const [key, perLocale] of Object.entries(expected)) {
       for (const [loc, label] of Object.entries(perLocale)) {

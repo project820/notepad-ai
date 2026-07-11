@@ -994,7 +994,7 @@ window.api.onFileOpened((payload: any) => {
     error?: string;
   };
   if (error) {
-    statusEl.textContent = `⚠ ${error}`;
+    statusEl.textContent = `⚠ ${error === 'converter-worker-failed' ? t('file.convert.workerFailed') : error}`;
     return;
   }
   currentPath = filePath ?? null;
