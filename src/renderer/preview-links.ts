@@ -1,3 +1,4 @@
+import { classifyLinkHref } from './link-policy';
 /**
  * Preview link & footnote interactions (#2):
  *  - web URLs (http/https) open in the external browser (via injected opener),
@@ -112,4 +113,22 @@ export function wirePreviewLinks(root: HTMLElement, opts: WirePreviewLinksOption
     clearBack();
     hideTip();
   };
+}
+export function installDocumentLinkBackstop(previewEl: HTMLElement, openExternal: (url: string) => void) {
+  document.addEventListener('submit', (e) => e.preventDefault(), true);
+  document.addEventListener(
+    'click',
+    (e) => {
+      const anchor = (e.target as Element | null)?.closest?.('a');
+      if (!anchor || previewEl.contains(anchor)) return;
+      const decision = classifyLinkHref(anchor.getAttribute('href'));
+      if (decision.action === 'external') {
+        e.preventDefault();
+        openExternal(decision.url);
+      } else if (decision.action === 'deny') {
+        e.preventDefault();
+      }
+    },
+    true,
+  );
 }

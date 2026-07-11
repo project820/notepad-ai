@@ -249,3 +249,19 @@ function openCellMenu(
     window.addEventListener('scroll', closeCellMenu, { once: true, capture: true });
   }, 0);
 }
+export function relabelPreviewTableToolbars(root: HTMLElement) {
+  const labelMap: Record<string, [string, string]> = {
+    'row+': ['table.addRow', 'table.addRowTitle'],
+    'col+': ['table.addCol', 'table.addColTitle'],
+    'row-': ['table.delRow', 'table.delRowTitle'],
+    'col-': ['table.delCol', 'table.delColTitle'],
+  };
+  root
+    .querySelectorAll<HTMLButtonElement>('.preview-table-wrap .table-toolbar button[data-act]')
+    .forEach((btn) => {
+      const pair = labelMap[btn.dataset.act ?? ''];
+      if (!pair) return;
+      btn.textContent = t(pair[0]);
+      btn.setAttribute('data-tooltip', t(pair[1]));
+    });
+}

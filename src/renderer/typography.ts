@@ -54,3 +54,7 @@ export function typographyCssVars(p: TypographyPref): Record<string, string> {
     '--type-line-height': `${p.lineHeight}`,
   };
 }
+export function applyTypography(p: TypographyPref) {
+  const vars = typographyCssVars(p);
+  for (const [key, value] of Object.entries(vars)) document.documentElement.style.setProperty(key, value);
+}
