@@ -22,6 +22,8 @@ import { KeyedMutex } from './keyed-mutex';
 import { canonicalNewTarget, isRealpathWithinRoot, type IdentityFs } from './path-identity';
 import { ConverterHost, type WorkerTransport } from './converter-host';
 import { convertDocument as convertIsolatedDocument } from './converter-service';
+import { saveDocumentAtomically } from './document-save';
+import { nodeAtomicBackend } from './atomic-write';
 import {
   getSessionAggregate,
   mutateSessionAggregate,
@@ -112,6 +114,8 @@ const nodeIdentityFs: IdentityFs = {
     return { dev: s.dev, ino: s.ino };
   },
 };
+/** Shared backend for crash-safe document saves. */
+const documentAtomicBackend = nodeAtomicBackend();
 
 /** Run kordoc conversion in an isolated utilityProcess (Phase 3 fault isolation). */
 const converterHost = new ConverterHost((): WorkerTransport => {
@@ -708,7 +712,7 @@ handleTrusted('file:save', async (event, args: { filePath: string | null; conten
       registry.claimPath(rec.windowId, finalTarget);
     }
     try {
-      await fs.writeFile(finalTarget, args.content, 'utf-8');
+      await saveDocumentAtomically(finalTarget, args.content, { fs, backend: documentAtomicBackend });
     } catch (e) {
       return { saved: false as const, error: e instanceof Error ? e.message : 'write-failed' };
     }
