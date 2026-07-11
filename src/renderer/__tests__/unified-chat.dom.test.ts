@@ -116,6 +116,34 @@ describe('mountUnifiedChat — modes', () => {
     expect(composer.hidden).toBe(false);
     expect(input.value).toBe('keep this draft');
   });
+  it('follows the ARIA tab contract with roving focus and keyboard activation', () => {
+    const { parent, handle } = mount();
+    const write = parent.querySelector<HTMLButtonElement>('[data-mode="write"]')!;
+    const advise = parent.querySelector<HTMLButtonElement>('[data-mode="advise"]')!;
+    const html = parent.querySelector<HTMLButtonElement>('[data-mode="html"]')!;
+    const panel = parent.querySelector<HTMLElement>('[role="tabpanel"]')!;
+
+    expect(write.getAttribute('aria-controls')).toBe(panel.id);
+    expect(write.tabIndex).toBe(0);
+    expect(advise.tabIndex).toBe(-1);
+
+    write.focus();
+    write.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    expect(handle.getMode()).toBe('advise');
+    expect(advise.getAttribute('aria-selected')).toBe('true');
+    expect(advise.tabIndex).toBe(0);
+    expect(write.tabIndex).toBe(-1);
+    expect(document.activeElement).toBe(advise);
+    expect(panel.getAttribute('aria-labelledby')).toBe(advise.id);
+
+    advise.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+    expect(document.activeElement).toBe(html);
+    expect(html.getAttribute('aria-selected')).toBe('true');
+
+    html.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+    expect(document.activeElement).toBe(write);
+    expect(write.getAttribute('aria-selected')).toBe('true');
+  });
 
   it('switching to write clears a transient panel and notifies onModeChange', () => {
     const onModeChange = vi.fn();

@@ -126,26 +126,28 @@ const STYLE_GEAR_ICON =
 export function renderUnifiedChat(): string {
   return `<div class="uc-root">
   <div class="uc-modes" role="tablist">
-    <button class="uc-mode" data-mode="write" aria-selected="true" type="button">${t('uc.write')}</button>
-    <button class="uc-mode" data-mode="advise" aria-selected="false" type="button">${t('uc.advise')}</button>
-    <button class="uc-mode" data-mode="project" aria-selected="false" type="button">${t('uc.project')}</button>
-    <button class="uc-mode" data-mode="html" aria-selected="false" type="button">${t('he.button')}</button>
+    <button class="uc-mode" data-mode="write" aria-selected="true" id="uc-tab-write" role="tab" aria-controls="uc-panel" tabindex="0" type="button">${t('uc.write')}</button>
+    <button class="uc-mode" data-mode="advise" aria-selected="false" id="uc-tab-advise" role="tab" aria-controls="uc-panel" tabindex="-1" type="button">${t('uc.advise')}</button>
+    <button class="uc-mode" data-mode="project" aria-selected="false" id="uc-tab-project" role="tab" aria-controls="uc-panel" tabindex="-1" type="button">${t('uc.project')}</button>
+    <button class="uc-mode" data-mode="html" aria-selected="false" id="uc-tab-html" role="tab" aria-controls="uc-panel" tabindex="-1" type="button">${t('he.button')}</button>
     <button class="uc-style-toggle" type="button" hidden data-tooltip="${t('style.title')}" aria-label="${t('style.title')}" aria-expanded="false">${STYLE_GEAR_ICON}</button>
   </div>
   <div class="uc-style-panel" hidden></div>
-  <div class="uc-thread" role="log"></div>
-  <div class="uc-write-help" hidden>${t('uc.writeHelp')}</div>
-  <div class="uc-advise-bar" hidden>
-    <span class="uc-advise-status"></span>
-    <button class="uc-advise-resync" type="button">${t('uc.advise.resync')}</button>
-  </div>
-  <div class="uc-chips" hidden></div>
-  <div class="uc-tool-notice" hidden aria-live="polite"></div>
-  <div class="uc-composer">
-    <button class="uc-attach" type="button" data-tooltip="${t('uc.attach')}" aria-label="${t('uc.attach')}">+</button>
-    <input class="uc-file" type="file" accept="image/png,image/jpeg,image/webp,.txt,.md,.markdown,.mdx,.csv,.tsv,.json,.yaml,.yml,.xml,.html,.css,.log,.pdf,.docx,.xlsx,.xls,.hwp,.hwpx,text/*" multiple hidden />
-    <textarea class="uc-input" rows="2" placeholder="${t('uc.placeholder')}" aria-label="${t('uc.write')}"></textarea>
-    <button class="uc-send" type="button">${t('uc.send')}</button>
+  <div class="uc-panel" id="uc-panel" role="tabpanel" aria-labelledby="uc-tab-write">
+    <div class="uc-thread" role="log"></div>
+    <div class="uc-write-help" hidden>${t('uc.writeHelp')}</div>
+    <div class="uc-advise-bar" hidden>
+      <span class="uc-advise-status"></span>
+      <button class="uc-advise-resync" type="button">${t('uc.advise.resync')}</button>
+    </div>
+    <div class="uc-chips" hidden></div>
+    <div class="uc-tool-notice" hidden aria-live="polite"></div>
+    <div class="uc-composer">
+      <button class="uc-attach" type="button" data-tooltip="${t('uc.attach')}" aria-label="${t('uc.attach')}">+</button>
+      <input class="uc-file" type="file" accept="image/png,image/jpeg,image/webp,.txt,.md,.markdown,.mdx,.csv,.tsv,.json,.yaml,.yml,.xml,.html,.css,.log,.pdf,.docx,.xlsx,.xls,.hwp,.hwpx,text/*" multiple hidden />
+      <textarea class="uc-input" rows="2" placeholder="${t('uc.placeholder')}" aria-label="${t('uc.write')}"></textarea>
+      <button class="uc-send" type="button">${t('uc.send')}</button>
+    </div>
   </div>
 </div>`;
 }
@@ -171,6 +173,7 @@ export function mountUnifiedChat(parent: HTMLElement, handlers: UnifiedChatHandl
   const adviseBar = parent.querySelector<HTMLElement>('.uc-advise-bar')!;
   const toolNotice = parent.querySelector<HTMLElement>('.uc-tool-notice')!;
   const composer = parent.querySelector<HTMLElement>('.uc-composer')!;
+  const panel = parent.querySelector<HTMLElement>('.uc-panel')!;
   const adviseStatus = parent.querySelector<HTMLElement>('.uc-advise-status')!;
   let mode: ChatMode = 'write';
   const chips = parent.querySelector<HTMLElement>('.uc-chips')!;
@@ -390,23 +393,49 @@ export function mountUnifiedChat(parent: HTMLElement, handlers: UnifiedChatHandl
     styleToggle.setAttribute('aria-expanded', String(show));
   };
 
-  const onModeClick = (e: Event) => {
-    if ((e.target as HTMLElement).closest('.uc-style-toggle')) {
-      toggleStylePanel();
-      return;
-    }
-    const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('.uc-mode');
-    if (!btn) return;
+  const activateMode = (btn: HTMLButtonElement) => {
     mode = (btn.dataset.mode as ChatMode) ?? 'write';
-    for (const m of parent.querySelectorAll<HTMLButtonElement>('.uc-mode')) {
-      m.setAttribute('aria-selected', String(m === btn));
+    for (const tab of parent.querySelectorAll<HTMLButtonElement>('.uc-mode')) {
+      const active = tab === btn;
+      tab.setAttribute('aria-selected', String(active));
+      tab.tabIndex = active ? 0 : -1;
     }
+    panel.setAttribute('aria-labelledby', btn.id);
     // Leaving project/html drops their transient panel (AC5: no lingering panel).
     if (mode === 'write' || mode === 'advise') clearPanel();
     handlers.onModeChange?.(mode);
     if (mode === 'project') handlers.onProjectSetup?.();
     else if (mode === 'html') handlers.onHtmlExport?.();
     updateChrome();
+  };
+
+  const onModeClick = (e: Event) => {
+    if ((e.target as HTMLElement).closest('.uc-style-toggle')) {
+      toggleStylePanel();
+      return;
+    }
+    const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('.uc-mode');
+    if (btn) activateMode(btn);
+  };
+
+  const onModeKeydown = (e: KeyboardEvent) => {
+    const tabs = Array.from(parent.querySelectorAll<HTMLButtonElement>('.uc-mode'));
+    const current = (e.target as HTMLElement).closest<HTMLButtonElement>('.uc-mode');
+    if (!current) return;
+    const currentIndex = tabs.indexOf(current);
+    if (currentIndex < 0) return;
+
+    let nextIndex: number | null = null;
+    if (e.key === 'ArrowRight') nextIndex = (currentIndex + 1) % tabs.length;
+    else if (e.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+    else if (e.key === 'Home') nextIndex = 0;
+    else if (e.key === 'End') nextIndex = tabs.length - 1;
+    if (nextIndex === null) return;
+
+    e.preventDefault();
+    const next = tabs[nextIndex];
+    next.focus();
+    activateMode(next);
   };
 
   const onAdviseResync = (e: Event) => {
@@ -482,7 +511,9 @@ export function mountUnifiedChat(parent: HTMLElement, handlers: UnifiedChatHandl
     else if (btn.dataset.act === 'copy') handlers.onCopy(text);
   };
 
-  parent.querySelector('.uc-modes')!.addEventListener('click', onModeClick);
+  const modes = parent.querySelector<HTMLElement>('.uc-modes')!;
+  modes.addEventListener('click', onModeClick);
+  modes.addEventListener('keydown', onModeKeydown);
   parent.querySelector('.uc-composer')!.addEventListener('click', onComposerClick);
   parent.querySelector('.uc-composer')!.addEventListener('click', onComposerExtraClick);
   chips.addEventListener('click', onComposerExtraClick);

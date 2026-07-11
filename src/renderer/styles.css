@@ -1452,6 +1452,12 @@ html[data-theme='dark'] .pm-item-selected {
 .uc-host[hidden] { display: none; }
 
 .uc-root { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.uc-panel {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
 
 .uc-modes {
   display: flex;
