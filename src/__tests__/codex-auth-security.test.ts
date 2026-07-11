@@ -175,6 +175,37 @@ describe('codex-auth token refresh lifecycle (H-21/H-22)', () => {
     // The flow must end with a terminal cancel — never hang the renderer's login.
     expect(updates.at(-1)).toEqual({ kind: 'error', code: 'cancelled' });
   });
+  it('emits a terminal persistence error when encrypted storage throws', async () => {
+    vi.useFakeTimers();
+    try {
+      h.writeFile.mockRejectedValueOnce(new Error('disk full'));
+      global.fetch = vi.fn(async (url: unknown) => {
+        const endpoint = String(url);
+        if (endpoint.includes('usercode')) {
+          return new Response(
+            JSON.stringify({ user_code: 'ABC', device_auth_id: 'dev1', interval: '3' }),
+            { status: 200 },
+          );
+        }
+        if (endpoint.includes('deviceauth/token')) {
+          return new Response(JSON.stringify({ authorization_code: 'code', code_verifier: 'verifier' }), {
+            status: 200,
+          });
+        }
+        return new Response(JSON.stringify({ access_token: 'ACCESS', expires_in: 3600 }), { status: 200 });
+      }) as unknown as typeof fetch;
+
+      const { startLogin } = await import('../main/codex-auth');
+      const updates: Array<{ kind: string; code?: string; detail?: string }> = [];
+      const login = startLogin((u) => updates.push(u));
+      await vi.advanceTimersByTimeAsync(3_000);
+
+      await expect(login).resolves.toBeUndefined();
+      expect(updates.at(-1)).toEqual({ kind: 'error', code: 'persist_failed', detail: 'disk full' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('codex-auth forced refresh (Bug A: 401 hard refresh)', () => {

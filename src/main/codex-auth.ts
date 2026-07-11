@@ -2,7 +2,8 @@ import { app, safeStorage, shell } from 'electron';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { readCappedText, STREAM_LIMITS } from './ai/stream-http';
-
+import type { AuthSnapshot, LoginUpdate } from '../shared/auth-protocol';
+export type { AuthSnapshot, AuthWarningCode, LoginErrorCode, LoginUpdate } from '../shared/auth-protocol';
 /**
  * OpenAI Codex device-code OAuth — ported from Hermes (auth.py).
  * Endpoints discovered:
@@ -23,19 +24,6 @@ const OAUTH_TOKEN_URL = `${ISSUER}/oauth/token`;
 const REDIRECT_URI = `${ISSUER}/deviceauth/callback`;
 const REFRESH_SKEW_SECONDS = 120;
 const REFRESH_TIMEOUT_MS = 20_000;
-
-export type AuthWarningCode = 'secure_storage_unavailable';
-
-export type AuthSnapshot = {
-  signedIn: boolean;
-  email?: string;
-  plan?: string;
-  expiresAt?: number;
-  /** True when tokens are persisted to encrypted disk; false = memory-only (session). Non-secret. */
-  persisted?: boolean;
-  /** Non-secret warning code surfaced to the renderer. */
-  warning?: AuthWarningCode;
-};
 
 type StoredAuth = {
   access_token: string;
@@ -160,20 +148,6 @@ function extractEmailPlan(idToken?: string): { email?: string; plan?: string } {
 // ---------------------------------------------------------------
 // Public: login flow
 // ---------------------------------------------------------------
-
-export type LoginErrorCode =
-  | 'device_code_request_failed'
-  | 'device_code_response_invalid'
-  | 'cancelled'
-  | 'polling_failed'
-  | 'polling_status_error'
-  | 'timeout_or_incomplete_response'
-  | 'token_exchange_failed';
-
-export type LoginUpdate =
-  | { kind: 'usercode'; userCode: string; verificationUri: string }
-  | { kind: 'success'; auth: AuthSnapshot }
-  | { kind: 'error'; code: LoginErrorCode; detail?: string };
 
 let activeLoginAbort: AbortController | null = null;
 
@@ -313,7 +287,13 @@ export async function startLogin(onUpdate: (u: LoginUpdate) => void): Promise<vo
     email,
     plan,
   };
-  const { persisted } = await writeStored(stored);
+  let persisted: boolean;
+  try {
+    ({ persisted } = await writeStored(stored));
+  } catch (e: any) {
+    onUpdate({ kind: 'error', code: 'persist_failed', detail: String(e.message ?? e) });
+    return;
+  }
 
   onUpdate({
     kind: 'success',

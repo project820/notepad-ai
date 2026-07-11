@@ -29,6 +29,7 @@ import { typographyCssVars, clampTypography, type TypographyPref } from './typog
 import { wirePreviewLinks } from './preview-links';
 import { mountLeftPanel } from './left-panel';
 import type { FileTreeEntry } from '../shared/file-types';
+import type { AuthSnapshot, LoginUpdate } from '../shared/auth-protocol';
 import type { AiProviderId, ModelRef, ProviderAuthStatus } from '../main/ai/types';
 import { isAiProviderId } from '../main/ai/types';
 import { modelContextWindowTokens } from '../main/ai/output-budget';
@@ -47,31 +48,6 @@ import { installSelectionFormatMenu } from './selection-format-menu';
 import { mountHtmlExportWizard, type HtmlExportWizardHandle } from './html-export-wizard';
 import { HTML_EXPORT_CONTENT_INSTRUCTIONS } from './html-export-content-prompt';
 import { EditorSelection } from '@codemirror/state';
-
-export type AuthWarningCode = 'secure_storage_unavailable';
-
-export type AuthSnapshot = {
-  signedIn: boolean;
-  email?: string;
-  plan?: string;
-  persisted?: boolean;
-  warning?: AuthWarningCode;
-  expiresAt?: number;
-};
-
-export type LoginErrorCode =
-  | 'device_code_request_failed'
-  | 'device_code_response_invalid'
-  | 'cancelled'
-  | 'polling_failed'
-  | 'polling_status_error'
-  | 'timeout_or_incomplete_response'
-  | 'token_exchange_failed';
-
-export type LoginUpdate =
-  | { kind: 'usercode'; userCode: string; verificationUri: string }
-  | { kind: 'success'; auth: AuthSnapshot }
-  | { kind: 'error'; code: LoginErrorCode; detail?: string };
 
 type ProjectWizardSaveApprovedDraftInput = {
   projectFolder: string;

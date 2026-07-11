@@ -1,6 +1,6 @@
 import { trapModalFocus } from './modal-a11y';
 import { t } from './i18n';
-import type { AuthSnapshot } from './main';
+import type { AuthSnapshot } from '../shared/auth-protocol';
 
 function esc(s: string): string {
   return s

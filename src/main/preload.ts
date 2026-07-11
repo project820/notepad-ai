@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { AiProviderErrorKind, AiProviderId, ModelRef, ProviderAuthStatus } from './ai/types';
 import type { FileTreeEntry } from '../shared/file-types';
-import type { AuthSnapshot, LoginUpdate } from './codex-auth';
+import type { AuthSnapshot, LoginUpdate } from '../shared/auth-protocol';
 
 type OpenedFile = {
   filePath: string | null;

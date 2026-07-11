@@ -40,6 +40,10 @@ const LOGIN_ERROR_EXPECTATIONS: ReadonlyArray<{ locale: Locale; copy: string }> 
   { locale: 'zh-Hant', copy: '無法請求裝置代碼。請檢查網路連線後再試一次。' },
   { locale: 'ja', copy: 'デバイスコードを要求できませんでした。接続を確認して、もう一度お試しください。' },
 ];
+const PERSIST_FAILURE_ERROR_EXPECTATIONS: ReadonlyArray<{ locale: Locale; copy: string }> = [
+  { locale: 'en', copy: 'Signed in, but saving your session failed. Try again.' },
+  { locale: 'ko', copy: '로그인했지만 세션을 저장하지 못했습니다. 다시 시도하세요.' },
+];
 
 const EN_LOGIN_ERROR = LOGIN_ERROR_EXPECTATIONS[0].copy;
 const HTML_LIKE_DETAIL = '<script>alert(1)</script>';
@@ -76,6 +80,19 @@ describe('login-modal dynamic-value escaping (S4)', () => {
     } finally {
       document.querySelector<HTMLButtonElement>('#login-close')?.click();
       setLocale('en');
+    }
+  });
+  it('localizes persistence failures in English and Korean', () => {
+    for (const { locale, copy } of PERSIST_FAILURE_ERROR_EXPECTATIONS) {
+      setLocale(locale);
+      const { emit } = setupApi();
+      openLoginModal({ onAfterLogin: vi.fn() });
+      emit({ kind: 'error', code: 'persist_failed' });
+
+      const primaryError = document.querySelector('.login-sub')!;
+      expect(primaryError.textContent, `primary error @ ${locale}`).toBe(copy);
+
+      document.querySelector<HTMLButtonElement>('#login-close')!.click();
     }
   });
 
