@@ -43,8 +43,7 @@ export class ComposedClaudeProvider implements AiProvider {
       authKind: 'api_key',
       connected: false,
       label: 'Claude',
-      error:
-        'Run `claude login` in a terminal to use the free local CLI (then reopen the app), or paste an Anthropic API key below.',
+      errorCode: 'claude_cli_setup_required',
     };
   }
 

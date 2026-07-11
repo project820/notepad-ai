@@ -190,4 +190,32 @@ describe('openSettingsModal — accessibility', () => {
 
     close.click();
   });
+  it('localizes stable provider setup codes before rendering them', async () => {
+    setLocale('ko');
+    (window as unknown as { api: unknown }).api = {
+      aiProvidersStatus: vi.fn().mockResolvedValue([
+        {
+          provider: 'grok',
+          label: 'Grok (CLI)',
+          authKind: 'cli',
+          connected: false,
+          errorCode: 'grok_cli_setup_required',
+        },
+      ]),
+      localAiGetConfig: vi.fn().mockResolvedValue({
+        ollama: 'http://127.0.0.1:11434',
+        lmstudio: 'http://127.0.0.1:1234',
+      }),
+      aiModels: vi.fn().mockResolvedValue([]),
+      mdHandlerStatus: vi.fn().mockResolvedValue({ supported: false, registered: false }),
+    };
+
+    openSettingsModal({ onSetCustomModel: vi.fn() });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const error = document.querySelector('.prov-error')!;
+    expect(error.textContent).toContain('Grok CLI를 사용할 수 없습니다.');
+    expect(error.textContent).not.toContain('Grok CLI is unavailable');
+    expect(document.querySelectorAll('.prov-local-note')).toHaveLength(0);
+  });
 });

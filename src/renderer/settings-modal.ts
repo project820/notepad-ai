@@ -48,6 +48,17 @@ type LocalViewContext = {
   modelCount: (provider: AiProviderId) => number;
 };
 
+function localizedProviderStatusError(s: ProviderAuthStatus): string | undefined {
+  switch (s.errorCode) {
+    case 'claude_cli_setup_required':
+      return t('settings.prov.error.claudeCliSetupRequired');
+    case 'grok_cli_setup_required':
+      return t('settings.prov.error.grokCliSetupRequired');
+    default:
+      return s.error;
+  }
+}
+
 function toView(s: ProviderAuthStatus, local: LocalViewContext): ProviderStatusView | null {
   if (s.authKind === 'local' && (s.provider === 'ollama' || s.provider === 'lmstudio')) {
     // Local servers are discovery, not auth: render a URL row + run-server hint.
@@ -56,7 +67,7 @@ function toView(s: ProviderAuthStatus, local: LocalViewContext): ProviderStatusV
       label: s.label,
       authKind: 'local',
       connected: s.connected,
-      error: s.error,
+      error: localizedProviderStatusError(s),
       localUrl: s.provider === 'ollama' ? local.config.ollama : local.config.lmstudio,
       localUrlDefault: s.provider === 'ollama' ? DEFAULT_OLLAMA_BASE_URL : DEFAULT_LMSTUDIO_BASE_URL,
       localModelCount: local.modelCount(s.provider),
@@ -69,7 +80,7 @@ function toView(s: ProviderAuthStatus, local: LocalViewContext): ProviderStatusV
       label: s.label,
       authKind: 'cli',
       connected: s.connected,
-      error: s.error,
+      error: localizedProviderStatusError(s),
     };
   }
   if (s.provider !== 'chatgpt' && s.provider !== 'claude' && s.provider !== 'openrouter') return null;
@@ -81,9 +92,9 @@ function toView(s: ProviderAuthStatus, local: LocalViewContext): ProviderStatusV
     connected: s.connected,
     accountLabel: s.accountLabel,
     keyLast4: s.keyLast4,
-    error: s.error,
+    error: localizedProviderStatusError(s),
     // Claude uses the local `claude` CLI first (free); the API key is an optional fallback.
-    hint: s.provider === 'claude' ? claudeCliHint() : undefined,
+    hint: s.provider === 'claude' && !s.errorCode ? claudeCliHint() : undefined,
   };
 }
 

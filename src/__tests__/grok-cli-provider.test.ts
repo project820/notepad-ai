@@ -108,9 +108,9 @@ describe('GrokCliProvider auth + models', () => {
     const provider = new GrokCliProvider({ spawn });
     const status = await provider.getAuthStatus();
     expect(status).toMatchObject({ provider: 'grok', authKind: 'cli', connected: true });
-    expect(status.error).toBeUndefined();
+    expect(status.errorCode).toBeUndefined();
   });
-  it('reports an install/login guidance error when the CLI is absent', async () => {
+  it('reports a stable setup status code when the CLI is absent', async () => {
     const spawn = () => {
       const c = new FakeChild();
       queueMicrotask(() => c.doClose(127));
@@ -119,7 +119,8 @@ describe('GrokCliProvider auth + models', () => {
     const provider = new GrokCliProvider({ spawn });
     const status = await provider.getAuthStatus();
     expect(status.connected).toBe(false);
-    expect(status.error).toMatch(/install|login/i);
+    expect(status).toMatchObject({ errorCode: 'grok_cli_setup_required' });
+    expect(status.error).toBeUndefined();
   });
   it('lists a single default Grok CLI model', async () => {
     const provider = new GrokCliProvider({ spawn: () => new FakeChild() });

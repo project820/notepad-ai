@@ -34,6 +34,10 @@ export type ModelRef = {
   contextWindow?: number;
 };
 
+export type ProviderAuthStatusCode =
+  | 'claude_cli_setup_required'
+  | 'grok_cli_setup_required';
+
 /** A renderer-safe provider auth status. Never contains secret material. */
 export type ProviderAuthStatus = {
   provider: AiProviderId;
@@ -51,6 +55,8 @@ export type ProviderAuthStatus = {
   persisted?: boolean;
   /** Actionable error string when the last auth/use attempt failed. */
   error?: string;
+  /** Stable setup status code; the renderer maps it to localized user copy. */
+  errorCode?: ProviderAuthStatusCode;
 };
 
 export type ChatTurn = { role: 'user' | 'assistant'; text: string };

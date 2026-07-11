@@ -81,7 +81,7 @@ export class GrokCliProvider implements AiProvider {
       authKind: 'cli',
       connected: r.available,
       label: 'Grok (CLI)',
-      error: r.available ? undefined : 'Grok CLI not found. Install grok and run `grok login`.',
+      errorCode: r.available ? undefined : 'grok_cli_setup_required',
     };
   }
 

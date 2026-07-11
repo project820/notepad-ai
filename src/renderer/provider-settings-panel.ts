@@ -132,6 +132,7 @@ function localHint(s: ProviderStatusView): string {
 
 /** CLI provider footer: a no-key/no-URL hint pointing at the local subscription CLI. */
 function cliHint(s: ProviderStatusView): string {
+  if (!s.connected && s.error) return '';
   const msg = s.connected
     ? t('settings.prov.cliConnectedHint')
     : t('settings.prov.cliDisconnectedHint');
