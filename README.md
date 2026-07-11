@@ -18,7 +18,7 @@
 
 1. [Releases](https://github.com/project820/notepad-ai/releases)에서 `Notepad.AI-<version>-arm64.dmg`를 내려받아 엽니다.
 2. `Notepad AI`를 `Applications`로 드래그합니다.
-3. **첫 실행(미서명 앱):** Finder에서 앱을 **우클릭 → 열기**를 선택하고, 경고창에서 다시 **열기**를 누릅니다. 그래도 막히면 터미널에서:
+3. **첫 실행(미서명 앱):** Finder에서 `/Applications`의 앱을 **Control-클릭(또는 우클릭) → 열기**로 실행한 뒤, 경고창에서 다시 **열기**를 누릅니다. 이 절차는 해당 앱의 Gatekeeper 예외를 저장합니다. 일반 더블클릭으로는 첫 실행 예외가 만들어지지 않습니다. 계속 막히면 시스템 설정 **개인정보 보호 및 보안**에서 열기를 허용하거나 터미널에서:
    ```bash
    xattr -dr com.apple.quarantine "/Applications/Notepad AI.app"
    ```
@@ -72,15 +72,22 @@
 
 ## 개발
 
+이 프로젝트는 Node.js 22+와 Electron 43 / electron-builder 26을 사용합니다. 일반 개발
+빌드는 빠른 반복을 위해 OCR 패키징 검사 없이 실행하며, DMG·로컬 설치·CI에서는
+`tessdata` 사전 검사를 먼저 실행합니다.
+
 ```bash
 npm install
-npm run dev          # Electron + Vite HMR 개발 모드
-npm run typecheck    # 타입 검사 (main + renderer)
-npm run test         # 단위 테스트 (vitest)
-npm run build        # main + renderer 빌드
-npm run install:local # ⭐ 로컬 설치(빌드 → /Applications에 1개만 설치 → release 정리)
-npm run build:dmg    # 배포용 DMG 생성 → release/
+npm run dev                # Electron + Vite HMR 개발 모드
+npm run typecheck          # 타입 검사 (main + renderer)
+npm run test               # 단위 테스트 (vitest)
+npm run build              # main + renderer 빌드 (패키징 전 검사 제외)
+npm run preflight:tessdata # 오프라인 OCR 언어 데이터 검사
+npm run install:local      # ⭐ 검사 → 빌드 → /Applications에 1개만 설치 → release 정리
+npm run build:dmg          # 검사 → 빌드 → 배포용 DMG 생성 → release/
 ```
+
+전체 CI/PR 검증 게이트 목록은 [CONTRIBUTING.md](./CONTRIBUTING.md#pr-verification-checklist)를 따릅니다.
 
 ### 단일 앱 원칙 (중요 — 앱을 여러 개 만들지 말 것)
 

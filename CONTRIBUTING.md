@@ -17,6 +17,7 @@ npm run dev          # Electron + Vite HMR dev mode
 npm run typecheck    # type-check main + renderer
 npm run test         # unit/DOM tests (vitest)
 npm run build        # build main + renderer
+npm run preflight:tessdata # validate bundled offline OCR data
 npm run build:dmg    # package a DMG into release/ (optional)
 ```
 
@@ -44,6 +45,7 @@ Before opening a PR, confirm all of the following pass:
 - [ ] `npm run typecheck` is clean
 - [ ] `npm run test` is green
 - [ ] `npm run build` succeeds
+- [ ] `npm run preflight:tessdata` confirms the bundled OCR data before packaging
 - [ ] `npm run test:security-e2e` is green
 - [ ] `npm run test:converter-e2e` is green
 - [ ] `npm run test:html-export` is green

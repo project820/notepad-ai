@@ -16,6 +16,7 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
+      - run: npm run preflight:tessdata
       - run: npm run typecheck
       - run: npm run test
       - run: npm run build
