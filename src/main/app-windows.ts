@@ -9,7 +9,7 @@ import { isAllowedExternalUrl } from './safe-external';
 import { ProjectWizardRootStore } from './project-wizard/access';
 import { sendWhenReady, type OutboundSink, type WindowRecord, type WindowRegistry } from './window-registry';
 import type { SessionWindowSnapshot } from './session-schema';
-import { shouldPublishLaunchWindow, type CreateWindowOptions } from './lifecycle-flags';
+import { queueOrOpenFile, shouldPublishLaunchWindow, type CreateWindowOptions } from './lifecycle-flags';
 import type { ConvertDocument } from './convert';
 
 const APP_DISPLAY_NAME = 'Notepad AI';
@@ -248,15 +248,18 @@ export function createAppWindows({
   } else {
     app.on('second-instance', (_event, argv) => {
       const arg = argv.slice(1).find((a) => typeof a === 'string' && !a.startsWith('-') && existsSync(a));
-      if (arg && ready) void openFileInWindow(arg, true);
-      else focusExisting();
+      if (arg) {
+        queueOrOpenFile(ready, arg, pending, (filePath) => void openFileInWindow(filePath, true));
+        if (!ready) focusExisting();
+      } else {
+        focusExisting();
+      }
     });
   }
 
   app.on('open-file', (event, filePath) => {
     event.preventDefault();
-    if (!ready) pending.push(filePath);
-    else void openFileInWindow(filePath, true);
+    queueOrOpenFile(ready, filePath, pending, (path) => void openFileInWindow(path, true));
   });
 
   return {

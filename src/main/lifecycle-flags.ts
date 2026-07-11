@@ -11,3 +11,15 @@ export function shouldUseMockKeychain(env: NodeJS.ProcessEnv): boolean {
 export function shouldPublishLaunchWindow(opts: CreateWindowOptions): boolean {
   return opts.isLaunchWindow === true && !opts.restore && !opts.openFilePath;
 }
+export function queueOrOpenFile(
+  ready: boolean,
+  filePath: string,
+  pending: string[],
+  openFile: (path: string) => void,
+): void {
+  if (!ready) {
+    pending.push(filePath);
+    return;
+  }
+  openFile(filePath);
+}

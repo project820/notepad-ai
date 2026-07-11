@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { shouldPublishLaunchWindow, shouldUseMockKeychain } from '../main/lifecycle-flags';
+import { queueOrOpenFile, shouldPublishLaunchWindow, shouldUseMockKeychain } from '../main/lifecycle-flags';
 
 describe('main integration keychain gate', () => {
   it('requires isolated userData and the exact integration-test marker', () => {
@@ -20,5 +20,26 @@ describe('launch-window publication', () => {
     expect(shouldPublishLaunchWindow({ isLaunchWindow: true })).toBe(true);
     expect(shouldPublishLaunchWindow({ isLaunchWindow: true, openFilePath: '/tmp/opened.md' })).toBe(false);
     expect(shouldPublishLaunchWindow({ isLaunchWindow: true, restore: {} })).toBe(false);
+  });
+});
+describe('incoming file lifecycle', () => {
+  it('queues a pre-ready file once for startup and opens ready files immediately', () => {
+    const pending: string[] = [];
+    const openFile = vi.fn();
+
+    queueOrOpenFile(false, '/tmp/pre-ready.md', pending, openFile);
+
+    expect(pending).toEqual(['/tmp/pre-ready.md']);
+    expect(openFile).not.toHaveBeenCalled();
+
+    for (const filePath of pending.splice(0)) openFile(filePath);
+    expect(openFile).toHaveBeenCalledTimes(1);
+    expect(openFile).toHaveBeenCalledWith('/tmp/pre-ready.md');
+
+    queueOrOpenFile(true, '/tmp/ready.md', pending, openFile);
+
+    expect(pending).toEqual([]);
+    expect(openFile).toHaveBeenCalledTimes(2);
+    expect(openFile).toHaveBeenLastCalledWith('/tmp/ready.md');
   });
 });
