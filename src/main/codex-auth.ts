@@ -269,7 +269,7 @@ export async function startLogin(onUpdate: (u: LoginUpdate) => void): Promise<vo
     // A 2xx body is not necessarily a token grant: `null` or a payload without
     // a usable access_token must fail the exchange terminally, never hang the
     // login promise or announce a success that cannot authenticate.
-    if (!tokens || typeof tokens !== 'object' || typeof tokens.access_token !== 'string' || tokens.access_token.length === 0) {
+    if (!tokens || typeof tokens !== 'object' || typeof tokens.access_token !== 'string' || tokens.access_token.trim().length === 0) {
       throw new Error('token exchange returned no usable access_token');
     }
   } catch (e: any) {

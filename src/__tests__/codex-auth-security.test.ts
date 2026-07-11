@@ -211,6 +211,7 @@ describe('codex-auth token refresh lifecycle (H-21/H-22)', () => {
     ['empty object', '{}'],
     ['empty access_token', JSON.stringify({ access_token: '' })],
     ['non-string access_token', JSON.stringify({ access_token: 42 })],
+    ['whitespace-only access_token', JSON.stringify({ access_token: '   ' })],
   ])('emits a terminal token_exchange_failed on a malformed 2xx token payload (%s)', async (_name, body) => {
     vi.useFakeTimers();
     try {
