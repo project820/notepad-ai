@@ -194,10 +194,11 @@ describe('renderProviderSettingsPanel — CLI providers (G006)', () => {
         authKind: 'cli',
         connected: false,
         authUnverified: true,
-        error: 'Grok CLI is installed, but its sign-in status could not be verified.',
+        error: 'Grok CLI is installed, but its sign-in status could not be verified. Run `grok login` in a terminal, then reopen the app.',
       }],
     });
-    expect(html).toContain('Status unverified — ready if you are signed in via `grok login`');
+    expect(html).toContain('Status unverified');
+    expect((html.match(/grok login/g) ?? [])).toHaveLength(1);
     expect(html).toContain('prov-status-unknown');
     expect(html).not.toContain('Not connected');
     expect(html).not.toContain('No AI provider connected');
