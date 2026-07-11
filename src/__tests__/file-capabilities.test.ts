@@ -42,6 +42,12 @@ describe('FileGrants — file authority', () => {
     expect(g.isFileAllowed(WC, '/Users/me/notes/a.md')).toBe(true);
     expect(g.isFileAllowed(WC, '/Users/me/notes/b.md')).toBe(false);
   });
+  it('exposes a directly granted file parent as a project wizard root', () => {
+    const g = new FileGrants();
+    g.grantFile(WC, '/Users/me/notes/a.md');
+
+    expect(g.projectWizardRoots(WC)).toEqual(['/Users/me/notes']);
+  });
 
   it('allows files inside a granted workspace root, denies escapes', () => {
     const g = new FileGrants();

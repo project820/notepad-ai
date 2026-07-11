@@ -47,6 +47,7 @@ import {
   isProjectWizardSaveApprovedDraftInput,
   isSafeAbsoluteProjectFolderPath,
 } from './project-wizard/service';
+import { ProjectWizardRootStore, resolveGrantedProjectFolder } from './project-wizard/access';
 import { nowInSeoulIso } from './project-wizard/time';
 import {
   isAllowedExternalUrl,
@@ -99,6 +100,8 @@ if (!app.requestSingleInstanceLock()) {
 const registry = createWindowRegistry();
 /** Per-window filesystem capability grants (renderer paths are not authority). */
 const fileGrants = new FileGrants();
+/** Canonical project folder authorized when each window starts its project wizard. */
+const projectWizardRoots = new ProjectWizardRootStore();
 /** Serializes save reserve→write→commit per canonical file identity (TOCTOU guard). */
 const saveMutex = new KeyedMutex();
 /** node:fs-backed identity surface for realpath/dev:ino canonicalization. */
@@ -325,6 +328,7 @@ async function createWindow(
     }
     registry.unregister(win.id);
     fileGrants.release(record.webContentsId);
+    projectWizardRoots.release(record.webContentsId);
     if (launchWindowId === win.id) launchWindowId = null;
     console.log(`[window] closed id=${win.id}`);
   });
@@ -938,26 +942,34 @@ function makeProjectWizardService() {
   });
 }
 
-handleTrusted('project-wizard:start', async (_e, projectFolder: string) =>
-  makeProjectWizardService().start(await requireProjectFolder(projectFolder)),);
-
-handleTrusted('project-wizard:save-approved-draft', async (_e, input) => {
+handleTrusted('project-wizard:start', async (event, projectFolder: string) => {
+  const canonicalRoot = await requireProjectFolder(event.sender.id, projectFolder);
+  projectWizardRoots.record(event.sender.id, canonicalRoot);
+  return makeProjectWizardService().start(canonicalRoot);
+});
+handleTrusted('project-wizard:save-approved-draft', async (event, input) => {
   if (!isProjectWizardSaveApprovedDraftInput(input)) {
     throw new Error('Invalid project wizard draft payload');
   }
-  const projectFolder = await requireProjectFolder(input.projectFolder);
+  const projectFolder = projectWizardRoots.get(event.sender.id);
+  if (!projectFolder) {
+    throw new Error('Project Wizard has not been started for this window');
+  }
   return makeProjectWizardService().saveApprovedDraft({ ...input, projectFolder });
 });
-
-async function requireProjectFolder(projectFolder: unknown): Promise<string> {
+async function requireProjectFolder(wcId: number, projectFolder: unknown): Promise<string> {
   if (!isSafeAbsoluteProjectFolderPath(projectFolder)) {
     throw new Error('Invalid project folder path');
   }
-  const stat = await fs.stat(projectFolder);
+  const canonicalRoot = await resolveGrantedProjectFolder(fileGrants, wcId, projectFolder, nodeIdentityFs);
+  if (!canonicalRoot) {
+    throw new Error('Project folder is not authorized');
+  }
+  const stat = await fs.stat(canonicalRoot);
   if (!stat.isDirectory()) {
     throw new Error('Project folder path is not a directory');
   }
-  return projectFolder;
+  return canonicalRoot;
 }
 
 
