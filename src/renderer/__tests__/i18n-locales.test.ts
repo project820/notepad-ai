@@ -1,8 +1,16 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, afterEach } from 'vitest';
-import { t, setLocale } from '../i18n';
+import { DICTS, t, setLocale, type Locale } from '../i18n';
 
 afterEach(() => setLocale('en'));
+
+const LOCALES: Exclude<Locale, 'en'>[] = ['ko', 'zh-Hans', 'zh-Hant', 'ja'];
+const SAME_AS_EN_ALLOWLIST: Record<Exclude<Locale, 'en'>, readonly string[]> = {
+  ko: ['block.ai', 'menu.lang.en', 'menu.lang.ja', 'menu.lang.ko', 'menu.lang.zhHans', 'menu.lang.zhHant'],
+  'zh-Hans': ['block.ai', 'menu.lang.en', 'menu.lang.ja', 'menu.lang.ko', 'menu.lang.zhHans', 'menu.lang.zhHant'],
+  'zh-Hant': ['block.ai', 'menu.lang.en', 'menu.lang.ja', 'menu.lang.ko', 'menu.lang.zhHans', 'menu.lang.zhHant'],
+  ja: ['block.ai', 'menu.lang.en', 'menu.lang.ja', 'menu.lang.ko', 'menu.lang.zhHans', 'menu.lang.zhHant'],
+};
 
 describe('i18n — 5 locales (#3)', () => {
   it('switches the unified-chat Send label across all locales', () => {
@@ -234,6 +242,16 @@ describe('i18n — 5 locales (#3)', () => {
       const v = t('he.error.fetch' as never);
       expect(v, `he.error.fetch @ ${loc}`).toBeTruthy();
       expect(v, `he.error.fetch @ ${loc} not the raw key`).not.toBe('he.error.fetch');
+    }
+  });
+  it('keeps every locale dictionary key-complete and flags untranslated English values', () => {
+    const englishKeys = Object.keys(DICTS.en).sort();
+    for (const locale of LOCALES) {
+      expect(Object.keys(DICTS[locale]).sort(), `${locale} has no missing or orphaned keys`).toEqual(englishKeys);
+      const untranslatedKeys = englishKeys.filter((key) => DICTS[locale][key] === DICTS.en[key]);
+      expect(untranslatedKeys, `${locale} English-equivalent values require an explicit allowlist entry`).toEqual(
+        SAME_AS_EN_ALLOWLIST[locale],
+      );
     }
   });
 });

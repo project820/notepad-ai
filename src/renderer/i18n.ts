@@ -1,5 +1,5 @@
 /**
- * Tiny i18n — ko / en. Persisted in prefs.
+ * Tiny i18n — en / ko / zh-Hans / zh-Hant / ja. Persisted in prefs.
  * Visible UI strings call `t(key)`; switching locale rebuilds the UI surfaces
  * that own labels.
  */
@@ -8,7 +8,7 @@ export type Locale = 'en' | 'ko' | 'zh-Hans' | 'zh-Hant' | 'ja';
 
 type Dict = Record<string, string>;
 
-const DICTS: Record<Locale, Dict> = {
+export const DICTS: Record<Locale, Dict> = {
   en: {
     // Header tooltips
     'tip.model': 'AI model',
