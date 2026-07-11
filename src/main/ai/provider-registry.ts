@@ -11,6 +11,7 @@
  */
 
 import { ApiKeyStore, type KeyStoreBackend } from './api-key-store';
+import { atomicWrite, nodeAtomicBackend } from '../atomic-write';
 import { ComposedClaudeProvider } from './claude-composed';
 import { GrokCliProvider } from './grok-cli-provider';
 import { nodeCliSpawn } from './cli-runner';
@@ -239,8 +240,7 @@ function createElectronKeyBackend(): KeyStoreBackend {
       }
     },
     writeFile: async (buf) => {
-      await fs.mkdir(path.dirname(filePath()), { recursive: true });
-      await fs.writeFile(filePath(), buf);
+      await atomicWrite(filePath(), buf, { backend: nodeAtomicBackend(), mode: 0o600 });
     },
     removeFile: async () => {
       try {
