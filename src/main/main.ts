@@ -34,6 +34,12 @@ const nodeIdentityFs: IdentityFs = {
   stat: async (p) => { const s = await fs.stat(p); return { dev: s.dev, ino: s.ino }; },
 };
 const documentAtomicBackend = nodeAtomicBackend();
+// Isolated integration runs (NOTEPAD_AI_USERDATA seam) must NEVER touch the
+// user's real macOS Keychain: every new/unsigned Electron binary re-triggers
+// the "Safe Storage" access prompt, and staged upgrade batteries turn that
+// into a password-prompt storm. Chromium's mock keychain keeps safeStorage
+// functional in-memory for the test process only.
+if (process.env.NOTEPAD_AI_USERDATA) app.commandLine.appendSwitch('use-mock-keychain');
 configureAppIdentity();
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 const converterHost = createConverterHost();

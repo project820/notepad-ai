@@ -23,6 +23,7 @@ const REPO = resolve(__dirname, '..');
 const require = createRequire(import.meta.url);
 
 app.disableHardwareAcceleration();
+app.commandLine.appendSwitch('use-mock-keychain'); // never prompt the user's macOS Keychain from a test run
 
 const WORKER = resolve(REPO, 'dist/main/converter-worker.js');
 const failures = [];

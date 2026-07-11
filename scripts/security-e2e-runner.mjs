@@ -35,6 +35,7 @@ const PRELOAD = resolve(REPO, 'dist/main/preload.js');
 
 app.disableHardwareAcceleration();
 app.commandLine.appendSwitch('disable-gpu');
+app.commandLine.appendSwitch('use-mock-keychain'); // never prompt the user's macOS Keychain from a test run
 
 const results = [];
 const failures = [];
