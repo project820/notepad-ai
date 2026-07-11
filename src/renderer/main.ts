@@ -14,6 +14,7 @@ import { htmlToMarkdown } from './html-to-md';
 import { handleSuppressedDocumentChange } from './suppressed-document-change';
 import { buildConvertedHtmlFrame } from './sanitize-html';
 import { buildRestoreBanner } from './restore-banner';
+import { createSessionSnapshotScheduler } from './session-snapshot-scheduler';
 import { classifyLinkHref } from './link-policy';
 import { openLoginModal } from './login-modal';
 import { mountUnifiedChat, type ChatMode, type ChatAttachment, type ChatTextAttachment } from './unified-chat';
@@ -1700,7 +1701,6 @@ function folderLabelFromScope(scope: string): string {
 }
 
 // ---------------- Session snapshot + crash recovery -----------------
-let sessionSnapshotTimer: ReturnType<typeof setTimeout> | null = null;
 function buildSessionSnapshot() {
   return {
     savedAt: Date.now(),
@@ -1713,18 +1713,17 @@ function buildSessionSnapshot() {
     dirty,
   };
 }
+
+const sessionSnapshotScheduler = createSessionSnapshotScheduler(() => {
+  void window.api.sessionWrite(buildSessionSnapshot());
+});
+
 function scheduleSessionSnapshot() {
-  if (sessionSnapshotTimer) clearTimeout(sessionSnapshotTimer);
-  sessionSnapshotTimer = setTimeout(() => {
-    void window.api.sessionWrite(buildSessionSnapshot());
-  }, 1500);
+  sessionSnapshotScheduler.schedule();
 }
 /** Cancel any pending debounce and write the snapshot immediately (await before app relaunch). */
 async function flushSessionSnapshot() {
-  if (sessionSnapshotTimer) {
-    clearTimeout(sessionSnapshotTimer);
-    sessionSnapshotTimer = null;
-  }
+  sessionSnapshotScheduler.cancel();
   await window.api.sessionWrite(buildSessionSnapshot());
 }
 
