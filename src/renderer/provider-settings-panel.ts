@@ -80,20 +80,22 @@ function statusLine(s: ProviderStatusView): string {
     }
     return '';
   }
-  if (!s.connected) return '<span class="prov-status prov-status-off">Not connected</span>';
+  if (!s.connected) {
+    return `<span class="prov-status prov-status-off">${escapeHTML(t('settings.prov.notConnected'))}</span>`;
+  }
   const detail =
     s.authKind === 'cli'
       ? 'CLI'
       : s.authKind === 'oauth'
-      ? s.accountLabel
-        ? escapeHTML(s.accountLabel)
-        : 'Signed in'
-      : s.keyLast4
-        ? `Key ••••${escapeHTML(s.keyLast4)}`
-        : 'Key set';
-  return `<span class="prov-status prov-status-on">Connected · ${detail}</span>`;
-}
+        ? s.accountLabel
+          ? escapeHTML(s.accountLabel)
+          : escapeHTML(t('settings.prov.signedIn'))
+        : s.keyLast4
+          ? `${escapeHTML(t('settings.prov.apiKeyLabel'))} ••••${escapeHTML(s.keyLast4)}`
+          : escapeHTML(t('settings.prov.keySet'));
+  return `<span class="prov-status prov-status-on">${t('settings.prov.connected').replace('{detail}', detail)}</span>`;
 
+}
 function providerControls(s: ProviderStatusView): string {
   if (s.authKind === 'local') {
     const url = s.localUrl ?? s.localUrlDefault ?? '';
@@ -106,8 +108,8 @@ function providerControls(s: ProviderStatusView): string {
   }
   if (s.authKind === 'oauth') {
     return s.connected
-      ? `<button class="prov-btn" data-prov-action="signout" type="button">Sign out</button>`
-      : `<button class="prov-btn prov-btn-primary" data-prov-action="signin" type="button">Sign in</button>`;
+      ? `<button class="prov-btn" data-prov-action="signout" type="button">${escapeHTML(t('settings.prov.signOut'))}</button>`
+      : `<button class="prov-btn prov-btn-primary" data-prov-action="signin" type="button">${escapeHTML(t('settings.prov.signIn'))}</button>`;
   }
   if (s.authKind === 'cli') {
     // CLI providers (grok) have no key/URL to configure — they use the local
@@ -117,11 +119,11 @@ function providerControls(s: ProviderStatusView): string {
   // API-key providers (claude, openrouter)
   return `
     <input class="prov-key-input" data-prov-key="${s.provider}" type="password"
-      placeholder="Paste API key" aria-label="${escapeHTML(s.label)} API key" />
-    <button class="prov-btn prov-btn-primary" data-prov-action="save-key" data-prov="${s.provider}" type="button">Save key</button>
-    <button class="prov-btn" data-prov-action="delete-key" data-prov="${s.provider}" type="button"${s.connected ? '' : ' disabled'}>Remove</button>`;
-}
+      placeholder="${escapeHTML(t('settings.prov.apiKeyPlaceholder'))}" aria-label="${escapeHTML(`${s.label} ${t('settings.prov.apiKeyLabel')}`)}" />
+    <button class="prov-btn prov-btn-primary" data-prov-action="save-key" data-prov="${s.provider}" type="button">${escapeHTML(t('settings.prov.saveKey'))}</button>
+    <button class="prov-btn" data-prov-action="delete-key" data-prov="${s.provider}" type="button"${s.connected ? '' : ' disabled'}>${escapeHTML(t('settings.prov.removeKey'))}</button>`;
 
+}
 /** Local provider footer: a friendly, non-auth hint (offline → run-server guidance). */
 function localHint(s: ProviderStatusView): string {
   const msg = (s.localModelCount ?? 0) > 0 ? t('settings.local.hint') : t('settings.local.noModels');
@@ -131,8 +133,8 @@ function localHint(s: ProviderStatusView): string {
 /** CLI provider footer: a no-key/no-URL hint pointing at the local subscription CLI. */
 function cliHint(s: ProviderStatusView): string {
   const msg = s.connected
-    ? 'Using your local CLI — no API key, no per-request billing.'
-    : 'Install the CLI and sign in (e.g. `grok login`) to use this provider — no API key needed.';
+    ? t('settings.prov.cliConnectedHint')
+    : t('settings.prov.cliDisconnectedHint');
   return `<div class="prov-local-note">${escapeHTML(msg)}</div>`;
 }
 
@@ -140,8 +142,8 @@ function cliHint(s: ProviderStatusView): string {
 function customModelControl(s: ProviderStatusView): string {
   return `<div class="prov-custom">
       <input class="prov-custom-input" data-prov-custom="${s.provider}" type="text"
-        placeholder="Custom model ID (optional)" aria-label="${escapeHTML(s.label)} custom model id" />
-      <button class="prov-btn" data-prov-action="set-custom" data-prov="${s.provider}" type="button">Use model</button>
+        placeholder="${escapeHTML(t('settings.prov.customModelPlaceholder'))}" aria-label="${escapeHTML(`${s.label} ${t('settings.prov.customModelLabel')}`)}" />
+      <button class="prov-btn" data-prov-action="set-custom" data-prov="${s.provider}" type="button">${escapeHTML(t('settings.prov.useModel'))}</button>
     </div>`;
 }
 
@@ -156,8 +158,7 @@ export function renderProviderSettingsPanel(opts: ProviderSettingsRenderOptions)
 
   const zeroAuthNotice = anyUsable
     ? ''
-    : `<div class="prov-zero-auth" role="alert">No AI provider connected. Connect at least one below to use AI features.</div>`;
-
+    : `<div class="prov-zero-auth" role="alert">${escapeHTML(t('settings.prov.zeroAuth'))}</div>`;
   const rows = statuses
     .map((s) => {
       const isLocal = s.authKind === 'local';
@@ -176,7 +177,7 @@ export function renderProviderSettingsPanel(opts: ProviderSettingsRenderOptions)
     .join('\n');
 
   return `<div class="prov-root">
-  <h2 class="prov-title">AI providers</h2>
+  <h2 class="prov-title">${escapeHTML(t('settings.prov.title'))}</h2>
   ${zeroAuthNotice}
   ${rows}
 </div>`;
@@ -210,7 +211,7 @@ export function mountProviderSettingsPanel(
           error.className = 'prov-error';
           error.dataset.provSaveError = '';
           error.setAttribute('role', 'alert');
-          error.textContent = 'Unable to save API key. Try again.';
+          error.textContent = t('settings.prov.saveKeyFailed');
           row?.querySelector('.prov-row-head')?.insertAdjacentElement('afterend', error);
         });
       return;

@@ -267,11 +267,11 @@ async function save() {
     pendingTitle = null;
     dirty = false;
     setTitle();
-    statusEl.textContent = `Saved • ${result.filePath}`;
+    statusEl.textContent = t('status.saved').replace('{filePath}', result.filePath);
   } else if (result.error === 'already-open') {
     // Another window owns this path; main focused it. Keep dirty + path so the
     // user never silently loses their edit (no last-writer-wins).
-    statusEl.textContent = '⚠ 이 파일은 다른 창에서 열려 있어 저장하지 않았습니다.';
+    statusEl.textContent = t('status.alreadyOpen');
   }
 }
 
@@ -282,9 +282,9 @@ async function saveAs() {
     pendingTitle = null;
     dirty = false;
     setTitle();
-    statusEl.textContent = `Saved • ${result.filePath}`;
+    statusEl.textContent = t('status.saved').replace('{filePath}', result.filePath);
   } else if (result.error === 'already-open') {
-    statusEl.textContent = '⚠ 이 파일은 다른 창에서 열려 있어 저장하지 않았습니다.';
+    statusEl.textContent = t('status.alreadyOpen');
   }
 }
 
@@ -296,7 +296,7 @@ function newDoc() {
   dirty = false;
   setTitle();
   updateWordCount('');
-  statusEl.textContent = 'New document';
+  statusEl.textContent = t('status.newDocument');
   editor.focus();
   scheduleSessionSnapshot();
 }
@@ -311,11 +311,11 @@ function cyclePreviewMode() {
     previewMode === 'split' ? 'preview-only' : previewMode === 'preview-only' ? 'editor-only' : 'split';
   applyPreviewMode();
   const labels: Record<PreviewMode, string> = {
-    split: 'split',
-    'preview-only': 'rich preview',
-    'editor-only': 'raw markdown',
+    split: t('status.view.split'),
+    'preview-only': t('status.view.preview'),
+    'editor-only': t('status.view.raw'),
   };
-  statusEl.textContent = `View • ${labels[previewMode]}`;
+  statusEl.textContent = t('status.view').replace('{mode}', labels[previewMode]);
   // When switching into preview-only or split, the preview is the natural surface to format.
   if (previewMode === 'preview-only') activeSurface = 'preview';
   if (previewMode === 'editor-only') activeSurface = 'editor';
@@ -740,7 +740,7 @@ preview.el.addEventListener('change', (e) => {
 });
 preview.el.addEventListener('focusin', () => {
   activeSurface = 'preview';
-  statusEl.textContent = 'Editing • rich preview';
+  statusEl.textContent = t('status.editingPreview');
 });
 preview.el.addEventListener('focusout', () => {
   // Slight delay so toolbar clicks (which blur the preview briefly) still target it.
@@ -767,7 +767,7 @@ preview.el.addEventListener('focusout', () => {
 // Track when the editor (CM6) is the active surface
 editorHost.addEventListener('focusin', () => {
   activeSurface = 'editor';
-  statusEl.textContent = 'Editing • raw markdown';
+  statusEl.textContent = t('status.editingRaw');
 });
 
 // ----- Toolbar -----
@@ -845,7 +845,7 @@ createToolbar(toolbarHost, {
     prefs.selectedModel = { provider, id };
     if (provider === 'chatgpt') prefs.model = id;
     savePrefs(prefs);
-    statusEl.textContent = `Model · ${id}`;
+    statusEl.textContent = t('status.model').replace('{model}', id);
   },
   onLocaleChange: (l) => {
     if (l === getLocale()) return;
@@ -899,7 +899,7 @@ createToolbar(toolbarHost, {
     // Single insertion path: always write the Markdown table into the source
     // (MD is the source of truth). The preview re-renders from the updated doc.
     editor.insertTable(rows, cols);
-    statusEl.textContent = `Inserted ${rows} × ${cols} table`;
+    statusEl.textContent = t('status.tableInserted').replace('{rows}', String(rows)).replace('{cols}', String(cols));
   },
   onTogglePreview: cyclePreviewMode,
   onThemeChange: (t: Theme) => {
@@ -944,14 +944,14 @@ titleEl.addEventListener('blur', () => {
         currentPath = result.filePath;
         pendingTitle = null;
         dirty = false;
-        statusEl.textContent = `Renamed • ${result.filePath}`;
+        statusEl.textContent = t('status.renamed').replace('{filePath}', result.filePath);
         setTitle();
       }
     })();
   } else {
     pendingTitle = withExt;
     titleEl.value = withExt;
-    statusEl.textContent = `Title set • will save as "${withExt}"`;
+    statusEl.textContent = t('status.titleSet').replace('{title}', withExt);
   }
 });
 
@@ -1034,9 +1034,9 @@ window.api.onFileOpened((payload: any) => {
   updateWordCount(docMd);
   updateHtmlViewToggle();
   if (converted) {
-    statusEl.textContent = `Converted from ${converted.from} • will save as ${filePath}`;
+    statusEl.textContent = t('status.converted').replace('{format}', converted.from).replace('{filePath}', filePath ?? '');
   } else {
-    statusEl.textContent = `Opened • ${filePath}`;
+    statusEl.textContent = t('status.opened').replace('{filePath}', filePath ?? '');
   }
 });
 
@@ -1251,7 +1251,7 @@ function applyStyle(next: { difficulty: Quality; naturalness: Naturalness }) {
   prefs.style = next;
   prefs.quality = next.difficulty; // keep legacy difficulty in sync (Block AI etc.)
   savePrefs(prefs);
-  statusEl.textContent = `Style · ${next.difficulty} · ${next.naturalness}`;
+  statusEl.textContent = t('status.style').replace('{difficulty}', next.difficulty).replace('{naturalness}', next.naturalness);
 }
 
 function openSettings() {
@@ -1269,7 +1269,7 @@ function openSettings() {
       prefs.selectedModel = { provider, id: modelId };
       if (provider === 'chatgpt') prefs.model = modelId;
       savePrefs(prefs);
-      statusEl.textContent = `Model · ${provider} · ${modelId}`;
+      statusEl.textContent = t('status.modelProvider').replace('{provider}', provider).replace('{model}', modelId);
     },
   });
 }
@@ -1287,9 +1287,9 @@ async function sendUnified(
     scheduleSessionSnapshot();
     unifiedChat.addMessage(
       'assistant',
-      'No AI provider is connected. Open Settings to sign in with ChatGPT or add a Claude / OpenRouter API key.',
+      t('chat.noProvider'),
     );
-    statusEl.textContent = 'Connect an AI provider to use AI.';
+    statusEl.textContent = t('status.connectProvider');
     openSettings();
     return;
   }
@@ -1335,8 +1335,8 @@ async function sendUnified(
       cleanup();
       ucInflight = null;
     } else if (e.kind === 'error') {
-      stream.fail(e.message ?? 'AI error');
-      statusEl.textContent = e.message ?? 'AI error';
+      stream.fail(e.message ?? t('status.aiError'));
+      statusEl.textContent = e.message ?? t('status.aiError');
       cleanup();
       ucInflight = null;
     }
@@ -1382,15 +1382,14 @@ const unifiedChat = mountUnifiedChat(unifiedChatHost, {
       ]
         .slice(0, 6)
         .join(', ');
-      const ok = window.confirm(
-        `This replacement drops protected content${lost ? ` (${lost})` : ''}. Replace anyway?`,
-      );
+      const lostSuffix = lost ? ` (${lost})` : '';
+      const ok = window.confirm(t('guard.confirm').replace('{lost}', lostSuffix));
       if (!ok) {
-        statusEl.textContent = 'Replace canceled — meaning guard.';
+        statusEl.textContent = t('status.replaceCanceled');
         return;
       }
     } else if (verdict.overHumanized) {
-      statusEl.textContent = 'Applied — heavy rewrite, review for meaning drift.';
+      statusEl.textContent = t('status.heavyRewrite');
     }
     applyAiOutput('replace', next);
   },
@@ -1432,7 +1431,7 @@ function runHtmlGeneration(
           resolve(e.text ?? buffer);
         } else if (e.kind === 'error') {
           cleanup();
-          reject(new Error(e.message ?? 'AI error'));
+          reject(new Error(e.message ?? t('status.aiError')));
         }
       });
       activeCancel = () => {
@@ -1471,9 +1470,9 @@ async function startHtmlExportWizard() {
     setUnifiedChatOpen(true);
     unifiedChat.addMessage(
       'assistant',
-      'No AI provider is connected. Open Settings to sign in with ChatGPT or add a Claude / OpenRouter API key.',
+      t('chat.noProvider'),
     );
-    statusEl.textContent = 'Connect an AI provider to use AI.';
+    statusEl.textContent = t('status.connectProvider');
     openSettings();
     return;
   }
@@ -1517,7 +1516,7 @@ async function startHtmlExportWizard() {
       runHtmlGeneration(prompt, model && isAiProviderId(model.provider) ? { provider: model.provider, id: model.id } : undefined),
     openExternal: (url) => void window.api.openExternal(url),
     onCancel: () => {
-      statusEl.textContent = 'HTML export canceled.';
+      statusEl.textContent = t('status.htmlExportCanceled');
     },
     t,
   });
@@ -1766,7 +1765,7 @@ function showRestoreBanner(snap: any) {
     setTitle();
     updateWordCount(snap.doc ?? '');
     scheduleSessionSnapshot();
-    statusEl.textContent = '복구됨 — 이전 세션이 로드되었습니다.';
+    statusEl.textContent = t('status.sessionRestored');
     root.remove();
   });
   root.querySelector('.restore-no')?.addEventListener('click', () => {

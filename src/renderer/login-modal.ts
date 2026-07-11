@@ -28,16 +28,16 @@ export function openLoginModal(cb: ModalCallbacks) {
   const root = document.createElement('div');
   root.className = 'login-modal-root';
   root.innerHTML = `
-    <div class="login-modal" role="dialog" aria-label="Sign in">
+    <div class="login-modal" role="dialog" aria-label="${esc(t('login.title'))}">
       <div class="login-modal-header">
         <div class="brand">
           <div class="brand-mark">md</div>
           <div>
             <div class="brand-title">notepad-ai</div>
-            <div class="brand-sub">Sign in to enable AI features</div>
+            <div class="brand-sub">${esc(t('login.subtitle'))}</div>
           </div>
         </div>
-        <button class="login-modal-close" id="login-close" title="Skip for now" aria-label="Close">
+        <button class="login-modal-close" id="login-close" title="${esc(t('login.skip'))}" aria-label="${esc(t('login.close'))}">
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><line x1="2.5" y1="2.5" x2="9.5" y2="9.5"/><line x1="9.5" y1="2.5" x2="2.5" y2="9.5"/></svg>
         </button>
       </div>
