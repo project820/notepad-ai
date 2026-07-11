@@ -36,6 +36,7 @@ type AppWindowsDeps = {
   abortChatsForWebContents: (id: number) => void;
   hasSingleInstanceLock: boolean;
   removeSessionWindow: (windowKey: string) => Promise<void>;
+  removeSessionWindows: (windowKeys: readonly string[]) => Promise<void>;
   showCloseDialog?: (win: BrowserWindow, labels: { title: string; message: string; save: string; discard: string; cancel: string }) => Promise<CloseGuardChoice>;
 };
 
@@ -77,6 +78,7 @@ export function createAppWindows({
   abortChatsForWebContents,
   hasSingleInstanceLock,
   removeSessionWindow,
+  removeSessionWindows,
   showCloseDialog = async (win, labels) => {
     const result = await dialog.showMessageBox(win, {
       type: 'warning',
@@ -100,6 +102,10 @@ export function createAppWindows({
   const pendingState = new Map<string, { webContentsId: number; resolve: (state: CloseGuardState | null) => void }>();
   const pendingSave = new Map<string, { webContentsId: number; resolve: (result: { saved: boolean; committedRevision: number | null }) => void }>();
   const windowLocales = new Map<number, CloseGuardState['locale']>();
+  const pendingAuthorize = new Map<string, { webContentsId: number; resolve: (valid: boolean) => void }>();
+  const pendingDiscard = new Map<string, { webContentsId: number; resolve: (fenced: boolean) => void }>();
+  const closeLeases = new Map<number, string>();
+  const invalidatedCloseLeases = new Set<string>();
 
   const requestId = (kind: string, win: BrowserWindow) => `${kind}:${win.id}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
   const waitForState = (
@@ -160,20 +166,45 @@ export function createAppWindows({
         : null,
     });
   });
+  onTrusted('close:authorize-result', (event, raw: unknown) => {
+    const value = raw as Record<string, unknown>;
+    const id = typeof value?.requestId === 'string' ? value.requestId : '';
+    const pending = pendingAuthorize.get(id);
+    if (!pending || pending.webContentsId !== event.sender.id) return;
+    pendingAuthorize.delete(id);
+    pending.resolve(value.valid === true);
+  });
+  onTrusted('close:discard-result', (event, raw: unknown) => {
+    const value = raw as Record<string, unknown>;
+    const id = typeof value?.requestId === 'string' ? value.requestId : '';
+    const pending = pendingDiscard.get(id);
+    if (!pending || pending.webContentsId !== event.sender.id) return;
+    pendingDiscard.delete(id);
+    pending.resolve(value.fenced === true);
+  });
+  onTrusted('close:lease-invalidated', (event, raw: unknown) => {
+    const value = raw as Record<string, unknown>;
+    const id = typeof value?.requestId === 'string' ? value.requestId : '';
+    if (closeLeases.get(BrowserWindow.fromWebContents(event.sender)?.id ?? -1) !== id) return;
+    invalidatedCloseLeases.add(id);
+  });
   onTrusted('close:locale', (event, locale: unknown) => {
     const rec = registry.getByWebContents(event.sender.id);
     if (rec) windowLocales.set(rec.windowId, normalizeCloseGuardLocale(locale));
   });
 
-  const queryCloseState = async (win: BrowserWindow): Promise<CloseGuardState> => {
+  const queryCloseState = async (win: BrowserWindow): Promise<CloseGuardState & { leaseId: string | null }> => {
     const rec = registry.get(win.id);
     const fallback = stateFromSnapshot(rec?.lastSnapshot);
     if (!rec || !rec.ready || win.isDestroyed()) {
-      return { ...fallback, locale: windowLocales.get(win.id) ?? fallback.locale };
+      return { ...fallback, locale: windowLocales.get(win.id) ?? fallback.locale, leaseId: null };
     }
     const id = requestId('state', win);
     const live = await waitForState(id, win.webContents.id, () => win.webContents.send('close:query-state', { requestId: id }));
-    return live ?? { ...fallback, locale: windowLocales.get(win.id) ?? fallback.locale };
+    if (!live) return { ...fallback, locale: windowLocales.get(win.id) ?? fallback.locale, leaseId: null };
+    closeLeases.set(win.id, id);
+    invalidatedCloseLeases.delete(id);
+    return { ...live, leaseId: id };
   };
 
   const saveFromRenderer = async (win: BrowserWindow, revision: number) => {
@@ -194,22 +225,82 @@ export function createAppWindows({
       win.webContents.send('close:save', { requestId: id, revision });
     });
   };
+  const authorizeRendererClose = (win: BrowserWindow, leaseId: string | undefined): Promise<boolean> => {
+    if (!leaseId || invalidatedCloseLeases.has(leaseId) || win.isDestroyed()) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        pendingAuthorize.delete(leaseId);
+        resolve(false);
+      }, 400);
+      pendingAuthorize.set(leaseId, {
+        webContentsId: win.webContents.id,
+        resolve: (valid) => {
+          clearTimeout(timer);
+          pendingAuthorize.delete(leaseId);
+          resolve(valid && !invalidatedCloseLeases.has(leaseId));
+        },
+      });
+      win.webContents.send('close:authorize', { requestId: leaseId });
+    });
+  };
+
+  const fenceRendererDiscard = (win: BrowserWindow, leaseId: string | undefined): Promise<boolean> => {
+    if (!leaseId || invalidatedCloseLeases.has(leaseId) || win.isDestroyed()) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        pendingDiscard.delete(leaseId);
+        resolve(false);
+      }, 400);
+      pendingDiscard.set(leaseId, {
+        webContentsId: win.webContents.id,
+        resolve: (fenced) => {
+          clearTimeout(timer);
+          pendingDiscard.delete(leaseId);
+          resolve(fenced);
+        },
+      });
+      win.webContents.send('close:discard', { requestId: leaseId });
+    });
+  };
+
+  const rollbackRendererDiscardFence = async (win: BrowserWindow | null, leaseId: string | undefined): Promise<void> => {
+    if (!leaseId || !win || win.isDestroyed()) return;
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(() => {
+        pendingDiscard.delete(leaseId);
+        resolve();
+      }, 400);
+      pendingDiscard.set(leaseId, {
+        webContentsId: win.webContents.id,
+        resolve: () => {
+          clearTimeout(timer);
+          pendingDiscard.delete(leaseId);
+          resolve();
+        },
+      });
+      win.webContents.send('close:discard-rollback', { requestId: leaseId });
+    });
+  };
 
   const decideClose = async (target: CloseTarget): Promise<CloseDecision> => {
     const win = BrowserWindow.fromId(target.windowId);
     if (!win || win.isDestroyed()) return 'allow';
-    const state = await queryCloseState(win);
-    const action = await resolveCloseGuard({
-      state,
-      showDialog: (labels) => showCloseDialog(win, labels),
-      save: async () => {
-        const result = await saveFromRenderer(win, state.revision);
-        if (!result.saved) return false;
-        const current = await queryCloseState(win);
-        return current.known === true && current.revision === result.committedRevision;
-      },
-    });
-    return action;
+
+    for (;;) {
+      const state = await queryCloseState(win);
+      const action = await resolveCloseGuard({
+        state,
+        showDialog: (labels) => showCloseDialog(win, labels),
+        save: async () => {
+          const result = await saveFromRenderer(win, state.revision);
+          if (!result.saved) return false;
+          const current = await queryCloseState(win);
+          return current.known === true && current.revision === result.committedRevision;
+        },
+      });
+      if (action === 'cancel') return action;
+      if (await authorizeRendererClose(win, closeLeases.get(win.id))) return action;
+    }
   };
 
   const targetsFor = (records: readonly WindowRecord[]): CloseTarget[] => records.map((rec) => ({ windowId: rec.windowId, windowKey: rec.windowKey }));
@@ -217,12 +308,45 @@ export function createAppWindows({
   const commitCloseTransaction = async (
     transaction: { intent: 'close' | 'quit' | 'relaunch'; targets: readonly CloseTarget[]; discards: readonly CloseTarget[] },
     onCommit?: () => Promise<void>,
-  ) => {
+  ): Promise<boolean> => {
+    const fenced: CloseTarget[] = [];
+    const rollbackDiscards = async () => {
+      for (const target of fenced) discardedWindowKeys.delete(target.windowKey);
+      await Promise.all(fenced.map((target) => rollbackRendererDiscardFence(
+        BrowserWindow.fromId(target.windowId),
+        closeLeases.get(target.windowId),
+      )));
+    };
+
+    for (const target of transaction.discards) {
+      const win = BrowserWindow.fromId(target.windowId);
+      if (!win || !(await fenceRendererDiscard(win, closeLeases.get(target.windowId)))) {
+        await rollbackDiscards();
+        return false;
+      }
+      fenced.push(target);
+      discardedWindowKeys.add(target.windowKey);
+    }
+    for (const target of transaction.targets) {
+      const win = BrowserWindow.fromId(target.windowId);
+      if (!win || !(await authorizeRendererClose(win, closeLeases.get(target.windowId)))) {
+        await rollbackDiscards();
+        return false;
+      }
+    }
+
+    try {
+      if (fenced.length > 0) await removeSessionWindows(fenced.map((target) => target.windowKey));
+    } catch (error) {
+      console.error('[session] failed to commit discarded windows:', error);
+      await rollbackDiscards();
+      return false;
+    }
+
     preserveSessionOnClose = transaction.intent === 'relaunch';
-    for (const target of transaction.discards) discardedWindowKeys.add(target.windowKey);
-    await Promise.all(transaction.discards.map((target) => removeSessionWindow(target.windowKey)));
     for (const target of transaction.targets) approvedCloseWindowIds.add(target.windowId);
     await onCommit?.();
+    return true;
   };
 
   const approveClose = async (win: BrowserWindow): Promise<boolean> => {
@@ -402,6 +526,7 @@ export function createAppWindows({
       fileGrants.release(record.webContentsId);
       projectWizardRoots.release(record.webContentsId);
       approvedCloseWindowIds.delete(win.id);
+      closeLeases.delete(win.id);
       windowLocales.delete(win.id);
       if (!preserveSessionOnClose && !discardedWindowKeys.has(record.windowKey)) {
         void removeSessionWindow(record.windowKey).catch((error) => {

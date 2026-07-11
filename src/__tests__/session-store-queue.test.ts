@@ -133,5 +133,6 @@ describe('SessionQueue — a persist failure does not wedge later writes', () =>
     // The next mutation must still run and persist.
     await q.mutate((s) => upsertWindowSnapshot(s, win('w2')));
     expect(h.disk.windows.map((w) => w.id)).toContain('w2');
+    expect(h.disk.windows.map((w) => w.id)).not.toContain('w1');
   });
 });

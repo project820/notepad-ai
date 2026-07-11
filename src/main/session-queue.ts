@@ -69,8 +69,8 @@ export class SessionQueue {
         return current;
       }
       const next = mutator(current);
-      this.state = next;
       await this.io.persist(next);
+      this.state = next;
       return next;
     });
     // Keep the chain alive even if this mutation rejects, so a single persist

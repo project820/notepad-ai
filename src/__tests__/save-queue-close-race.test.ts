@@ -4,7 +4,7 @@ import { saveDocumentAtomically } from '../main/document-save';
 import { KeyedMutex } from '../main/keyed-mutex';
 
 describe('save queue close race', () => {
-  it('runs A→B→A through the real atomic-save path and only approves the current close revision', async () => {
+  it('serializes queued document writes and keeps the latest revision clean', async () => {
     const mutex = new KeyedMutex();
     const files = new Map<string, string>();
     const order: string[] = [];

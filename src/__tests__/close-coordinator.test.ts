@@ -13,6 +13,12 @@ describe('CloseCoordinator', () => {
     await expect(coordinator.request('quit', [first, second], async () => decisions.shift()!, commit)).resolves.toEqual({ approved: false, intent: 'quit' });
     expect(commit).not.toHaveBeenCalled();
   });
+  it('does not approve when commit rejects a provisional transaction', async () => {
+    const coordinator = new CloseCoordinator();
+
+    await expect(coordinator.request('close', [first], async () => 'discard', async () => false))
+      .resolves.toEqual({ approved: false, intent: 'close' });
+  });
 
   it('serializes a close that arrives during quit and commits once for all quit windows', async () => {
     const coordinator = new CloseCoordinator();

@@ -164,6 +164,33 @@ const api = {
   },
   sendCloseSaveResult: (requestId: string, result: { saved: boolean; committedRevision: number | null }): void =>
     ipcRenderer.send('close:save-result', { requestId, ...result }),
+  onCloseAuthorize: (cb: (requestId: string) => void): (() => void) => {
+    const listener = (_e: unknown, request: { requestId?: unknown }) => {
+      if (typeof request?.requestId === 'string') cb(request.requestId);
+    };
+    ipcRenderer.on('close:authorize', listener);
+    return () => ipcRenderer.removeListener('close:authorize', listener);
+  },
+  sendCloseAuthorizeResult: (requestId: string, valid: boolean): void =>
+    ipcRenderer.send('close:authorize-result', { requestId, valid }),
+  onCloseDiscard: (cb: (requestId: string) => void): (() => void) => {
+    const listener = (_e: unknown, request: { requestId?: unknown }) => {
+      if (typeof request?.requestId === 'string') cb(request.requestId);
+    };
+    ipcRenderer.on('close:discard', listener);
+    return () => ipcRenderer.removeListener('close:discard', listener);
+  },
+  sendCloseDiscardResult: (requestId: string, fenced: boolean): void =>
+    ipcRenderer.send('close:discard-result', { requestId, fenced }),
+  onCloseDiscardRollback: (cb: (requestId: string) => void): (() => void) => {
+    const listener = (_e: unknown, request: { requestId?: unknown }) => {
+      if (typeof request?.requestId === 'string') cb(request.requestId);
+    };
+    ipcRenderer.on('close:discard-rollback', listener);
+    return () => ipcRenderer.removeListener('close:discard-rollback', listener);
+  },
+  sendCloseLeaseInvalidated: (requestId: string, revision: number): void =>
+    ipcRenderer.send('close:lease-invalidated', { requestId, revision }),
   setCloseLocale: (locale: 'en' | 'ko' | 'zh-Hans' | 'zh-Hant' | 'ja'): void =>
     ipcRenderer.send('close:locale', locale),
 

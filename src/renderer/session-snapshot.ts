@@ -13,8 +13,7 @@ type SessionSnapshotDeps = {
   setUnifiedChatHistory: (history: UnifiedChatItem[]) => void;
   setUnifiedChatOpen: (open: boolean) => void;
   applyPreviewMode: () => void;
-  setTitle: () => void;
-  updateWordCount: (doc: string) => void;
+  replaceDocument: (input: { doc: string; currentPath: string | null; pendingTitle: string | null; dirty: boolean }) => void;
 };
 
 export function initSessionSnapshot(ctx: AppContext, deps: SessionSnapshotDeps) {
@@ -58,20 +57,18 @@ export function initSessionSnapshot(ctx: AppContext, deps: SessionSnapshotDeps) 
     );
     document.body.appendChild(root);
     root.querySelector('.restore-yes')?.addEventListener('click', () => {
-      ctx.suppressEditorChange = true;
-      ctx.editor.setDoc(snap.doc ?? '');
-      ctx.suppressEditorChange = false;
-      if (!ctx.editingInPreview) ctx.preview.setDoc(snap.doc ?? '');
-      if (snap.path) ctx.currentPath = snap.path;
-      if (snap.title) ctx.pendingTitle = snap.title;
+      deps.replaceDocument({
+        doc: snap.doc ?? '',
+        currentPath: typeof snap.path === 'string' ? snap.path : null,
+        pendingTitle: typeof snap.title === 'string' ? snap.title : null,
+        dirty: snap.dirty === true,
+      });
       if (snap.view) { ctx.previewMode = snap.view as PreviewMode; deps.applyPreviewMode(); }
       if (snap) {
         deps.setUnifiedChatHistory(restoreUnifiedThread(snap));
         deps.unifiedChat.restore(snap);
         if (deps.getUnifiedChatHistory().length > 0) deps.setUnifiedChatOpen(true);
       }
-      deps.setTitle();
-      deps.updateWordCount(snap.doc ?? '');
       scheduleSessionSnapshot();
       ctx.setStatus(t('status.sessionRestored'));
       root.remove();

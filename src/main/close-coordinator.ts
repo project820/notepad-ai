@@ -29,7 +29,7 @@ export class CloseCoordinator {
     intent: CloseIntent,
     targets: readonly CloseTarget[],
     decide: (target: CloseTarget) => Promise<CloseDecision>,
-    commit: (transaction: CloseTransaction) => Promise<void>,
+    commit: (transaction: CloseTransaction) => Promise<void | boolean>,
   ): Promise<CloseTransactionResult> {
     if (this.inFlight) {
       // A window close joins a process-wide quit/relaunch transaction, but an
@@ -46,8 +46,8 @@ export class CloseCoordinator {
         if (decision === 'cancel') return { approved: false, intent };
         if (decision === 'discard') discards.push(target);
       }
-      await commit({ intent, targets, discards });
-      return { approved: true, intent };
+      const committed = await commit({ intent, targets, discards });
+      return { approved: committed !== false, intent };
     })();
     this.inFlightIntent = intent;
     this.inFlight = run.finally(() => {

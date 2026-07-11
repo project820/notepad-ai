@@ -56,6 +56,9 @@ const windows = createAppWindows({
   removeSessionWindow: async (windowKey) => {
     await mutateSessionAggregate((current) => removeWindowSnapshot(current, windowKey));
   },
+  removeSessionWindows: async (windowKeys) => {
+    await mutateSessionAggregate((current) => windowKeys.reduce(removeWindowSnapshot, current));
+  },
 });
 
 // All IPC handlers are registered at module load, before app.whenReady().

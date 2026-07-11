@@ -69,6 +69,12 @@ export type Api = {
   sendCloseState: (requestId: string, state: { dirty: boolean; hasPath: boolean; docEmpty: boolean; revision: number; locale: 'en' | 'ko' | 'zh-Hans' | 'zh-Hant' | 'ja' }) => void;
   onCloseSave: (cb: (requestId: string, revision: number) => void) => () => void;
   sendCloseSaveResult: (requestId: string, result: { saved: boolean; committedRevision: number | null }) => void;
+  onCloseAuthorize: (cb: (requestId: string) => void) => () => void;
+  sendCloseAuthorizeResult: (requestId: string, valid: boolean) => void;
+  onCloseDiscard: (cb: (requestId: string) => void) => () => void;
+  sendCloseDiscardResult: (requestId: string, fenced: boolean) => void;
+  onCloseDiscardRollback: (cb: (requestId: string) => void) => () => void;
+  sendCloseLeaseInvalidated: (requestId: string, revision: number) => void;
   setCloseLocale: (locale: 'en' | 'ko' | 'zh-Hans' | 'zh-Hant' | 'ja') => void;
   checkForUpdate: () => Promise<{ updateAvailable: boolean; currentVersion: string; latestVersion: string; url: string } | null>;
   openExternal: (url: string) => Promise<void>;

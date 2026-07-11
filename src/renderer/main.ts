@@ -205,6 +205,7 @@ docLifecycle.wireMenuActions(cyclePreviewMode);
 window.api.setCloseLocale(getLocale());
 onLocaleChange((locale) => window.api.setCloseLocale(locale));
 window.api.onCloseQueryState((requestId) => {
+  docLifecycle.beginCloseLease(requestId);
   window.api.sendCloseState(requestId, {
     dirty: ctx.dirty,
     hasPath: ctx.currentPath !== null,
@@ -226,6 +227,19 @@ window.api.onCloseSave((requestId, requestedRevision) => {
   })().catch(() => {
     window.api.sendCloseSaveResult(requestId, { saved: false, committedRevision: null });
   });
+});
+window.api.onCloseAuthorize((requestId) => {
+  window.api.sendCloseAuthorizeResult(requestId, docLifecycle.authorizeCloseLease(requestId));
+});
+window.api.onCloseDiscard((requestId) => {
+  void docLifecycle.fenceDiscard(requestId).then(
+    (fenced) => window.api.sendCloseDiscardResult(requestId, fenced),
+    () => window.api.sendCloseDiscardResult(requestId, false),
+  );
+});
+window.api.onCloseDiscardRollback((requestId) => {
+  docLifecycle.rollbackDiscardFence();
+  window.api.sendCloseDiscardResult(requestId, true);
 });
 window.api.windowReady();
 document.addEventListener('keydown', (e) => {
@@ -322,8 +336,7 @@ sessionSnapshot = initSessionSnapshot(ctx, {
   setUnifiedChatHistory: unifiedChatWiring.setHistory,
   setUnifiedChatOpen: unifiedChatWiring.setUnifiedChatOpen,
   applyPreviewMode,
-  setTitle: docLifecycle.setTitle,
-  updateWordCount,
+  replaceDocument: docLifecycle.replaceDocument,
 });
 
 void (async () => {

@@ -22,6 +22,20 @@ type DocLifecycleDeps = {
 
 export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
   let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
+  let closeLease: { id: string; revision: number; invalidated: boolean } | null = null;
+  let savesFenced = false;
+  let saveTail = Promise.resolve();
+
+  function invalidateCloseLease(): void {
+    if (!closeLease || closeLease.invalidated) return;
+    closeLease.invalidated = true;
+    deps.api.sendCloseLeaseInvalidated(closeLease.id, ctx.docRevision);
+  }
+
+  function recordDocumentMutation(): void {
+    ctx.docRevision += 1;
+    invalidateCloseLease();
+  }
 
   function displayTitle(): string {
     if (ctx.currentPath) return ctx.currentPath.split('/').pop() ?? 'Untitled';
@@ -35,7 +49,7 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
     deps.dirtyEl.classList.toggle('dirty', ctx.dirty);
   }
 
-  async function saveTo(filePath: string | null): Promise<number | null> {
+  async function performSave(filePath: string | null): Promise<number | null> {
     const revision = ctx.docRevision;
     const result = await deps.api.saveFile(filePath, ctx.editor.getDoc());
     if (result.saved && result.filePath) {
@@ -56,6 +70,12 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
     return null;
   }
 
+  function saveTo(filePath: string | null): Promise<number | null> {
+    const queued = saveTail.then(() => (savesFenced ? null : performSave(filePath)));
+    saveTail = queued.then(() => undefined, () => undefined);
+    return queued;
+  }
+
   async function save(): Promise<number | null> {
     return saveTo(ctx.currentPath);
   }
@@ -65,8 +85,10 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
   }
 
   function scheduleAutosave() {
+    if (savesFenced) return;
     if (autosaveTimer) clearTimeout(autosaveTimer);
     autosaveTimer = setTimeout(() => {
+      autosaveTimer = null;
       if (ctx.currentPath) void save();
     }, 3000);
   }
@@ -74,7 +96,7 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
   const previewRenderThrottle = deps.createRafThrottle();
   function onDocChange(doc: string) {
     if (ctx.suppressEditorChange) return;
-    ctx.docRevision += 1;
+    recordDocumentMutation();
     if (!ctx.dirty) {
       ctx.dirty = true;
       setTitle();
@@ -92,7 +114,7 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
   }
 
   function onSuppressedEditorChange(doc: string, syncPreview = false): void {
-    ctx.docRevision += 1;
+    recordDocumentMutation();
     handleSuppressedDocumentChange(doc, {
       isDirty: () => ctx.dirty,
       markDirty: () => {
@@ -106,18 +128,38 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
     });
   }
 
-  function newDoc() {
-    ctx.currentPath = null;
-    ctx.pendingTitle = null;
-    ctx.editor.setDoc('');
-    ctx.docRevision += 1;
-    ctx.preview.setDoc('');
-    ctx.dirty = false;
+  function replaceDocument({
+    doc,
+    currentPath,
+    pendingTitle,
+    dirty,
+    syncPreview = true,
+    scheduleSnapshot = true,
+  }: {
+    doc: string;
+    currentPath: string | null;
+    pendingTitle: string | null;
+    dirty: boolean;
+    syncPreview?: boolean;
+    scheduleSnapshot?: boolean;
+  }): void {
+    ctx.suppressEditorChange = true;
+    ctx.editor.setDoc(doc);
+    ctx.suppressEditorChange = false;
+    ctx.currentPath = currentPath;
+    ctx.pendingTitle = pendingTitle;
+    recordDocumentMutation();
+    if (syncPreview && !ctx.editingInPreview) ctx.preview.setDoc(doc);
+    ctx.dirty = dirty;
     setTitle();
-    deps.updateWordCount('');
+    deps.updateWordCount(doc);
+    if (scheduleSnapshot) deps.scheduleSessionSnapshot();
+  }
+
+  function newDoc() {
+    replaceDocument({ doc: '', currentPath: null, pendingTitle: null, dirty: false });
     ctx.setStatus(deps.t('status.newDocument'));
     ctx.editor.focus();
-    deps.scheduleSessionSnapshot();
   }
 
   async function saveIfDirtyBeforeReplace(): Promise<boolean> {
@@ -177,9 +219,6 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
         ctx.setStatus(`⚠ ${error === 'converter-worker-failed' ? deps.t('file.convert.workerFailed') : error}`);
         return;
       }
-      ctx.currentPath = filePath ?? null;
-      deps.syncWorkspaceRootToCurrent();
-      ctx.pendingTitle = null;
       let docMd = content;
       // Every open/new resets the HTML-view toggle so a converted doc never inherits
       // the previous document's rich-HTML view state.
@@ -195,17 +234,18 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
       } else {
         ctx.convertedHtml = null;
       }
-      ctx.editor.setDoc(docMd);
-      ctx.docRevision += 1;
+      replaceDocument({
+        doc: docMd,
+        currentPath: filePath ?? null,
+        pendingTitle: null,
+        dirty: !!converted,
+        scheduleSnapshot: false,
+      });
+      deps.syncWorkspaceRootToCurrent();
       if (ctx.showingConvertedHtml && ctx.convertedHtml) {
         // Converted HTML is sanitized into an inert fragment (never raw innerHTML).
         ctx.preview.el.replaceChildren(deps.buildConvertedHtmlFrame(ctx.convertedHtml));
-      } else {
-        ctx.preview.setDoc(docMd);
       }
-      ctx.dirty = !!converted;
-      setTitle();
-      deps.updateWordCount(docMd);
       deps.updateHtmlViewToggle();
       if (converted) {
         ctx.setStatus(deps.t('status.converted').replace('{format}', converted.from).replace('{filePath}', filePath ?? ''));
@@ -222,9 +262,35 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
     deps.api.onTogglePreview(cyclePreviewMode);
   }
 
+  function beginCloseLease(id: string): void {
+    closeLease = { id, revision: ctx.docRevision, invalidated: false };
+  }
+
+  function authorizeCloseLease(id: string): boolean {
+    return closeLease?.id === id && !closeLease.invalidated && closeLease.revision === ctx.docRevision;
+  }
+
+  async function fenceDiscard(id: string): Promise<boolean> {
+    if (!authorizeCloseLease(id)) return false;
+    if (autosaveTimer) clearTimeout(autosaveTimer);
+    autosaveTimer = null;
+    savesFenced = true;
+    await saveTail;
+    return true;
+  }
+
+  function rollbackDiscardFence(): void {
+    savesFenced = false;
+  }
+
   return {
     onDocChange,
     onSuppressedEditorChange,
+    replaceDocument,
+    beginCloseLease,
+    authorizeCloseLease,
+    fenceDiscard,
+    rollbackDiscardFence,
     save,
     saveIfDirtyBeforeReplace,
     setTitle,
