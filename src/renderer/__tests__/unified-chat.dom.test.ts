@@ -64,6 +64,27 @@ describe('mountUnifiedChat — composer', () => {
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true }));
     expect(handlers.onSend).toHaveBeenCalledTimes(1);
   });
+  it('disables the send control and ignores Enter while a response is generating', () => {
+    const { parent, handlers, handle } = mount();
+    const input = parent.querySelector<HTMLTextAreaElement>('.uc-input')!;
+    const send = parent.querySelector<HTMLButtonElement>('.uc-send')!;
+    input.value = 'first request';
+    send.click();
+
+    expect(handlers.onSend).toHaveBeenCalledTimes(1);
+    expect(send.disabled).toBe(true);
+    expect(send.textContent).toBe('Generating…');
+
+    input.value = 'second request';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(handlers.onSend).toHaveBeenCalledTimes(1);
+    expect(input.value).toBe('second request');
+
+    handle.setStreaming(false);
+    expect(send.disabled).toBe(false);
+    expect(send.textContent).toBe('Send');
+  });
+
 
   it('respects the Korean IME composition guard (keyCode 229)', () => {
     const { parent, handlers } = mount();
@@ -242,6 +263,7 @@ describe('mountUnifiedChat — streaming assistant', () => {
     stream.fail('rate limited');
     const body = parent.querySelector<HTMLElement>('.uc-assistant .uc-body')!;
     expect(body.textContent).toContain('rate limited');
+    expect(body.textContent).toContain('Couldn’t finish the response. Check your connection and try again.');
     expect(body.classList.contains('uc-err')).toBe(true);
     expect(parent.querySelector<HTMLElement>('.uc-assistant')!.classList.contains('uc-streaming')).toBe(false);
   });

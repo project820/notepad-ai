@@ -1290,6 +1290,7 @@ async function sendUnified(
       t('chat.noProvider'),
     );
     statusEl.textContent = t('status.connectProvider');
+    unifiedChat.setStreaming(false);
     openSettings();
     return;
   }
@@ -1334,11 +1335,13 @@ async function sendUnified(
       scheduleSessionSnapshot();
       cleanup();
       ucInflight = null;
+      unifiedChat.setStreaming(false);
     } else if (e.kind === 'error') {
       stream.fail(e.message ?? t('status.aiError'));
       statusEl.textContent = e.message ?? t('status.aiError');
       cleanup();
       ucInflight = null;
+      unifiedChat.setStreaming(false);
     }
   });
   ucInflight = { id, cleanup };
@@ -1349,6 +1352,7 @@ async function sendUnified(
     stream.fail(err?.message ?? String(err));
     cleanup();
     ucInflight = null;
+    unifiedChat.setStreaming(false);
   }
 }
 

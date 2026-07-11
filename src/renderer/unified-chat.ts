@@ -97,6 +97,8 @@ export type UnifiedChatHandle = {
   clearPanel: () => void;
   /** Advise tab: update the sync-status badge (e.g. "문서 동기화됨 · 14:32"). */
   setAdviceSync: (label: string) => void;
+  /** Reflect whether a single assistant response is being generated. */
+  setStreaming: (streaming: boolean) => void;
   /** Add a pending image attachment to the composer (paste/file/programmatic). */
   addAttachment: (att: ChatAttachment) => void;
   destroy: () => void;
@@ -174,6 +176,8 @@ export function mountUnifiedChat(parent: HTMLElement, handlers: UnifiedChatHandl
   const toolNotice = parent.querySelector<HTMLElement>('.uc-tool-notice')!;
   const composer = parent.querySelector<HTMLElement>('.uc-composer')!;
   const panel = parent.querySelector<HTMLElement>('.uc-panel')!;
+  const sendButton = parent.querySelector<HTMLButtonElement>('.uc-send')!;
+  let sending = false;
   const adviseStatus = parent.querySelector<HTMLElement>('.uc-advise-status')!;
   let mode: ChatMode = 'write';
   const chips = parent.querySelector<HTMLElement>('.uc-chips')!;
@@ -267,6 +271,13 @@ export function mountUnifiedChat(parent: HTMLElement, handlers: UnifiedChatHandl
     else body.textContent = text;
   }
 
+  function setStreaming(streaming: boolean) {
+    sending = streaming;
+    sendButton.disabled = streaming;
+    sendButton.textContent = t(streaming ? 'uc.generating' : 'uc.send');
+    composer.classList.toggle('uc-composer-streaming', streaming);
+  }
+
   function addMessage(role: 'user' | 'assistant', text: string) {
     const node = newBubble(role);
     node.dataset.text = text;
@@ -312,11 +323,11 @@ export function mountUnifiedChat(parent: HTMLElement, handlers: UnifiedChatHandl
           renderBody(node, buffer, true);
           const note = document.createElement('div');
           note.className = 'uc-err';
-          note.textContent = `⚠ ${message}`;
+          note.textContent = `⚠ ${t('uc.error.retry')} ${message}`;
           body.appendChild(note);
           if (actions) actions.style.display = '';
         } else {
-          body.textContent = `⚠ ${message}`;
+          body.textContent = `⚠ ${t('uc.error.retry')} ${message}`;
           body.classList.add('uc-err');
         }
         scrollToEnd();
@@ -445,12 +456,13 @@ export function mountUnifiedChat(parent: HTMLElement, handlers: UnifiedChatHandl
   const send = () => {
     // Project/HTML are panel-driven tabs with no composer turn — never send or
     // wipe the user's text from them (would be silent text loss).
-    if (mode === 'project' || mode === 'html') return;
+    if (sending || mode === 'project' || mode === 'html') return;
     const text = input.value.trim();
     const images = pending.filter((p): p is { kind: 'image'; img: ChatAttachment } => p.kind === 'image').map((p) => p.img);
     const textFiles = pending.filter((p): p is { kind: 'text'; txt: ChatTextAttachment } => p.kind === 'text').map((p) => p.txt);
     // Allow an attachment-only turn (e.g. "OCR this" / "summarize this file").
     if (!text && pending.length === 0) return;
+    setStreaming(true);
     handlers.onSend(text, mode, images.length ? images : undefined, textFiles.length ? textFiles : undefined);
     input.value = '';
     pending.length = 0;
@@ -538,6 +550,7 @@ export function mountUnifiedChat(parent: HTMLElement, handlers: UnifiedChatHandl
     setAdviceSync: (label: string) => {
       adviseStatus.textContent = label;
     },
+    setStreaming,
     addAttachment,
     showPanel,
     clearPanel,
