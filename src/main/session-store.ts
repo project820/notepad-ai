@@ -1,7 +1,7 @@
 import { app } from 'electron';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { migrateSessionSnapshot, type SessionSnapshotV2 } from './session-schema';
+import { migrateSessionSnapshot, removeWindowSnapshot, type SessionSnapshotV2 } from './session-schema';
 import { SessionQueue } from './session-queue';
 import { atomicWrite as atomicWriteFile, nodeAtomicBackend } from './atomic-write';
 
@@ -74,12 +74,14 @@ export function mutateSessionAggregate(
 }
 
 /**
- * Begin the quit transaction and persist `cleanExit: true`. After this, late
- * renderer `session:write` mutations are dropped so the clean-exit marker wins.
+ * Atomically persist the final quit aggregate and then fence late renderer
+ * writes. Discarded windows and the clean-exit marker are one durable change.
  */
-export async function markCleanExitQueued(): Promise<void> {
-  sessionQueue.beginQuit();
-  await sessionQueue.mutate((s) => ({ ...s, cleanExit: true }), { allowDuringQuit: true });
+export async function markCleanExitQueued(windowKeys: readonly string[] = []): Promise<void> {
+  await sessionQueue.beginQuit((state) => ({
+    ...windowKeys.reduce(removeWindowSnapshot, state),
+    cleanExit: true,
+  }));
 }
 
 /** Reset the aggregate to a clean empty state (after a clean-exit restore check). */

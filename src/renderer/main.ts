@@ -231,6 +231,9 @@ window.api.onCloseSave((requestId, requestedRevision) => {
 window.api.onCloseAuthorize((requestId) => {
   window.api.sendCloseAuthorizeResult(requestId, docLifecycle.authorizeCloseLease(requestId));
 });
+window.api.onCloseConsume((requestId) => {
+  window.api.sendCloseConsumeResult(requestId, docLifecycle.consumeCloseLease(requestId));
+});
 window.api.onCloseDiscard((requestId) => {
   void docLifecycle.fenceDiscard(requestId).then(
     (fenced) => window.api.sendCloseDiscardResult(requestId, fenced),

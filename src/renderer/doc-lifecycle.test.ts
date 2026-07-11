@@ -71,6 +71,32 @@ describe('document close lease and replacement lifecycle', () => {
     expect(saveFile).not.toHaveBeenCalled();
     vi.useRealTimers();
   });
+  it('re-arms autosave after discard rollback for a dirty named document', async () => {
+    vi.useFakeTimers();
+    const { ctx, lifecycle, saveFile } = setup();
+    ctx.currentPath = '/tmp/draft.md';
+    ctx.dirty = true;
+    lifecycle.beginCloseLease('lease-1');
+
+    await lifecycle.fenceDiscard('lease-1');
+    lifecycle.rollbackDiscardFence();
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    expect(saveFile).toHaveBeenCalledOnce();
+    vi.useRealTimers();
+  });
+
+  it('consumes a valid lease and rejects later document lifecycle mutations', () => {
+    const { ctx, lifecycle } = setup();
+    ctx.dirty = true;
+    lifecycle.beginCloseLease('lease-1');
+
+    expect(lifecycle.consumeCloseLease('lease-1')).toBe(true);
+    lifecycle.onDocChange('edited');
+
+    expect(ctx.docRevision).toBe(0);
+    expect(lifecycle.authorizeCloseLease('lease-1')).toBe(false);
+  });
 
   it('routes programmatic replacement through one revision and dirty-state authority', () => {
     const { ctx, lifecycle, getDoc } = setup();

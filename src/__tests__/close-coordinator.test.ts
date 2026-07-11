@@ -19,6 +19,18 @@ describe('CloseCoordinator', () => {
     await expect(coordinator.request('close', [first], async () => 'discard', async () => false))
       .resolves.toEqual({ approved: false, intent: 'close' });
   });
+  it('re-decides only invalidated targets before retrying the all-window commit', async () => {
+    const coordinator = new CloseCoordinator();
+    const decide = vi.fn(async () => 'allow' as const);
+    const commit = vi.fn()
+      .mockResolvedValueOnce({ retry: [first] })
+      .mockResolvedValueOnce(true);
+
+    await expect(coordinator.request('quit', [first, second], decide, commit))
+      .resolves.toEqual({ approved: true, intent: 'quit' });
+    expect(decide.mock.calls.map(([target]) => target)).toEqual([first, second, first]);
+    expect(commit).toHaveBeenCalledTimes(2);
+  });
 
   it('serializes a close that arrives during quit and commits once for all quit windows', async () => {
     const coordinator = new CloseCoordinator();

@@ -173,6 +173,15 @@ const api = {
   },
   sendCloseAuthorizeResult: (requestId: string, valid: boolean): void =>
     ipcRenderer.send('close:authorize-result', { requestId, valid }),
+  onCloseConsume: (cb: (requestId: string) => void): (() => void) => {
+    const listener = (_e: unknown, request: { requestId?: unknown }) => {
+      if (typeof request?.requestId === 'string') cb(request.requestId);
+    };
+    ipcRenderer.on('close:consume', listener);
+    return () => ipcRenderer.removeListener('close:consume', listener);
+  },
+  sendCloseConsumeResult: (requestId: string, consumed: boolean): void =>
+    ipcRenderer.send('close:consume-result', { requestId, consumed }),
   onCloseDiscard: (cb: (requestId: string) => void): (() => void) => {
     const listener = (_e: unknown, request: { requestId?: unknown }) => {
       if (typeof request?.requestId === 'string') cb(request.requestId);

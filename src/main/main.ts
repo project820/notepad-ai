@@ -59,6 +59,7 @@ const windows = createAppWindows({
   removeSessionWindows: async (windowKeys) => {
     await mutateSessionAggregate((current) => windowKeys.reduce(removeWindowSnapshot, current));
   },
+  commitQuitSession: (windowKeys) => markCleanExitQueued(windowKeys),
 });
 
 // All IPC handlers are registered at module load, before app.whenReady().
@@ -71,11 +72,11 @@ registerConvertIpc({ converterHost });
 handleTrusted('update:check', async () => checkForUpdate(app.getVersion()));
 handleTrusted('app:version', () => app.getVersion());
 handleTrusted('app:relaunch', async () => {
-  await windows.approveAllForQuit('relaunch', async () => {
+  if (await windows.approveAllForQuit('relaunch')) {
     relaunchApproved = true;
     app.relaunch();
     app.quit();
-  });
+  }
 });
 handleTrusted('shell:open-external', async (_e, url: string) => { if (isAllowedExternalUrl(url)) await shell.openExternal(url); });
 registerOsIpc();
@@ -92,8 +93,8 @@ app.on('before-quit', (event) => {
   event.preventDefault();
   if (quitGuardPending) return;
   quitGuardPending = true;
-  void windows.approveAllForQuit('quit', async () => {
-    await markCleanExitQueued();
+  void windows.approveAllForQuit('quit').then((approved) => {
+    if (!approved) return;
     quitApproved = true;
     app.quit();
   }).catch((error) => {

@@ -12,6 +12,8 @@ export type CloseTransaction = {
   discards: readonly CloseTarget[];
 };
 
+export type CloseCommitResult = boolean | { retry: readonly CloseTarget[] };
+
 export type CloseTransactionResult = {
   approved: boolean;
   intent: CloseIntent;
@@ -29,7 +31,7 @@ export class CloseCoordinator {
     intent: CloseIntent,
     targets: readonly CloseTarget[],
     decide: (target: CloseTarget) => Promise<CloseDecision>,
-    commit: (transaction: CloseTransaction) => Promise<void | boolean>,
+    commit: (transaction: CloseTransaction) => Promise<void | CloseCommitResult>,
   ): Promise<CloseTransactionResult> {
     if (this.inFlight) {
       // A window close joins a process-wide quit/relaunch transaction, but an
@@ -40,14 +42,24 @@ export class CloseCoordinator {
     }
 
     const run = (async (): Promise<CloseTransactionResult> => {
-      const discards: CloseTarget[] = [];
-      for (const target of targets) {
-        const decision = await decide(target);
-        if (decision === 'cancel') return { approved: false, intent };
-        if (decision === 'discard') discards.push(target);
+      const decisions = new Map<number, CloseDecision>();
+      let pending = [...targets];
+      for (let attempts = 0; pending.length > 0; attempts += 1) {
+        if (attempts >= 8) return { approved: false, intent };
+        for (const target of pending) {
+          const decision = await decide(target);
+          if (decision === 'cancel') return { approved: false, intent };
+          decisions.set(target.windowId, decision);
+        }
+        const discards = targets.filter((target) => decisions.get(target.windowId) === 'discard');
+        const committed = await commit({ intent, targets, discards });
+        if (committed !== false && !(typeof committed === 'object' && 'retry' in committed)) {
+          return { approved: true, intent };
+        }
+        pending = typeof committed === 'object' && 'retry' in committed ? [...committed.retry] : [];
+        if (pending.length === 0) return { approved: false, intent };
       }
-      const committed = await commit({ intent, targets, discards });
-      return { approved: committed !== false, intent };
+      return { approved: false, intent };
     })();
     this.inFlightIntent = intent;
     this.inFlight = run.finally(() => {

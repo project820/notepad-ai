@@ -55,9 +55,9 @@ export class SessionQueue {
   /**
    * Serialized read-modify-write. `mutator` receives the latest authoritative
    * aggregate and returns the next one, which is committed to memory and
-   * persisted atomically. After {@link beginQuit}, a non-quit mutation is a
-   * no-op (returns the current state) so the clean-exit transaction is not
-   * overwritten by a late renderer write.
+   * persisted atomically. After a successful {@link beginQuit}, a non-quit
+   * mutation is a no-op (returns the current state) so the clean-exit
+   * transaction is not overwritten by a late renderer write.
    */
   mutate(
     mutator: (current: SessionSnapshotV2) => SessionSnapshotV2,
@@ -79,9 +79,25 @@ export class SessionQueue {
     return run;
   }
 
-  /** Begin the quit transaction: subsequent non-quit mutations become no-ops. */
-  beginQuit(): void {
-    this.quitting = true;
+  /**
+   * Persist the final quit aggregate and only then fence subsequent non-quit
+   * writes. A failed persist leaves both the durable and in-memory transaction
+   * state unchanged.
+   */
+  beginQuit(
+    mutator: (current: SessionSnapshotV2) => SessionSnapshotV2,
+  ): Promise<SessionSnapshotV2> {
+    const run = this.chain.then(async () => {
+      const current = await this.ensureLoaded();
+      if (this.quitting) return current;
+      const next = mutator(current);
+      await this.io.persist(next);
+      this.state = next;
+      this.quitting = true;
+      return next;
+    });
+    this.chain = run.catch(() => {});
+    return run;
   }
 
   isQuitting(): boolean {

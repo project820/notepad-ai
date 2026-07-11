@@ -102,24 +102,45 @@ describe('SessionQueue — concurrent writes preserve every window (lost-update 
 });
 
 describe('SessionQueue — quit transaction', () => {
-  it('drops late non-quit writes after beginQuit so cleanExit wins', async () => {
+  it('drops late non-quit writes only after the final aggregate persists', async () => {
     const h = makeIO();
     const q = new SessionQueue(h.io);
     await q.mutate((s) => upsertWindowSnapshot(s, win('w1')));
-    q.beginQuit();
-    // clean-exit marker (allowed during quit)
-    await q.mutate((s) => ({ ...s, cleanExit: true }), { allowDuringQuit: true });
+    await q.beginQuit((s) => ({ ...s, cleanExit: true }));
     // late renderer write (must be dropped)
     await q.mutate((s) => upsertWindowSnapshot(s, win('w-late')));
     expect(h.disk.cleanExit).toBe(true);
     expect(h.disk.windows.map((w) => w.id)).toEqual(['w1']);
   });
+  it('persists discarded removals and cleanExit in one final mutation', async () => {
+    const h = makeIO();
+    const q = new SessionQueue(h.io);
+    await q.mutate((s) => upsertWindowSnapshot(s, win('discarded')));
+    await q.mutate((s) => upsertWindowSnapshot(s, win('kept')));
+    const persistsBeforeQuit = h.calls.filter((call) => call === 'persist:start').length;
 
-  it('isQuitting reflects beginQuit', async () => {
+    await q.beginQuit((s) => ({ ...removeWindowSnapshot(s, 'discarded'), cleanExit: true }));
+
+    expect(h.disk.cleanExit).toBe(true);
+    expect(h.disk.windows.map((window) => window.id)).toEqual(['kept']);
+    expect(h.calls.filter((call) => call === 'persist:start')).toHaveLength(persistsBeforeQuit + 1);
+  });
+
+  it('does not publish the quit fence when final persistence fails', async () => {
+    const h = makeIO();
+    const q = new SessionQueue(h.io);
+    h.failOncePersist();
+    await expect(q.beginQuit((s) => ({ ...s, cleanExit: true }))).rejects.toThrow('disk full');
+    expect(q.isQuitting()).toBe(false);
+    await q.mutate((s) => upsertWindowSnapshot(s, win('w1')));
+    expect(h.disk.windows.map((w) => w.id)).toEqual(['w1']);
+  });
+
+  it('isQuitting reflects a successfully persisted beginQuit', async () => {
     const h = makeIO();
     const q = new SessionQueue(h.io);
     expect(q.isQuitting()).toBe(false);
-    q.beginQuit();
+    await q.beginQuit((s) => ({ ...s, cleanExit: true }));
     expect(q.isQuitting()).toBe(true);
   });
 });

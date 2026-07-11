@@ -21,7 +21,7 @@ import {
   type CloseGuardState,
 } from './close-guard';
 import { onTrusted } from './ipc-guard';
-import { CloseCoordinator, type CloseDecision, type CloseTarget } from './close-coordinator';
+import { CloseCoordinator, type CloseCommitResult, type CloseDecision, type CloseTarget } from './close-coordinator';
 
 const APP_DISPLAY_NAME = 'Notepad AI';
 const APP_STORAGE_NAME = 'notepad-ai';
@@ -37,6 +37,7 @@ type AppWindowsDeps = {
   hasSingleInstanceLock: boolean;
   removeSessionWindow: (windowKey: string) => Promise<void>;
   removeSessionWindows: (windowKeys: readonly string[]) => Promise<void>;
+  commitQuitSession: (discardedWindowKeys: readonly string[]) => Promise<void>;
   showCloseDialog?: (win: BrowserWindow, labels: { title: string; message: string; save: string; discard: string; cancel: string }) => Promise<CloseGuardChoice>;
 };
 
@@ -51,7 +52,7 @@ type AppWindows = {
   sinkFor: (win: BrowserWindow) => OutboundSink;
   sendToFocused: (channel: string) => void;
   approveClose: (win: BrowserWindow) => Promise<boolean>;
-  approveAllForQuit: (intent: 'quit' | 'relaunch', onCommit: () => Promise<void>) => Promise<boolean>;
+  approveAllForQuit: (intent: 'quit' | 'relaunch') => Promise<boolean>;
   clearCloseApprovals: () => void;
   isSessionWriteFenced: (windowKey: string) => boolean;
 };
@@ -79,6 +80,7 @@ export function createAppWindows({
   hasSingleInstanceLock,
   removeSessionWindow,
   removeSessionWindows,
+  commitQuitSession,
   showCloseDialog = async (win, labels) => {
     const result = await dialog.showMessageBox(win, {
       type: 'warning',
@@ -104,8 +106,8 @@ export function createAppWindows({
   const windowLocales = new Map<number, CloseGuardState['locale']>();
   const pendingAuthorize = new Map<string, { webContentsId: number; resolve: (valid: boolean) => void }>();
   const pendingDiscard = new Map<string, { webContentsId: number; resolve: (fenced: boolean) => void }>();
-  const closeLeases = new Map<number, string>();
-  const invalidatedCloseLeases = new Set<string>();
+  const pendingConsume = new Map<string, { webContentsId: number; resolve: (consumed: boolean) => void }>();
+  const closeLeases = new Map<number, { id: string; invalidated: boolean }>();
 
   const requestId = (kind: string, win: BrowserWindow) => `${kind}:${win.id}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
   const waitForState = (
@@ -174,6 +176,14 @@ export function createAppWindows({
     pendingAuthorize.delete(id);
     pending.resolve(value.valid === true);
   });
+  onTrusted('close:consume-result', (event, raw: unknown) => {
+    const value = raw as Record<string, unknown>;
+    const id = typeof value?.requestId === 'string' ? value.requestId : '';
+    const pending = pendingConsume.get(id);
+    if (!pending || pending.webContentsId !== event.sender.id) return;
+    pendingConsume.delete(id);
+    pending.resolve(value.consumed === true);
+  });
   onTrusted('close:discard-result', (event, raw: unknown) => {
     const value = raw as Record<string, unknown>;
     const id = typeof value?.requestId === 'string' ? value.requestId : '';
@@ -185,8 +195,9 @@ export function createAppWindows({
   onTrusted('close:lease-invalidated', (event, raw: unknown) => {
     const value = raw as Record<string, unknown>;
     const id = typeof value?.requestId === 'string' ? value.requestId : '';
-    if (closeLeases.get(BrowserWindow.fromWebContents(event.sender)?.id ?? -1) !== id) return;
-    invalidatedCloseLeases.add(id);
+    const lease = closeLeases.get(BrowserWindow.fromWebContents(event.sender)?.id ?? -1);
+    if (!lease || lease.id !== id) return;
+    lease.invalidated = true;
   });
   onTrusted('close:locale', (event, locale: unknown) => {
     const rec = registry.getByWebContents(event.sender.id);
@@ -202,8 +213,7 @@ export function createAppWindows({
     const id = requestId('state', win);
     const live = await waitForState(id, win.webContents.id, () => win.webContents.send('close:query-state', { requestId: id }));
     if (!live) return { ...fallback, locale: windowLocales.get(win.id) ?? fallback.locale, leaseId: null };
-    closeLeases.set(win.id, id);
-    invalidatedCloseLeases.delete(id);
+    closeLeases.set(win.id, { id, invalidated: false });
     return { ...live, leaseId: id };
   };
 
@@ -225,62 +235,82 @@ export function createAppWindows({
       win.webContents.send('close:save', { requestId: id, revision });
     });
   };
+  const activeLease = (win: BrowserWindow, leaseId: string | undefined) => {
+    const lease = closeLeases.get(win.id);
+    return !!leaseId && !!lease && lease.id === leaseId && !lease.invalidated && !win.isDestroyed();
+  };
   const authorizeRendererClose = (win: BrowserWindow, leaseId: string | undefined): Promise<boolean> => {
-    if (!leaseId || invalidatedCloseLeases.has(leaseId) || win.isDestroyed()) return Promise.resolve(false);
+    if (!activeLease(win, leaseId)) return Promise.resolve(false);
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
-        pendingAuthorize.delete(leaseId);
+        pendingAuthorize.delete(leaseId!);
         resolve(false);
       }, 400);
-      pendingAuthorize.set(leaseId, {
+      pendingAuthorize.set(leaseId!, {
         webContentsId: win.webContents.id,
         resolve: (valid) => {
           clearTimeout(timer);
-          pendingAuthorize.delete(leaseId);
-          resolve(valid && !invalidatedCloseLeases.has(leaseId));
+          pendingAuthorize.delete(leaseId!);
+          resolve(valid && activeLease(win, leaseId));
         },
       });
       win.webContents.send('close:authorize', { requestId: leaseId });
     });
   };
-
-  const fenceRendererDiscard = (win: BrowserWindow, leaseId: string | undefined): Promise<boolean> => {
-    if (!leaseId || invalidatedCloseLeases.has(leaseId) || win.isDestroyed()) return Promise.resolve(false);
+  const consumeRendererClose = (win: BrowserWindow, leaseId: string | undefined): Promise<boolean> => {
+    if (!activeLease(win, leaseId)) return Promise.resolve(false);
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
-        pendingDiscard.delete(leaseId);
+        pendingConsume.delete(leaseId!);
         resolve(false);
       }, 400);
-      pendingDiscard.set(leaseId, {
+      pendingConsume.set(leaseId!, {
         webContentsId: win.webContents.id,
-        resolve: (fenced) => {
+        resolve: (consumed) => {
           clearTimeout(timer);
-          pendingDiscard.delete(leaseId);
-          resolve(fenced);
+          pendingConsume.delete(leaseId!);
+          resolve(consumed && activeLease(win, leaseId));
         },
       });
+      win.webContents.send('close:consume', { requestId: leaseId });
+    });
+  };
+
+  const fenceRendererDiscard = (win: BrowserWindow, leaseId: string | undefined): Promise<boolean> => {
+    if (!activeLease(win, leaseId)) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      const onDestroyed = () => pending.resolve(false);
+      const pending = {
+        webContentsId: win.webContents.id,
+        resolve: (fenced: boolean) => {
+          win.removeListener('closed', onDestroyed);
+          pendingDiscard.delete(leaseId!);
+          resolve(fenced && activeLease(win, leaseId));
+        },
+      };
+      pendingDiscard.set(leaseId!, pending);
+      win.once('closed', onDestroyed);
       win.webContents.send('close:discard', { requestId: leaseId });
     });
   };
-
   const rollbackRendererDiscardFence = async (win: BrowserWindow | null, leaseId: string | undefined): Promise<void> => {
     if (!leaseId || !win || win.isDestroyed()) return;
     await new Promise<void>((resolve) => {
-      const timer = setTimeout(() => {
-        pendingDiscard.delete(leaseId);
-        resolve();
-      }, 400);
-      pendingDiscard.set(leaseId, {
+      const onDestroyed = () => pending.resolve();
+      const pending = {
         webContentsId: win.webContents.id,
         resolve: () => {
-          clearTimeout(timer);
+          win.removeListener('closed', onDestroyed);
           pendingDiscard.delete(leaseId);
           resolve();
         },
-      });
+      };
+      pendingDiscard.set(leaseId, pending);
+      win.once('closed', onDestroyed);
       win.webContents.send('close:discard-rollback', { requestId: leaseId });
     });
   };
+  const leaseIdFor = (windowId: number) => closeLeases.get(windowId)?.id;
 
   const decideClose = async (target: CloseTarget): Promise<CloseDecision> => {
     const win = BrowserWindow.fromId(target.windowId);
@@ -299,7 +329,7 @@ export function createAppWindows({
         },
       });
       if (action === 'cancel') return action;
-      if (await authorizeRendererClose(win, closeLeases.get(win.id))) return action;
+      if (await authorizeRendererClose(win, leaseIdFor(win.id))) return action;
     }
   };
 
@@ -307,45 +337,77 @@ export function createAppWindows({
 
   const commitCloseTransaction = async (
     transaction: { intent: 'close' | 'quit' | 'relaunch'; targets: readonly CloseTarget[]; discards: readonly CloseTarget[] },
-    onCommit?: () => Promise<void>,
-  ): Promise<boolean> => {
-    const fenced: CloseTarget[] = [];
-    const rollbackDiscards = async () => {
-      for (const target of fenced) discardedWindowKeys.delete(target.windowKey);
-      await Promise.all(fenced.map((target) => rollbackRendererDiscardFence(
-        BrowserWindow.fromId(target.windowId),
-        closeLeases.get(target.windowId),
-      )));
+  ): Promise<CloseCommitResult> => {
+    // A discard request fences autosave before its active save drains. Track it
+    // before waiting so every partial prepare is explicitly rolled back.
+    const requestedDiscards = [...transaction.discards];
+    const rollback = async (targets: readonly CloseTarget[]) => {
+      await Promise.all(targets.map(async (target) => {
+        const win = BrowserWindow.fromId(target.windowId);
+        await rollbackRendererDiscardFence(win, leaseIdFor(target.windowId));
+        closeLeases.delete(target.windowId);
+      }));
     };
-
-    for (const target of transaction.discards) {
+    const discardResults = await Promise.all(requestedDiscards.map(async (target) => {
       const win = BrowserWindow.fromId(target.windowId);
-      if (!win || !(await fenceRendererDiscard(win, closeLeases.get(target.windowId)))) {
-        await rollbackDiscards();
-        return false;
-      }
-      fenced.push(target);
-      discardedWindowKeys.add(target.windowKey);
+      return !!win && await fenceRendererDiscard(win, leaseIdFor(target.windowId));
+    }));
+    if (discardResults.some((fenced) => !fenced)) {
+      await rollback(requestedDiscards);
+      return { retry: requestedDiscards };
     }
-    for (const target of transaction.targets) {
+
+    // One full parallel validation epoch must finish with every lease still
+    // valid. A lease invalidation returns only that window to the decision
+    // phase; the coordinator bounds repeated retries.
+    const validation = await Promise.all(transaction.targets.map(async (target) => {
       const win = BrowserWindow.fromId(target.windowId);
-      if (!win || !(await authorizeRendererClose(win, closeLeases.get(target.windowId)))) {
-        await rollbackDiscards();
-        return false;
-      }
+      return !!win && await authorizeRendererClose(win, leaseIdFor(target.windowId));
+    }));
+    const invalid = transaction.targets.filter((target, index) => {
+      const win = BrowserWindow.fromId(target.windowId);
+      return !validation[index] || !win || !activeLease(win, leaseIdFor(target.windowId));
+    });
+    if (invalid.length > 0) {
+      await rollback(requestedDiscards);
+      return { retry: [...new Map([...invalid, ...requestedDiscards].map((target) => [target.windowId, target])).values()] };
+    }
+
+    // Consume every already-authorized lease before any persistent or teardown
+    // side effect. The renderer rejects later document mutations for a consumed
+    // lease, closing the final validation-to-close race.
+    const consumed = await Promise.all(transaction.targets.map(async (target) => {
+      const win = BrowserWindow.fromId(target.windowId);
+      return !!win && await consumeRendererClose(win, leaseIdFor(target.windowId));
+    }));
+    const notConsumed = transaction.targets.filter((target, index) => {
+      const win = BrowserWindow.fromId(target.windowId);
+      return !consumed[index] || !win || !activeLease(win, leaseIdFor(target.windowId));
+    });
+    if (notConsumed.length > 0) {
+      await rollback(transaction.targets);
+      return { retry: transaction.targets };
     }
 
     try {
-      if (fenced.length > 0) await removeSessionWindows(fenced.map((target) => target.windowKey));
+      const discardedKeys = requestedDiscards.map((target) => target.windowKey);
+      if (transaction.intent === 'quit') {
+        await commitQuitSession(discardedKeys);
+      } else if (discardedKeys.length > 0) {
+        await removeSessionWindows(discardedKeys);
+      }
     } catch (error) {
-      console.error('[session] failed to commit discarded windows:', error);
-      await rollbackDiscards();
+      console.error('[session] failed to commit close transaction:', error);
+      await rollback(transaction.targets);
       return false;
     }
 
+    for (const target of requestedDiscards) discardedWindowKeys.add(target.windowKey);
     preserveSessionOnClose = transaction.intent === 'relaunch';
-    for (const target of transaction.targets) approvedCloseWindowIds.add(target.windowId);
-    await onCommit?.();
+    for (const target of transaction.targets) {
+      approvedCloseWindowIds.add(target.windowId);
+      closeLeases.delete(target.windowId);
+    }
     return true;
   };
 
@@ -357,8 +419,8 @@ export function createAppWindows({
     return result.approved;
   };
 
-  const approveAllForQuit = async (intent: 'quit' | 'relaunch', onCommit: () => Promise<void>) => {
-    const result = await coordinator.request(intent, targetsFor(registry.all()), decideClose, (transaction) => commitCloseTransaction(transaction, onCommit));
+  const approveAllForQuit = async (intent: 'quit' | 'relaunch') => {
+    const result = await coordinator.request(intent, targetsFor(registry.all()), decideClose, commitCloseTransaction);
     return result.approved && result.intent === intent;
   };
 

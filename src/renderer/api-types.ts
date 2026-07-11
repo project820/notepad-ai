@@ -71,6 +71,8 @@ export type Api = {
   sendCloseSaveResult: (requestId: string, result: { saved: boolean; committedRevision: number | null }) => void;
   onCloseAuthorize: (cb: (requestId: string) => void) => () => void;
   sendCloseAuthorizeResult: (requestId: string, valid: boolean) => void;
+  onCloseConsume: (cb: (requestId: string) => void) => () => void;
+  sendCloseConsumeResult: (requestId: string, consumed: boolean) => void;
   onCloseDiscard: (cb: (requestId: string) => void) => () => void;
   sendCloseDiscardResult: (requestId: string, fenced: boolean) => void;
   onCloseDiscardRollback: (cb: (requestId: string) => void) => () => void;

@@ -22,19 +22,21 @@ type DocLifecycleDeps = {
 
 export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
   let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
-  let closeLease: { id: string; revision: number; invalidated: boolean } | null = null;
+  let closeLease: { id: string; revision: number; invalidated: boolean; consumed: boolean } | null = null;
   let savesFenced = false;
   let saveTail = Promise.resolve();
 
   function invalidateCloseLease(): void {
-    if (!closeLease || closeLease.invalidated) return;
+    if (!closeLease || closeLease.invalidated || closeLease.consumed) return;
     closeLease.invalidated = true;
     deps.api.sendCloseLeaseInvalidated(closeLease.id, ctx.docRevision);
   }
 
-  function recordDocumentMutation(): void {
+  function recordDocumentMutation(): boolean {
+    if (closeLease?.consumed) return false;
     ctx.docRevision += 1;
     invalidateCloseLease();
+    return true;
   }
 
   function displayTitle(): string {
@@ -95,8 +97,7 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
 
   const previewRenderThrottle = deps.createRafThrottle();
   function onDocChange(doc: string) {
-    if (ctx.suppressEditorChange) return;
-    recordDocumentMutation();
+    if (ctx.suppressEditorChange || !recordDocumentMutation()) return;
     if (!ctx.dirty) {
       ctx.dirty = true;
       setTitle();
@@ -114,7 +115,7 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
   }
 
   function onSuppressedEditorChange(doc: string, syncPreview = false): void {
-    recordDocumentMutation();
+    if (!recordDocumentMutation()) return;
     handleSuppressedDocumentChange(doc, {
       isDirty: () => ctx.dirty,
       markDirty: () => {
@@ -263,11 +264,17 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
   }
 
   function beginCloseLease(id: string): void {
-    closeLease = { id, revision: ctx.docRevision, invalidated: false };
+    closeLease = { id, revision: ctx.docRevision, invalidated: false, consumed: false };
   }
 
   function authorizeCloseLease(id: string): boolean {
-    return closeLease?.id === id && !closeLease.invalidated && closeLease.revision === ctx.docRevision;
+    return closeLease?.id === id && !closeLease.invalidated && !closeLease.consumed && closeLease.revision === ctx.docRevision;
+  }
+
+  function consumeCloseLease(id: string): boolean {
+    if (!authorizeCloseLease(id)) return false;
+    closeLease!.consumed = true;
+    return true;
   }
 
   async function fenceDiscard(id: string): Promise<boolean> {
@@ -276,11 +283,13 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
     autosaveTimer = null;
     savesFenced = true;
     await saveTail;
-    return true;
+    return authorizeCloseLease(id);
   }
 
   function rollbackDiscardFence(): void {
     savesFenced = false;
+    closeLease = null;
+    if (ctx.dirty && ctx.currentPath) scheduleAutosave();
   }
 
   return {
@@ -288,6 +297,7 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
     onSuppressedEditorChange,
     replaceDocument,
     beginCloseLease,
+    consumeCloseLease,
     authorizeCloseLease,
     fenceDiscard,
     rollbackDiscardFence,
