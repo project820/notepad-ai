@@ -195,6 +195,9 @@ export function createAppWindows({
       restoreSnapshot: opts.restore,
     };
     registry.register(record);
+    // Electron can deliver an open-file event while the initial window is loading.
+    // Publish the blank launch window before loadFile resolves so that event reuses it.
+    if (!opts.restore && launchWindowId == null) launchWindowId = win.id;
     if (opts.restore?.path) {
       registry.claimPath(win.id, opts.restore.path);
       fileGrants.grantFile(win.webContents.id, opts.restore.path);
