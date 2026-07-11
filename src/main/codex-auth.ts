@@ -3,7 +3,6 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { readCappedText, STREAM_LIMITS } from './ai/stream-http';
 import type { AuthSnapshot, LoginUpdate } from '../shared/auth-protocol';
-export type { AuthSnapshot, AuthWarningCode, LoginErrorCode, LoginUpdate } from '../shared/auth-protocol';
 /**
  * OpenAI Codex device-code OAuth — ported from Hermes (auth.py).
  * Endpoints discovered:

@@ -336,7 +336,7 @@ describe('openSettingsModal — accessibility', () => {
       openSettingsModal({ onSetCustomModel: vi.fn() });
       await flushSettingsRender();
 
-      expect(document.querySelector('.prov-status')?.textContent).toContain('Connected through your local CLI');
+      expect(document.querySelector('.prov-status')?.textContent).toContain('Connected · local CLI');
       expect(document.querySelector('.prov-status')?.textContent).not.toContain('Key set');
       expect(document.querySelectorAll('.prov-local-note')).toHaveLength(1);
     } finally {

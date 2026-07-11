@@ -173,7 +173,7 @@ describe('renderProviderSettingsPanel — CLI providers (G006)', () => {
     expect(html).not.toContain('data-prov-key="grok"'); // no API key input
     expect(html).not.toContain('data-prov-url="grok"'); // no server URL input
     expect(html).not.toContain('data-prov-custom="grok"'); // no custom-model input
-    expect(html).toContain('Connected · CLI');
+    expect(html).toContain('Connected · local CLI');
   });
 
   it('surfaces the install/login guidance error when the CLI is absent', () => {
