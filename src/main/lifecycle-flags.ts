@@ -18,7 +18,10 @@ export function queueOrOpenFile(
   openFile: (path: string) => void,
 ): void {
   if (!ready) {
-    pending.push(filePath);
+    // Path-unique: the same document can legitimately arrive through BOTH
+    // macOS `open-file` and a `second-instance` argv before readiness; the
+    // concurrent flush must never open it twice (double-window race).
+    if (!pending.includes(filePath)) pending.push(filePath);
     return;
   }
   openFile(filePath);

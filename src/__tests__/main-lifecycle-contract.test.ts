@@ -42,4 +42,23 @@ describe('incoming file lifecycle', () => {
     expect(openFile).toHaveBeenCalledTimes(2);
     expect(openFile).toHaveBeenLastCalledWith('/tmp/ready.md');
   });
+
+  it('deduplicates the same path delivered through both pre-ready sources (open-file + second-instance)', () => {
+    const pending: string[] = [];
+    const openFile = vi.fn();
+
+    // Finder open-file and a second-instance argv can race the same document
+    // before readiness; the shared queue must hold it exactly once so the
+    // concurrent flush cannot create two windows.
+    queueOrOpenFile(false, '/tmp/same-doc.md', pending, openFile);
+    queueOrOpenFile(false, '/tmp/same-doc.md', pending, openFile);
+    queueOrOpenFile(false, '/tmp/other-doc.md', pending, openFile);
+
+    expect(pending).toEqual(['/tmp/same-doc.md', '/tmp/other-doc.md']);
+    expect(openFile).not.toHaveBeenCalled();
+
+    for (const filePath of pending.splice(0)) openFile(filePath);
+    expect(openFile).toHaveBeenCalledTimes(2);
+    expect(pending).toEqual([]);
+  });
 });
