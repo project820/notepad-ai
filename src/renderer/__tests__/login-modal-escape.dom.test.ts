@@ -2,10 +2,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { openLoginModal } from '../login-modal';
 import { setLocale, type Locale } from '../i18n';
+const apiWindow = window as unknown as { api?: unknown };
+let priorApi: unknown;
+let hadPriorApi = false;
 
 function setupApi() {
   let cb: ((u: unknown) => void) | undefined;
-  (window as unknown as { api: unknown }).api = {
+  apiWindow.api = {
     authLogin: vi.fn(),
     authCancelLogin: vi.fn(),
     authStatus: vi.fn(),
@@ -17,6 +20,8 @@ function setupApi() {
 }
 
 beforeEach(() => {
+  hadPriorApi = Object.prototype.hasOwnProperty.call(apiWindow, 'api');
+  priorApi = apiWindow.api;
   document.body.innerHTML = '';
   setLocale('en');
 });
@@ -24,6 +29,8 @@ afterEach(() => {
   document.querySelector<HTMLButtonElement>('#login-close')?.click();
   document.body.innerHTML = '';
   setLocale('en');
+  if (hadPriorApi) apiWindow.api = priorApi;
+  else delete apiWindow.api;
 });
 
 const LOGIN_ERROR_EXPECTATIONS: ReadonlyArray<{ locale: Locale; copy: string }> = [
