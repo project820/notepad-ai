@@ -586,7 +586,7 @@ export function mountUnifiedChat(parent: HTMLElement, handlers: UnifiedChatHandl
       setStreaming(false);
       if (!request) return;
       const draft = input.value;
-      input.value = draft ? `${request.text}\n\n${draft}` : request.text;
+      input.value = request.text && draft ? `${request.text}\n\n${draft}` : request.text || draft;
       pending.unshift(...request.pending);
       renderChips();
     },

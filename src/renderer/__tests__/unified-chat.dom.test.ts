@@ -418,6 +418,27 @@ describe('mountUnifiedChat — image attachments (G007 AC14)', () => {
     expect(input.value).toBe('');
     expect(parent.querySelectorAll('.uc-chip')).toHaveLength(0);
   });
+  it('preserves a concurrent draft exactly after an attachment-only request fails', () => {
+    const concurrent = { mime: 'image/jpeg', base64: 'BBBB', bytes: 20, name: 'later.jpg' };
+    const { parent, handle } = mount();
+    const input = parent.querySelector<HTMLTextAreaElement>('.uc-input')!;
+    const send = parent.querySelector<HTMLButtonElement>('.uc-send')!;
+
+    handle.addAttachment(att);
+    send.click();
+    input.value = 'Keep this draft exactly';
+    handle.addAttachment(concurrent);
+
+    handle.failRequest();
+
+    expect(input.value).toBe('Keep this draft exactly');
+    expect(Array.from(parent.querySelectorAll('.uc-chip')).map((chip) => chip.textContent)).toEqual([
+      expect.stringContaining('shot.png'),
+      expect.stringContaining('later.jpg'),
+    ]);
+    expect(send.disabled).toBe(false);
+    expect(parent.querySelector('.uc-composer')!.classList.contains('uc-composer-streaming')).toBe(false);
+  });
 
   it('allows an image-only turn (empty text but attachment present)', () => {
     const { parent, handlers, handle } = mount();
