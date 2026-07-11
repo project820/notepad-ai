@@ -23,7 +23,7 @@ export type CloseDialogLabels = {
   cancel: string;
 };
 
-export const CLOSE_DIALOG_LABELS: Record<CloseGuardLocale, CloseDialogLabels> = {
+const CLOSE_DIALOG_LABELS: Record<CloseGuardLocale, CloseDialogLabels> = {
   en: { title: 'Save changes?', message: 'Do you want to save your changes before closing?', save: 'Save', discard: "Don't Save", cancel: 'Cancel' },
   ko: { title: '변경사항을 저장할까요?', message: '닫기 전에 변경사항을 저장하시겠습니까?', save: '저장', discard: '저장 안 함', cancel: '취소' },
   'zh-Hans': { title: '要保存更改吗？', message: '关闭前要保存更改吗？', save: '保存', discard: '不保存', cancel: '取消' },
