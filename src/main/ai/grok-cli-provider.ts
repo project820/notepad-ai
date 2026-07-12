@@ -4,8 +4,8 @@
  * delivered through a 0o600 temp file via `--prompt-file` (NOT argv: `grok
  * --single` would expose the prompt in the process list), so argv carries only
  * static flags + the random temp path. Output is the `--output-format
- * streaming-json` NDJSON stream. CLI-only: no API key and no paid fallback — a
- * missing/unauthenticated CLI surfaces an install/login guidance error. (G005)
+ * streaming-json` NDJSON stream. It is the CLI transport used by the composed
+ * Grok provider when no xAI key is saved or a restricted fallback is allowed. (G005)
  */
 
 import os from 'node:os';
@@ -17,6 +17,7 @@ import type { AiChatEvent, AiChatRequest, AiProvider, ModelRef, ProviderAuthStat
 import { runCliCompletion, probeCliAvailability, buildMinimalEnv, type CliSpawn, type CliLineMapper } from './cli-runner';
 import { resolveTrustedCliCommand, type TrustedCliResult } from './cli-trust';
 import { buildCliPrompt } from './cli-prompt';
+import { getCuratedModels } from './model-catalog';
 
 /**
  * Map a `grok --output-format streaming-json` NDJSON record (empirically captured,
@@ -51,13 +52,6 @@ const defaultWritePromptFile: PromptFileWriter = async (content) => {
   };
 };
 
-const GROK_MODEL: ModelRef = {
-  provider: 'grok',
-  id: 'grok',
-  label: 'Grok (CLI)',
-  humanizeEngineId: 'openai',
-  requiresAuth: true,
-};
 
 export class GrokCliProvider implements AiProvider {
   readonly id = 'grok' as const;
@@ -94,7 +88,7 @@ export class GrokCliProvider implements AiProvider {
   }
 
   async listModels(): Promise<ModelRef[]> {
-    return [GROK_MODEL];
+    return getCuratedModels().filter((model) => model.provider === 'grok');
   }
 
   async streamChat(req: AiChatRequest, onEvent: (e: AiChatEvent) => void): Promise<void> {
@@ -111,6 +105,8 @@ export class GrokCliProvider implements AiProvider {
         command: command.command,
         // Static argv only: the prompt lives in the temp file, not the command line.
         args: [
+          '--model',
+          req.model.id,
           '--prompt-file',
           file.path,
           '--output-format',

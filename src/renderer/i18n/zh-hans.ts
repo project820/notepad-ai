@@ -134,6 +134,7 @@ export const zhHans: Dict = {
     'settings.prov.cliOverrideClear': '清除可执行文件',
     'settings.prov.cliOverrideWarning': '仅选择您信任的 CLI。应用会在使用前验证并暂存它。',
     'settings.prov.claudeCliHint': '优先使用本地 `claude` CLI（免费，随订阅）。在终端运行 `claude login`（会自动检测；若未检测到请重新打开应用）。下面的 API 密钥为可选后备。',
+    'settings.prov.grokApiHint': '优先使用 xAI API 密钥。未保存密钥或发生允许的启动失败时，仍可使用本机 Grok CLI。',
     'settings.prov.cliDisconnectedHint': '请安装 CLI 并登录（例如 `grok login`）以使用此提供商 — 无需 API 密钥。',
     'settings.prov.error.claudeCliSetupRequired': '在终端运行 `claude login` 以使用免费的本地 CLI，然后重新打开应用。或者在下方粘贴 Anthropic API 密钥。',
     'settings.prov.error.grokCliSetupRequired': 'Grok CLI 不可用。请安装后在终端运行 `grok login`，然后重新打开应用。',

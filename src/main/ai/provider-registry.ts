@@ -14,7 +14,7 @@ import { ApiKeyStore, type KeyStoreBackend } from './api-key-store';
 import type { ChatGptProvider } from './chatgpt-provider';
 import { atomicWrite, nodeAtomicBackend } from '../atomic-write';
 import { ComposedClaudeProvider } from './claude-composed';
-import { GrokCliProvider } from './grok-cli-provider';
+import { ComposedGrokProvider } from './grok-composed';
 import { nodeCliSpawn } from './cli-runner';
 import { OpenRouterProvider } from './openrouter-provider';
 import { getCuratedModels } from './model-catalog';
@@ -137,21 +137,25 @@ export class ProviderRegistry {
   }
 
   /**
-   * Curated catalog merged with live ChatGPT models and the local model cache
-   * SNAPSHOT (deduped by `provider:id`). Local discovery is NEVER awaited here:
-   * we merge only the current cache snapshot and kick a background refresh when
-   * the cache is stale or `force` is set — so a slow/offline local server can
-   * never block the cloud picker.
+   * Curated catalog merged with every registered cloud provider's model list and
+   * the local model-cache snapshot (deduped by `provider:id`). Local discovery is
+   * NEVER awaited here, so an offline local server cannot block cloud pickers.
    */
   async getAvailableModels(force = false): Promise<ModelRef[]> {
     if (force) this.bumpReasoningSnapshot();
     const curated = getCuratedModels();
-    let live: ModelRef[] = [];
-    try {
-      live = (await this.providers.chatgpt?.listModels()) ?? [];
-    } catch {
-      live = [];
-    }
+    const cloudProviders = Object.values(this.providers).filter(
+      (provider): provider is AiProvider => provider != null && provider.authKind !== 'local',
+    );
+    const live = (
+      await Promise.all(cloudProviders.map(async (provider) => {
+        try {
+          return await provider.listModels();
+        } catch {
+          return [] as ModelRef[];
+        }
+      }))
+    ).flat();
     const locals = this.localProviders();
     if (locals.length > 0 && (force || this.localCache.isStale())) {
       // Fire-and-forget: must not block the cloud model list.
@@ -160,11 +164,11 @@ export class ProviderRegistry {
     const localModels = this.localCache.snapshot();
     const seen = new Set<string>();
     const merged: ModelRef[] = [];
-    for (const m of [...curated, ...live, ...localModels]) {
-      const key = `${m.provider}:${m.id}`;
+    for (const model of [...curated, ...live, ...localModels]) {
+      const key = `${model.provider}:${model.id}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      merged.push(m);
+      merged.push(model);
     }
     return merged;
   }
@@ -177,12 +181,6 @@ export class ProviderRegistry {
       throw new AiProviderError(
         'provider',
         'Local providers run on your machine and do not use an API key. Set the server URL in AI settings.',
-      );
-    }
-    if (provider === 'grok') {
-      throw new AiProviderError(
-        'provider',
-        'Grok runs through its local CLI and does not use an API key. Install grok and run `grok login`.',
       );
     }
     return this.keys.setApiKey(provider, key);
@@ -332,8 +330,8 @@ function buildDefaultProviders(keys: ApiKeyStore, localConfig?: LocalConfigStore
     openrouter: new OpenRouterProvider(keys),
     ollama: new OllamaProvider(getOllamaBaseUrl),
     lmstudio: new LmStudioProvider(getLmStudioBaseUrl),
-    // Grok: local subscription CLI only (no API key, no paid fallback).
-    grok: new GrokCliProvider({ spawn: cliSpawn }),
+    // Grok uses xAI's API when a key is saved, otherwise the local CLI.
+    grok: new ComposedGrokProvider(keys, cliSpawn),
   };
 }
 

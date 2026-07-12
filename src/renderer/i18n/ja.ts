@@ -134,6 +134,7 @@ export const ja: Dict = {
     'settings.prov.cliOverrideClear': '実行ファイルを解除',
     'settings.prov.cliOverrideWarning': '信頼できる CLI だけを選択してください。アプリは使用前に検証してステージングします。',
     'settings.prov.claudeCliHint': 'ローカルの `claude` CLI を優先して使用します（無料・サブスク）。ターミナルで `claude login` を実行してください（自動検出されます。検出されない場合はアプリを開き直してください）。下の API キーは任意のフォールバックです。',
+    'settings.prov.grokApiHint': 'xAI API キーを優先して使用します。キーが未保存の場合や許可された開始時の失敗では、ローカルの Grok CLI を引き続き使用できます。',
     'settings.prov.cliDisconnectedHint': 'このプロバイダーを使うには CLI をインストールしてサインインしてください（例: `grok login`）。API キーは不要です。',
     'settings.prov.error.claudeCliSetupRequired': '無料のローカル CLI を使うには、ターミナルで `claude login` を実行してからアプリを開き直してください。あるいは下に Anthropic API キーを貼り付けてください。',
     'settings.prov.error.grokCliSetupRequired': 'Grok CLI は利用できません。インストール後にターミナルで `grok login` を実行し、アプリを開き直してください。',

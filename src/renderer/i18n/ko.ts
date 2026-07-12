@@ -274,6 +274,7 @@ export const ko: Dict = {
     'settings.prov.cliOverrideClear': '실행파일 해제',
     'settings.prov.cliOverrideWarning': '신뢰하는 CLI만 지정하세요. 앱이 사용 전에 검증하고 스테이징합니다.',
     'settings.prov.claudeCliHint': '로컬 `claude` CLI를 우선 사용합니다(무료·구독). 터미널에서 `claude login` 하세요(자동 감지되며, 감지되지 않으면 앱을 다시 여세요). 아래 API 키는 선택적 폴백입니다.',
+    'settings.prov.grokApiHint': 'xAI API 키를 우선 사용합니다. 키가 없거나 허용된 시작 실패일 때는 로컬 Grok CLI를 계속 사용할 수 있습니다.',
     'settings.prov.cliDisconnectedHint': '이 제공자를 사용하려면 CLI를 설치하고 로그인하세요(예: `grok login`). API 키는 필요 없습니다.',
     'settings.prov.error.claudeCliSetupRequired': '무료 로컬 CLI를 사용하려면 터미널에서 `claude login`을 실행한 후 앱을 다시 여세요. 또는 아래에 Anthropic API 키를 붙여넣으세요.',
     'settings.prov.error.grokCliSetupRequired': 'Grok CLI를 사용할 수 없습니다. 설치한 뒤 터미널에서 `grok login`을 실행하고 앱을 다시 여세요.',

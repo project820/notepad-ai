@@ -247,6 +247,7 @@ describe('mountHtmlExportWizard — local model context badge + small-model noti
       listHtmlModels: async () => [
         { provider: 'chatgpt', id: 'gpt-5.4', label: 'GPT-5.4', contextWindow: 1_000_000 },
         { provider: 'ollama', id: 'llama3:latest', label: 'llama3:latest', contextWindow: 8_192 },
+        { provider: 'grok', id: 'grok-4.5', label: 'Grok 4.5', contextWindow: 256_000 },
       ],
       getDefaultModel: () => ({ provider: 'ollama', id: 'llama3:latest' }),
     });
@@ -260,6 +261,7 @@ describe('mountHtmlExportWizard — local model context badge + small-model noti
     const optText = Array.from(select!.querySelectorAll('option')).map((o) => o.textContent);
     expect(optText).toContain('llama3:latest · 8K');
     expect(optText).toContain('GPT-5.4 · 1M');
+    expect(optText).toContain('Grok 4.5 · 256K');
     const note = host.querySelector<HTMLElement>('[data-he-note="model"]');
     expect(note).toBeTruthy();
     expect(note!.hidden).toBe(false);

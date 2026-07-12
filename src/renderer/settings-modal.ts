@@ -32,7 +32,7 @@ const KNOWN_PROVIDER_ROWS: readonly ProviderStatusView[] = [
   { provider: 'openrouter', label: 'OpenRouter', authKind: 'api_key', connected: false },
   { provider: 'ollama', label: 'Ollama', authKind: 'local', connected: false },
   { provider: 'lmstudio', label: 'LM Studio', authKind: 'local', connected: false },
-  { provider: 'grok', label: 'Grok (CLI)', authKind: 'cli', connected: false },
+  { provider: 'grok', label: 'Grok', authKind: 'api_key', connected: false },
 ];
 
 type ProviderSnapshot = {
@@ -98,8 +98,25 @@ export function toView(
       localModelCount: local.modelCount(s.provider),
     };
   }
-  if (s.authKind === 'cli') {
-    // CLI providers (grok): status + install/login guidance row, no key/URL input.
+  if (s.provider === 'grok' && s.authKind === 'api_key') {
+    return {
+      provider: s.provider,
+      label: s.label,
+      authKind: 'api_key',
+      connected: s.connected,
+      connectionSource: s.connectionSource,
+      keyLast4: s.keyLast4,
+      error: localizedProviderStatusError(s),
+      errorCode: s.errorCode,
+      errorDetail: s.error,
+      cliStatus: s.cliStatus,
+      hint: t('settings.prov.grokApiHint'),
+      cliOverridePath: cliOverrides?.grok?.path,
+    };
+  }
+  // Kept for a stale status response during an app update; production Grok
+  // composition reports api_key plus cliStatus.
+  if (s.provider === 'grok' && s.authKind === 'cli') {
     return {
       provider: s.provider,
       label: s.label,
@@ -111,7 +128,7 @@ export function toView(
       error: localizedProviderStatusError(s),
       errorCode: s.errorCode,
       errorDetail: s.error,
-      cliOverridePath: s.provider === 'grok' ? cliOverrides?.grok?.path : undefined,
+      cliOverridePath: cliOverrides?.grok?.path,
     };
   }
   if (s.provider !== 'chatgpt' && s.provider !== 'claude' && s.provider !== 'openrouter') return null;

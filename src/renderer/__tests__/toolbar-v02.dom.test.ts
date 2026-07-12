@@ -207,6 +207,7 @@ describe('toolbar — model dropdown (G003 local providers)', () => {
       loadModels: async () => [
         { id: 'gpt-5.4-mini', label: 'GPT-5.4 mini', provider: 'chatgpt', contextWindow: 400_000 },
         { id: 'llama3:latest', label: 'llama3:latest', provider: 'ollama', contextWindow: 32_000 },
+        { id: 'grok-4.5', label: 'Grok 4.5', provider: 'grok', contextWindow: 256_000 },
       ],
     });
     await flush(); // model cache warmed by the startup loadModels()
@@ -216,6 +217,9 @@ describe('toolbar — model dropdown (G003 local providers)', () => {
     expect(llama).toBeTruthy();
     expect(llama!.textContent).toContain('Ollama'); // provider label
     expect(llama!.textContent).toContain('32K'); // context badge
+    const grok = items.find((i) => i.getAttribute('data-value') === 'grok:grok-4.5');
+    expect(grok).toBeTruthy();
+    expect(grok!.textContent).toContain('Grok');
     (llama as HTMLButtonElement).click();
     expect(onModelChange).toHaveBeenCalledWith('ollama:llama3:latest');
   });

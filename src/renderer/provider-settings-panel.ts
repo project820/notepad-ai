@@ -68,8 +68,8 @@ export type ProviderSettingsRenderOptions = {
 export type ProviderSettingsOptions = ProviderSettingsRenderOptions & {
   onChatgptSignIn: () => void;
   onChatgptSignOut: () => Promise<void> | void;
-  onSaveKey: (provider: 'claude' | 'openrouter', key: string) => Promise<void> | void;
-  onDeleteKey: (provider: 'claude' | 'openrouter') => Promise<void> | void;
+  onSaveKey: (provider: 'claude' | 'openrouter' | 'grok', key: string) => Promise<void> | void;
+  onDeleteKey: (provider: 'claude' | 'openrouter' | 'grok') => Promise<void> | void;
   onSetCustomModel: (provider: AiProviderId, modelId: string) => void;
   /** Persist a local provider's server URL (validated localhost in main). */
   onSaveLocalUrl?: (provider: 'ollama' | 'lmstudio', url: string) => Promise<void> | void;
@@ -205,7 +205,7 @@ function providerControls(s: ProviderStatusView): string {
     // subscription CLI. Guidance is shown via the error line + cliHint footer.
     return '';
   }
-  // API-key providers (claude, openrouter)
+  // API-key providers (Claude, OpenRouter, xAI/Grok).
   return `
     <input class="prov-key-input" data-prov-key="${s.provider}" type="password"${disabled}
       placeholder="${escapeHTML(t('settings.prov.apiKeyPlaceholder'))}" aria-label="${escapeHTML(`${s.label} ${t('settings.prov.apiKeyLabel')}`)}" />
@@ -413,7 +413,7 @@ export function mountProviderSettingsPanel(
     }
     if (action === 'signin') return opts.onChatgptSignIn();
     if (action === 'signout' && prov === 'chatgpt') return runRowAction(prov, opts.onChatgptSignOut);
-    if (action === 'save-key' && (prov === 'claude' || prov === 'openrouter')) {
+    if (action === 'save-key' && (prov === 'claude' || prov === 'openrouter' || prov === 'grok')) {
       const input = parent.querySelector<HTMLInputElement>(`input[data-prov-key="${prov}"]`);
       const key = input?.value.trim() ?? '';
       if (!key || !input) return;
@@ -435,7 +435,7 @@ export function mountProviderSettingsPanel(
         .finally(() => setRowBusy(prov, false));
       return;
     }
-    if (action === 'delete-key' && (prov === 'claude' || prov === 'openrouter')) {
+    if (action === 'delete-key' && (prov === 'claude' || prov === 'openrouter' || prov === 'grok')) {
       return runRowAction(prov, () => opts.onDeleteKey(prov));
     }
     if (action === 'save-url' && (prov === 'ollama' || prov === 'lmstudio')) {

@@ -181,8 +181,10 @@ describe('ProviderRegistry — grok routing + cli auth', () => {
     expect(events.map((e) => e.kind)).toContain('done');
   });
 
-  it('rejects setApiKey for the grok CLI provider with install/login guidance', async () => {
-    const reg = new ProviderRegistry({ setApiKey: vi.fn() } as unknown as ApiKeyStore, {});
-    await expect(reg.setApiKey('grok', 'x')).rejects.toThrow(/CLI|login|install/i);
+  it('persists a Grok xAI API key instead of rejecting the dual-transport provider', async () => {
+    const setApiKey = vi.fn().mockResolvedValue({ persisted: true });
+    const reg = new ProviderRegistry({ setApiKey, deleteApiKey: vi.fn() } as unknown as ApiKeyStore, {});
+    await expect(reg.setApiKey('grok', 'x')).resolves.toEqual({ persisted: true });
+    expect(setApiKey).toHaveBeenCalledWith('grok', 'x');
   });
 });

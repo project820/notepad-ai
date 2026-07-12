@@ -18,6 +18,8 @@ import type { AiProviderId } from './types';
  */
 const VISION_MATCHERS: Partial<Record<AiProviderId, RegExp[]>> = {
   claude: [/^claude-(?:opus|sonnet|haiku)/i, /^claude-3/i, /^claude-4/i],
+  // Verified xAI vision model. Unknown/custom Grok ids remain OCR-only.
+  grok: [/^grok-4\.5$/i],
   openrouter: [
     /gpt-4o/i,
     /gpt-4\.1/i,

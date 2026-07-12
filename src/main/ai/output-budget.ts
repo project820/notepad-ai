@@ -37,6 +37,10 @@ export const MODEL_MAX_OUTPUT: Record<string, number> = {
   'claude:claude-sonnet-5': 64_000,
   'claude:claude-sonnet-4-6': 64_000,
   'claude:claude-haiku-4-5': 64_000,
+  // Grok — xAI API and CLI catalog. Conservative floors; custom IDs use the
+  // provider defaults below.
+  'grok:grok-4.5': 8_192,
+  'grok:grok-composer-2.5-fast': 8_192,
   // OpenRouter — conservative verified floor per curated slug (same evidence bar).
   'openrouter:anthropic/claude-sonnet-4.5': 64_000,
   'openrouter:google/gemini-2.5-pro': 65_536,
@@ -53,7 +57,7 @@ const PROVIDER_DEFAULT_OUTPUT: Record<AiProviderId, number> = {
   // per-model sizing lands. They accept a max_tokens param, so a finite default is safe.
   ollama: 8_192,
   lmstudio: 8_192,
-  grok: 8_192, // Grok CLI: finite default; CLI ignores max_tokens but keep a sane cap.
+  grok: 8_192, // xAI API/CLI: conservative default for unknown custom models.
 };
 
 /**
@@ -89,6 +93,9 @@ export const MODEL_CONTEXT_WINDOW: Record<string, number> = {
   'claude:claude-sonnet-5': 200_000,
   'claude:claude-sonnet-4-6': 200_000,
   'claude:claude-haiku-4-5': 200_000,
+  // Grok — conservative context windows for the curated xAI/CLI catalog.
+  'grok:grok-4.5': 256_000,
+  'grok:grok-composer-2.5-fast': 256_000,
   // OpenRouter slugs.
   'openrouter:anthropic/claude-sonnet-4.5': 200_000,
   'openrouter:google/gemini-2.5-pro': 1_000_000,
@@ -104,7 +111,7 @@ const PROVIDER_DEFAULT_CONTEXT: Record<AiProviderId, number> = {
   // Local providers (G002+): conservative default context window; refined per-model later.
   ollama: 32_768,
   lmstudio: 32_768,
-  grok: 256_000, // Grok default context window (CLI provider).
+  grok: 256_000, // xAI API/CLI conservative fallback for custom models.
 };
 
 /**
