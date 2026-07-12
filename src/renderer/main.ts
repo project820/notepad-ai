@@ -226,6 +226,8 @@ window.api.onCloseQueryState((requestId) => {
     flush: flushPendingPreviewToSource,
     beginLease: docLifecycle.beginCloseLease,
     send: window.api.sendCloseState,
+    onFlushFailure: docLifecycle.markPreviewSyncFailed,
+    onFlushSuccess: docLifecycle.markPreviewSyncRecovered,
     state: () => ({
       dirty: ctx.dirty,
       hasPath: ctx.currentPath !== null,
@@ -277,8 +279,7 @@ window.api.onCloseDiscard(({ requestId, leaseId }) => {
   );
 });
 window.api.onCloseDiscardRollback(({ requestId, leaseId }) => {
-  docLifecycle.rollbackDiscardFence(leaseId);
-  window.api.sendCloseDiscardResult(requestId, true);
+  window.api.sendCloseDiscardResult(requestId, docLifecycle.rollbackDiscardFence(leaseId));
 });
 window.api.windowReady();
 document.addEventListener('keydown', (e) => {

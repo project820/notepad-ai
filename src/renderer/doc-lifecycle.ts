@@ -29,6 +29,8 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
   let allowingCloseFlush = false;
   let quiesce: { id: string; expiry: ReturnType<typeof setTimeout> | null; autosavePending: boolean; previewPending: boolean } | null = null;
   let quiescePreview: { pause: () => boolean; resume: (wasPending: boolean) => void } | null = null;
+  let previewSyncFailed = false;
+  let discardFenced = false;
 
   function invalidateCloseLease(): void {
     if (!closeLease || closeLease.invalidated || closeLease.consumed) return;
@@ -37,7 +39,7 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
   }
 
   function tryMutateDocument(): boolean {
-    return (!savesFenced || allowingCloseFlush) && !quiesce && !closeLease?.consumed;
+    return allowingCloseFlush || ((!savesFenced && !previewSyncFailed) && !quiesce && !closeLease?.consumed);
   }
 
   function recordDocumentMutation(): boolean {
@@ -92,7 +94,7 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
   }
 
   function saveTo(filePath: string | null): Promise<number | null> {
-    const queued = saveTail.then(() => (savesFenced ? null : performSave(filePath)));
+    const queued = saveTail.then(() => (savesFenced || previewSyncFailed ? null : performSave(filePath)));
     saveTail = queued.then(() => undefined, () => undefined);
     return queued;
   }
@@ -323,6 +325,7 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
     if (autosaveTimer) clearTimeout(autosaveTimer);
     autosaveTimer = null;
     savesFenced = true;
+    discardFenced = true;
     await saveTail;
     if (!authorizeCloseLease(id)) return false;
     ctx.editor.setMutationFence(true);
@@ -345,6 +348,7 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
       allowingCloseFlush = false;
     }
     savesFenced = false;
+    discardFenced = false;
     ctx.editor.setMutationFence(false);
     ctx.preview.el.contentEditable = 'true';
     closeLease = null;
@@ -356,7 +360,17 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
     flushPendingPreview = flush;
   }
   function isSaveFenced(): boolean {
-    return savesFenced;
+    return savesFenced || previewSyncFailed;
+  }
+
+  function markPreviewSyncFailed(): void {
+    previewSyncFailed = true;
+    savesFenced = true;
+  }
+
+  function markPreviewSyncRecovered(): void {
+    previewSyncFailed = false;
+    if (!discardFenced && !quiesce) savesFenced = false;
   }
 
 
@@ -404,7 +418,8 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
       allowingCloseFlush = false;
     }
     quiesce = null;
-    savesFenced = false;
+    if (closeLease && !closeLease.consumed) invalidateCloseLease();
+    if (!discardFenced && !previewSyncFailed) savesFenced = false;
     ctx.editor.setMutationFence(false);
     ctx.preview.el.contentEditable = 'true';
     quiescePreview?.resume(current.previewPending);
@@ -432,6 +447,8 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
     rollbackDiscardFence,
     setPreviewFlushGate,
     isSaveFenced,
+    markPreviewSyncFailed,
+    markPreviewSyncRecovered,
     setPreviewQuiesceHooks,
     prepareCloseQuiesce,
     heartbeatCloseQuiesce,

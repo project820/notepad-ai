@@ -307,6 +307,15 @@ describe('mountUnifiedChat — streaming assistant', () => {
     expect(parent.querySelector<HTMLElement>('.uc-assistant')!.dataset.text).toBe('Hello world');
   });
 
+  it('treats undefined final text as absent and preserves streamed deltas', () => {
+    const { parent, handle } = mount();
+    const stream = handle.beginAssistant();
+    stream.pushDelta('Hello ');
+    stream.pushDelta('world');
+
+    expect(stream.finalize(undefined)).toBe('Hello world');
+    expect(parent.querySelector<HTMLElement>('.uc-assistant')!.dataset.text).toBe('Hello world');
+  });
   it('fail() renders an inline error and clears streaming state', () => {
     const { parent, handle } = mount();
     const stream = handle.beginAssistant();

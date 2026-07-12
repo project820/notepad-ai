@@ -90,7 +90,7 @@ export function createAppWindows({
       title: labels.title,
       message: labels.message,
       buttons,
-      defaultId: 0,
+      defaultId: labels.saveAllowed === false ? 1 : 0,
       cancelId: buttons.length - 1,
       noLink: true,
     });
@@ -203,7 +203,7 @@ export function createAppWindows({
       return;
     }
     const pendingRollback = pendingDiscardRollback.get(id);
-    if (pendingRollback && pendingRollback.webContentsId === event.sender.id) pendingRollback.resolve(true);
+    if (pendingRollback && pendingRollback.webContentsId === event.sender.id) pendingRollback.resolve(value.fenced === true);
   });
   onTrusted('close:quiesce-ready', (event) => {
     quiesceReady.add(event.sender.id);
@@ -315,20 +315,21 @@ export function createAppWindows({
     let settle: (fenced: boolean) => void = () => {};
     const result = new Promise<boolean>((resolve) => {
       let settled = false;
-      // No wall-clock deadline: prepare deliberately awaits the renderer's
-      // active-save drain (atomic write + fsync latency has no valid upper
-      // bound). The waiter settles ONLY from the prepare ACK, an explicit
-      // peer-cancellation via cancel(), or window destruction.
+      // A discard never approves before the active save drains, but it must
+      // still settle so the coordinator can compensate and release ownership.
+      let timer: ReturnType<typeof setTimeout> | null = null;
       const onDestroyed = () => settle(false);
       settle = (fenced) => {
         if (settled) return;
         settled = true;
+        if (timer) clearTimeout(timer);
         win.removeListener('closed', onDestroyed);
         pendingDiscardPrepare.delete(id);
         resolve(fenced && activeLease(win, leaseId));
       };
       pendingDiscardPrepare.set(id, { webContentsId: win.webContents.id, leaseId: leaseId!, resolve: settle });
       win.once('closed', onDestroyed);
+      timer = setTimeout(() => settle(false), 5_000);
       win.webContents.send('close:discard', { requestId: id, leaseId });
     });
     return { result, cancel: () => settle(false) };
@@ -378,6 +379,7 @@ export function createAppWindows({
     if (active.length !== targets.length) return true;
     const results = await Promise.all(active.map(async (win) => {
       const existing = activeQuiesce.get(win.id);
+      if (!rollback && existing) return true;
       if (rollback) {
         if (!existing) return true;
         clearInterval(existing.heartbeat);
@@ -456,8 +458,10 @@ export function createAppWindows({
       await Promise.all(targets.map(async (target) => {
         const win = BrowserWindow.fromId(target.windowId);
         const leaseId = leaseIdFor(target.windowId);
-        await rollbackRendererDiscardFence(win, leaseId);
-        if (leaseId && leaseIdFor(target.windowId) === leaseId) closeLeases.delete(target.windowId);
+        const rolledBack = await rollbackRendererDiscardFence(win, leaseId);
+        // Retain ownership when renderer compensation failed; a later close
+        // query/lease expiry must not be mistaken for a completed rollback.
+        if (rolledBack && leaseId && leaseIdFor(target.windowId) === leaseId) closeLeases.delete(target.windowId);
       }));
     };
     const prepares = requestedDiscards.map((target) => ({

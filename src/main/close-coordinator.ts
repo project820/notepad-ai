@@ -68,6 +68,7 @@ export function createQuiesceTransaction({
   return {
     async prepare(targets, context) {
       const prepared = await Promise.all(targets.map(async (target) => {
+        if (context.quiescedTargets.has(target.windowId)) return true;
         const accepted = await awaitWithinDeadline(prepare(target, context), context.forwardDeadline, false);
         if (accepted) context.quiescedTargets.add(target.windowId);
         return accepted;
@@ -143,11 +144,12 @@ export class CloseCoordinator {
       let approved = false;
       try {
         while (pending.length > 0 && Date.now() < context.forwardDeadline) {
-          for (const target of pending) {
-            const decision = await decide(target, context);
-            if (decision === 'cancel') return { approved: false, intent };
-            decisions.set(target.windowId, decision);
-          }
+          const epoch = await Promise.all(pending.map(async (target) => ({
+            target,
+            decision: await decide(target, context),
+          })));
+          if (epoch.some(({ decision }) => decision === 'cancel')) return { approved: false, intent };
+          for (const { target, decision } of epoch) decisions.set(target.windowId, decision);
           if (quiesce && !await quiesce.prepare(targets, context)) {
             context.failuresUsed += 1;
             if (context.failuresUsed >= 8) return { approved: false, intent };

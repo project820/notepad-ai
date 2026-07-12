@@ -18,18 +18,24 @@ export function handleCloseQueryState({
   beginLease,
   send,
   state,
+  onFlushFailure,
+  onFlushSuccess,
 }: {
   requestId: string;
   flush: () => unknown;
   beginLease: (requestId: string) => void;
   send: (requestId: string, state: CloseQueryState) => void;
   state: () => Omit<CloseQueryState, 'syncFailed'> & { syncFailed?: boolean };
+  onFlushFailure?: () => void;
+  onFlushSuccess?: () => void;
 }): void {
   let syncFailed = false;
   try {
     flush();
+    onFlushSuccess?.();
   } catch (error) {
     syncFailed = true;
+    onFlushFailure?.();
     console.warn('[close] preview synchronization failed:', error);
   }
   beginLease(requestId);

@@ -229,4 +229,49 @@ describe('document close lease and replacement lifecycle', () => {
       vi.useRealTimers();
     }
   });
+  it('keeps manual save fenced after a failed close preview sync', async () => {
+    const { ctx, lifecycle, saveFile } = setup();
+    ctx.currentPath = '/tmp/draft.md';
+    ctx.dirty = true;
+    lifecycle.markPreviewSyncFailed();
+
+    await expect(lifecycle.save()).resolves.toBeNull();
+
+    expect(saveFile).not.toHaveBeenCalled();
+    expect(ctx.dirty).toBe(true);
+  });
+
+  it('flushes pending preview data through the internal compensation gate before reopening quiesce', async () => {
+    const { ctx, lifecycle, getDoc } = setup();
+    ctx.currentPath = '/tmp/draft.md';
+    lifecycle.setPreviewFlushGate(() => {
+      expect(lifecycle.tryMutateDocument()).toBe(true);
+      ctx.editor.setDoc('preview edit');
+    });
+
+    await lifecycle.prepareCloseQuiesce('tx', 1_000);
+    await expect(lifecycle.rollbackCloseQuiesce('tx')).resolves.toBe(true);
+
+    expect(getDoc()).toBe('preview edit');
+    expect(lifecycle.tryMutateDocument()).toBe(true);
+  });
+
+  it('keeps discard fencing active when quiesce TTL expires and invalidates the lease', async () => {
+    vi.useFakeTimers();
+    try {
+      const { ctx, lifecycle, sendCloseLeaseInvalidated } = setup();
+      ctx.currentPath = '/tmp/draft.md';
+      lifecycle.beginCloseLease('lease');
+      await lifecycle.prepareCloseQuiesce('tx', 20);
+      await lifecycle.fenceDiscard('lease');
+
+      await vi.advanceTimersByTimeAsync(20);
+
+      expect(lifecycle.isSaveFenced()).toBe(true);
+      expect(sendCloseLeaseInvalidated).toHaveBeenCalledWith('lease', 0);
+      expect(lifecycle.authorizeCloseLease('lease')).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
