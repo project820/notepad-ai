@@ -84,6 +84,30 @@ describe('initPreviewEditing close flush', () => {
     expect(editing.flushPendingPreviewToSource()).toBe(false);
     expect(htmlToMarkdown).toHaveBeenCalledTimes(1);
   });
+  it('transfers a whitespace-only pending preview edit before close-state capture', () => {
+    const { ctx, doc, editing, lifecycle, previewEl, setDoc } = setupPreviewEditing();
+    previewEl.innerHTML = '<p>original</p><p> </p>';
+    previewEl.dispatchEvent(new Event('input'));
+
+    editing.flushPendingPreviewToSource();
+    const closeState = { dirty: ctx.dirty, revision: ctx.docRevision, doc: doc() };
+
+    expect(closeState).toEqual({ dirty: true, revision: 1, doc: 'original ' });
+    expect(setDoc).toHaveBeenCalledWith('original ');
+    expect(lifecycle).toHaveBeenCalledWith('original ', false, true);
+  });
+  it('does not update the canonical document for an unchanged pending preview edit', () => {
+    const { doc, editing, htmlToMarkdown, lifecycle, previewEl, setDoc } = setupPreviewEditing();
+    previewEl.innerHTML = '<p>original</p>';
+    previewEl.dispatchEvent(new Event('input'));
+
+    expect(editing.flushPendingPreviewToSource()).toBe(false);
+
+    expect(doc()).toBe('original');
+    expect(htmlToMarkdown).toHaveBeenCalledTimes(1);
+    expect(setDoc).not.toHaveBeenCalled();
+    expect(lifecycle).not.toHaveBeenCalled();
+  });
   it('invalidates the lifecycle immediately on preview input before debounced source synchronization', () => {
     vi.useFakeTimers();
     const { ctx, doc, lifecycle, previewEl, recordPreviewInput, setDoc } = setupPreviewEditing();

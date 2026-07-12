@@ -35,7 +35,7 @@ export function initPreviewEditing(ctx: AppContext, deps: PreviewEditingDeps) {
     });
     const md = deps.htmlToMarkdown(ctx.preview.el.innerHTML);
     previewEditPending = false;
-    if (md.trim() === ctx.editor.getDoc().trim()) return false;
+    if (md === ctx.editor.getDoc()) return false;
     ctx.suppressEditorChange = true;
     ctx.editor.setDoc(md);
     ctx.suppressEditorChange = false;
