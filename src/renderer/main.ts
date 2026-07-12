@@ -131,6 +131,7 @@ const preview = createPreview(previewHost);
 ctx.setHandles(editor, preview);
 ctx.preview.onAfterRender(() => {
   wirePreviewTables(ctx.preview.el, () => ctx.editor.getDoc(), (newDoc) => {
+    if (!docLifecycle.tryMutateDocument()) return;
     ctx.suppressEditorChange = true;
     ctx.editor.setDoc(newDoc);
     ctx.suppressEditorChange = false;
@@ -166,6 +167,7 @@ const { flushPreviewToSource, syncPreviewToSource } = initPreviewEditing(ctx, {
   htmlToMarkdown,
   t,
   onSuppressedEditorChange: docLifecycle.onSuppressedEditorChange,
+  tryMutateDocument: docLifecycle.tryMutateDocument,
 });
 updateHtmlViewToggle = createHtmlViewToggle(ctx, { selectionSync, scheduleLineAlign });
 
@@ -193,6 +195,7 @@ const { dispatchFormat } = initToolbarWiring(ctx, {
   scheduleLineAlign,
   cyclePreviewMode,
   flushPreviewToSource,
+  tryMutateDocument: docLifecycle.tryMutateDocument,
   syncPreviewToSource,
 });
 
@@ -234,13 +237,13 @@ window.api.onCloseAuthorize((requestId) => {
 window.api.onCloseConsume((requestId) => {
   window.api.sendCloseConsumeResult(requestId, docLifecycle.consumeCloseLease(requestId));
 });
-window.api.onCloseDiscard((requestId) => {
-  void docLifecycle.fenceDiscard(requestId).then(
+window.api.onCloseDiscard(({ requestId, leaseId }) => {
+  void docLifecycle.fenceDiscard(leaseId).then(
     (fenced) => window.api.sendCloseDiscardResult(requestId, fenced),
     () => window.api.sendCloseDiscardResult(requestId, false),
   );
 });
-window.api.onCloseDiscardRollback((requestId) => {
+window.api.onCloseDiscardRollback(({ requestId }) => {
   docLifecycle.rollbackDiscardFence();
   window.api.sendCloseDiscardResult(requestId, true);
 });
@@ -322,6 +325,7 @@ unifiedChatWiring = initUnifiedChatWiring(ctx, {
   paintAccountState,
   scheduleSessionSnapshot,
   onSuppressedEditorChange: docLifecycle.onSuppressedEditorChange,
+  tryMutateDocument: docLifecycle.tryMutateDocument,
   onProjectSetup: (guard) => void projectWizard.startProjectWizard(guard),
 });
 projectWizard = initProjectWizardFlow(ctx, {

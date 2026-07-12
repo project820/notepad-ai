@@ -45,6 +45,7 @@ type UnifiedChatWiringDeps = {
   paintAccountState: (signedIn: boolean) => void;
   scheduleSessionSnapshot: () => void;
   onSuppressedEditorChange: (doc: string, updatePreview: boolean) => void;
+  tryMutateDocument: () => boolean;
   onProjectSetup: (guard: ToolPanelGuard) => void;
 };
 
@@ -59,6 +60,7 @@ export function initUnifiedChatWiring(ctx: AppContext, deps: UnifiedChatWiringDe
   let htmlExportWizard: HtmlExportWizardHandle | null = null;
 
   function applyAiOutput(action: 'replace' | 'insert', md: string) {
+    if (!deps.tryMutateDocument()) return;
     if (action === 'replace') {
       ctx.suppressEditorChange = true;
       ctx.editor.setDoc(md);

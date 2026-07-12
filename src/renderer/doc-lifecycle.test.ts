@@ -6,10 +6,12 @@ function setup() {
   (globalThis as { document?: unknown }).document = { activeElement: null };
   const ctx = createAppContext({ textContent: '' } as HTMLElement);
   let doc = 'draft';
+  let mutationFenced = false;
   ctx.setHandles({
     view: {} as never,
     getDoc: () => doc,
     setDoc: (next) => { doc = next; },
+    setMutationFence: (fenced) => { mutationFenced = fenced; },
     insertTable: () => {},
     focus: () => {},
     undo: () => {},
@@ -40,7 +42,7 @@ function setup() {
     updateHtmlViewToggle: () => {},
     createRafThrottle: (() => (callback: () => void) => callback()) as never,
   });
-  return { ctx, lifecycle, saveFile, sendCloseLeaseInvalidated, getDoc: () => doc };
+  return { ctx, lifecycle, saveFile, sendCloseLeaseInvalidated, getDoc: () => doc, mutationFenced: () => mutationFenced };
 }
 
 describe('document close lease and replacement lifecycle', () => {
@@ -86,15 +88,23 @@ describe('document close lease and replacement lifecycle', () => {
     vi.useRealTimers();
   });
 
-  it('consumes a valid lease and rejects later document lifecycle mutations', () => {
-    const { ctx, lifecycle } = setup();
+  it('consumes a valid lease, fences the editor, and rejects programmatic replacement before state changes', () => {
+    const { ctx, lifecycle, getDoc, mutationFenced } = setup();
     ctx.dirty = true;
+    ctx.currentPath = '/tmp/draft.md';
     lifecycle.beginCloseLease('lease-1');
 
     expect(lifecycle.consumeCloseLease('lease-1')).toBe(true);
+    expect(mutationFenced()).toBe(true);
+    expect(lifecycle.replaceDocument({ doc: 'edited', currentPath: '/tmp/other.md', pendingTitle: 'other.md', dirty: false })).toBe(false);
     lifecycle.onDocChange('edited');
 
+    expect(getDoc()).toBe('draft');
+    expect(ctx.currentPath).toBe('/tmp/draft.md');
     expect(ctx.docRevision).toBe(0);
+    expect(ctx.dirty).toBe(true);
+    lifecycle.rollbackDiscardFence();
+    expect(mutationFenced()).toBe(false);
     expect(lifecycle.authorizeCloseLease('lease-1')).toBe(false);
   });
 

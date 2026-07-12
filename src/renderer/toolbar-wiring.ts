@@ -27,6 +27,7 @@ type ToolbarWiringDeps = {
   syncPreviewToSource: () => void;
   cyclePreviewMode: () => void;
   flushPreviewToSource: () => boolean;
+  tryMutateDocument: () => boolean;
 };
 
 export function initToolbarWiring(ctx: AppContext, deps: ToolbarWiringDeps) {
@@ -35,6 +36,7 @@ export function initToolbarWiring(ctx: AppContext, deps: ToolbarWiringDeps) {
     if (ctx.previewMode === 'editor-only') ctx.activeSurface = 'editor';
     if (action === 'footnote') {
       if (ctx.activeSurface === 'preview' && ctx.editingInPreview) deps.flushPreviewToSource();
+      if (!deps.tryMutateDocument()) return;
       applyToEditor(ctx.editor.view, 'footnote');
       if (ctx.activeSurface === 'preview') {
         ctx.editingInPreview = false;
@@ -51,6 +53,7 @@ export function initToolbarWiring(ctx: AppContext, deps: ToolbarWiringDeps) {
         deps.syncPreviewToSource();
       }
     } else {
+      if (!deps.tryMutateDocument()) return;
       applyToEditor(ctx.editor.view, action);
     }
   }
@@ -77,8 +80,18 @@ export function initToolbarWiring(ctx: AppContext, deps: ToolbarWiringDeps) {
     },
     onToggleSideChat: deps.toggleUnifiedChat,
     onToggleOutline: deps.toggleLeftPanel,
-    onUndo: () => { if (ctx.activeSurface === 'preview' && ctx.editingInPreview) deps.flushPreviewToSource(); ctx.editor.undo(); ctx.preview.setDoc(ctx.editor.getDoc()); },
-    onRedo: () => { if (ctx.activeSurface === 'preview' && ctx.editingInPreview) deps.flushPreviewToSource(); ctx.editor.redo(); ctx.preview.setDoc(ctx.editor.getDoc()); },
+    onUndo: () => {
+      if (!deps.tryMutateDocument()) return;
+      if (ctx.activeSurface === 'preview' && ctx.editingInPreview) deps.flushPreviewToSource();
+      ctx.editor.undo();
+      ctx.preview.setDoc(ctx.editor.getDoc());
+    },
+    onRedo: () => {
+      if (!deps.tryMutateDocument()) return;
+      if (ctx.activeSurface === 'preview' && ctx.editingInPreview) deps.flushPreviewToSource();
+      ctx.editor.redo();
+      ctx.preview.setDoc(ctx.editor.getDoc());
+    },
     onTogglePreviewLines: () => { const next = !(deps.prefs.previewLineNumbers ?? false); deps.prefs.previewLineNumbers = next; savePrefs(deps.prefs); ctx.preview.setLineNumbers(next); },
     getPreviewLines: () => deps.prefs.previewLineNumbers ?? false,
     onToggleRawLineAlign: () => { deps.prefs.rawLineAlign = !(deps.prefs.rawLineAlign ?? false); savePrefs(deps.prefs); deps.scheduleLineAlign(); },
@@ -89,7 +102,11 @@ export function initToolbarWiring(ctx: AppContext, deps: ToolbarWiringDeps) {
     onSignIn: () => openLoginModal({ onAfterLogin: (auth) => { deps.setAuth(auth); deps.paintAuthPill(auth); } }),
     onSignOut: async () => { await window.api.authLogout(); const auth = { signedIn: false }; deps.setAuth(auth); deps.paintAuthPill(auth); ctx.setStatus(deps.t('status.signedOut')); },
     onFormat: dispatchFormat,
-    onInsertTable: (rows, cols) => { ctx.editor.insertTable(rows, cols); ctx.setStatus(deps.t('status.tableInserted').replace('{rows}', String(rows)).replace('{cols}', String(cols))); },
+    onInsertTable: (rows, cols) => {
+      if (!deps.tryMutateDocument()) return;
+      ctx.editor.insertTable(rows, cols);
+      ctx.setStatus(deps.t('status.tableInserted').replace('{rows}', String(rows)).replace('{cols}', String(cols)));
+    },
     onTogglePreview: deps.cyclePreviewMode,
     onThemeChange: (theme: Theme) => { deps.prefs.theme = theme; savePrefs(deps.prefs); applyTheme(theme); ctx.editor.applyTheme(resolvedDark(theme)); },
     onFontSizeChange: (size: FontSize) => { deps.prefs.fontSize = size; savePrefs(deps.prefs); applyFontSize(size); deps.scheduleLineAlign(); },

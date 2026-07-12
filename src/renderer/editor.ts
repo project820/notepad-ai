@@ -100,6 +100,7 @@ export type EditorHandle = {
   view: EditorView;
   getDoc: () => string;
   setDoc: (doc: string) => void;
+  setMutationFence: (fenced: boolean) => void;
   insertTable: (rows: number, cols: number) => void;
   focus: () => void;
   /** Undo / redo the CM6 edit history. */
@@ -148,6 +149,7 @@ export function createEditor(parent: HTMLElement, opts: { onChange: ChangeHandle
   ]);
 
   const selectionListeners: SelectionHandler[] = [];
+  let mutationFenced = false;
 
   const updateListener = EditorView.updateListener.of((update) => {
     if (update.docChanged) {
@@ -164,6 +166,9 @@ export function createEditor(parent: HTMLElement, opts: { onChange: ChangeHandle
       for (const cb of selectionListeners) cb(span);
     }
   });
+  const mutationFence = EditorState.transactionFilter.of((transaction) =>
+    mutationFenced && transaction.docChanged ? [] : transaction,
+  );
 
   const state = EditorState.create({
     doc: opts.initialDoc ?? '',
@@ -180,6 +185,7 @@ export function createEditor(parent: HTMLElement, opts: { onChange: ChangeHandle
       lineAlignmentField,
       keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
       formatKeymap,
+      mutationFence,
       updateListener,
       cssVarTheme,
     ],
@@ -194,6 +200,9 @@ export function createEditor(parent: HTMLElement, opts: { onChange: ChangeHandle
       view.dispatch({
         changes: { from: 0, to: view.state.doc.length, insert: doc },
       });
+    },
+    setMutationFence: (fenced: boolean) => {
+      mutationFenced = fenced;
     },
     insertTable: (rows: number, cols: number) => {
       // import('./i18n') would create a cycle; require dynamic-ish access via document.documentElement.lang

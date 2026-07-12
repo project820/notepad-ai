@@ -182,18 +182,18 @@ const api = {
   },
   sendCloseConsumeResult: (requestId: string, consumed: boolean): void =>
     ipcRenderer.send('close:consume-result', { requestId, consumed }),
-  onCloseDiscard: (cb: (requestId: string) => void): (() => void) => {
-    const listener = (_e: unknown, request: { requestId?: unknown }) => {
-      if (typeof request?.requestId === 'string') cb(request.requestId);
+  onCloseDiscard: (cb: (request: { requestId: string; leaseId: string }) => void): (() => void) => {
+    const listener = (_e: unknown, request: { requestId?: unknown; leaseId?: unknown }) => {
+      if (typeof request?.requestId === 'string' && typeof request.leaseId === 'string') cb({ requestId: request.requestId, leaseId: request.leaseId });
     };
     ipcRenderer.on('close:discard', listener);
     return () => ipcRenderer.removeListener('close:discard', listener);
   },
   sendCloseDiscardResult: (requestId: string, fenced: boolean): void =>
     ipcRenderer.send('close:discard-result', { requestId, fenced }),
-  onCloseDiscardRollback: (cb: (requestId: string) => void): (() => void) => {
-    const listener = (_e: unknown, request: { requestId?: unknown }) => {
-      if (typeof request?.requestId === 'string') cb(request.requestId);
+  onCloseDiscardRollback: (cb: (request: { requestId: string; leaseId: string }) => void): (() => void) => {
+    const listener = (_e: unknown, request: { requestId?: unknown; leaseId?: unknown }) => {
+      if (typeof request?.requestId === 'string' && typeof request.leaseId === 'string') cb({ requestId: request.requestId, leaseId: request.leaseId });
     };
     ipcRenderer.on('close:discard-rollback', listener);
     return () => ipcRenderer.removeListener('close:discard-rollback', listener);

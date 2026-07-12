@@ -8,12 +8,14 @@ type PreviewEditingDeps = {
   htmlToMarkdown: typeof htmlToMarkdown;
   t: typeof t;
   onSuppressedEditorChange: (doc: string) => void;
+  tryMutateDocument: () => boolean;
 };
 
 export function initPreviewEditing(ctx: AppContext, deps: PreviewEditingDeps) {
   let previewSyncTimer: ReturnType<typeof setTimeout> | null = null;
 
   function flushPreviewToSource(): boolean {
+    if (!deps.tryMutateDocument()) return false;
     ctx.preview.el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach((el) => {
       el.toggleAttribute('checked', el.checked);
     });
@@ -54,6 +56,7 @@ export function initPreviewEditing(ctx: AppContext, deps: PreviewEditingDeps) {
       if (!ctx.preview.el.contains(document.activeElement)) {
         ctx.editingInPreview = false;
         if (previewSyncTimer) clearTimeout(previewSyncTimer);
+        if (!deps.tryMutateDocument()) return;
         ctx.preview.el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach((el) => {
           el.toggleAttribute('checked', el.checked);
         });

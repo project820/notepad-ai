@@ -32,8 +32,12 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
     deps.api.sendCloseLeaseInvalidated(closeLease.id, ctx.docRevision);
   }
 
+  function tryMutateDocument(): boolean {
+    return !closeLease?.consumed;
+  }
+
   function recordDocumentMutation(): boolean {
-    if (closeLease?.consumed) return false;
+    if (!tryMutateDocument()) return false;
     ctx.docRevision += 1;
     invalidateCloseLease();
     return true;
@@ -143,7 +147,8 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
     dirty: boolean;
     syncPreview?: boolean;
     scheduleSnapshot?: boolean;
-  }): void {
+  }): boolean {
+    if (!tryMutateDocument()) return false;
     ctx.suppressEditorChange = true;
     ctx.editor.setDoc(doc);
     ctx.suppressEditorChange = false;
@@ -155,10 +160,11 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
     setTitle();
     deps.updateWordCount(doc);
     if (scheduleSnapshot) deps.scheduleSessionSnapshot();
+    return true;
   }
 
   function newDoc() {
-    replaceDocument({ doc: '', currentPath: null, pendingTitle: null, dirty: false });
+    if (!replaceDocument({ doc: '', currentPath: null, pendingTitle: null, dirty: false })) return;
     ctx.setStatus(deps.t('status.newDocument'));
     ctx.editor.focus();
   }
@@ -186,6 +192,10 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
     deps.titleEl.addEventListener('blur', () => {
       const raw = deps.titleEl.value.trim();
       if (!raw || raw === displayTitle()) {
+        deps.titleEl.value = displayTitle();
+        return;
+      }
+      if (!tryMutateDocument()) {
         deps.titleEl.value = displayTitle();
         return;
       }
@@ -220,6 +230,7 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
         ctx.setStatus(`⚠ ${error === 'converter-worker-failed' ? deps.t('file.convert.workerFailed') : error}`);
         return;
       }
+      if (!tryMutateDocument()) return;
       let docMd = content;
       // Every open/new resets the HTML-view toggle so a converted doc never inherits
       // the previous document's rich-HTML view state.
@@ -273,6 +284,7 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
 
   function consumeCloseLease(id: string): boolean {
     if (!authorizeCloseLease(id)) return false;
+    ctx.editor.setMutationFence(true);
     closeLease!.consumed = true;
     return true;
   }
@@ -288,11 +300,13 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
 
   function rollbackDiscardFence(): void {
     savesFenced = false;
+    ctx.editor.setMutationFence(false);
     closeLease = null;
     if (ctx.dirty && ctx.currentPath) scheduleAutosave();
   }
 
   return {
+    tryMutateDocument,
     onDocChange,
     onSuppressedEditorChange,
     replaceDocument,

@@ -105,7 +105,8 @@ export function createAppWindows({
   const pendingSave = new Map<string, { webContentsId: number; resolve: (result: { saved: boolean; committedRevision: number | null }) => void }>();
   const windowLocales = new Map<number, CloseGuardState['locale']>();
   const pendingAuthorize = new Map<string, { webContentsId: number; resolve: (valid: boolean) => void }>();
-  const pendingDiscard = new Map<string, { webContentsId: number; resolve: (fenced: boolean) => void }>();
+  const pendingDiscardPrepare = new Map<string, { webContentsId: number; leaseId: string; resolve: (fenced: boolean) => void }>();
+  const pendingDiscardRollback = new Map<string, { webContentsId: number; resolve: () => void }>();
   const pendingConsume = new Map<string, { webContentsId: number; resolve: (consumed: boolean) => void }>();
   const closeLeases = new Map<number, { id: string; invalidated: boolean }>();
 
@@ -187,17 +188,24 @@ export function createAppWindows({
   onTrusted('close:discard-result', (event, raw: unknown) => {
     const value = raw as Record<string, unknown>;
     const id = typeof value?.requestId === 'string' ? value.requestId : '';
-    const pending = pendingDiscard.get(id);
-    if (!pending || pending.webContentsId !== event.sender.id) return;
-    pendingDiscard.delete(id);
-    pending.resolve(value.fenced === true);
+    const pendingPrepare = pendingDiscardPrepare.get(id);
+    if (pendingPrepare && pendingPrepare.webContentsId === event.sender.id) {
+      pendingPrepare.resolve(value.fenced === true);
+      return;
+    }
+    const pendingRollback = pendingDiscardRollback.get(id);
+    if (pendingRollback && pendingRollback.webContentsId === event.sender.id) pendingRollback.resolve();
   });
   onTrusted('close:lease-invalidated', (event, raw: unknown) => {
     const value = raw as Record<string, unknown>;
     const id = typeof value?.requestId === 'string' ? value.requestId : '';
-    const lease = closeLeases.get(BrowserWindow.fromWebContents(event.sender)?.id ?? -1);
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const lease = closeLeases.get(win?.id ?? -1);
     if (!lease || lease.id !== id) return;
     lease.invalidated = true;
+    for (const pending of pendingDiscardPrepare.values()) {
+      if (pending.webContentsId === event.sender.id && pending.leaseId === id) pending.resolve(false);
+    }
   });
   onTrusted('close:locale', (event, locale: unknown) => {
     const rec = registry.getByWebContents(event.sender.id);
@@ -276,38 +284,45 @@ export function createAppWindows({
     });
   };
 
-  const fenceRendererDiscard = (win: BrowserWindow, leaseId: string | undefined): Promise<boolean> => {
-    if (!activeLease(win, leaseId)) return Promise.resolve(false);
-    return new Promise((resolve) => {
-      const onDestroyed = () => pending.resolve(false);
-      const pending = {
-        webContentsId: win.webContents.id,
-        resolve: (fenced: boolean) => {
-          win.removeListener('closed', onDestroyed);
-          pendingDiscard.delete(leaseId!);
-          resolve(fenced && activeLease(win, leaseId));
-        },
+  const beginFenceRendererDiscard = (win: BrowserWindow | null, leaseId: string | undefined) => {
+    if (!win || !activeLease(win, leaseId)) {
+      return { result: Promise.resolve(false), cancel: () => {} };
+    }
+    const id = requestId('discard-prepare', win);
+    let settle: (fenced: boolean) => void = () => {};
+    const result = new Promise<boolean>((resolve) => {
+      let settled = false;
+      const onDestroyed = () => settle(false);
+      settle = (fenced) => {
+        if (settled) return;
+        settled = true;
+        win.removeListener('closed', onDestroyed);
+        pendingDiscardPrepare.delete(id);
+        resolve(fenced && activeLease(win, leaseId));
       };
-      pendingDiscard.set(leaseId!, pending);
+      pendingDiscardPrepare.set(id, { webContentsId: win.webContents.id, leaseId: leaseId!, resolve: settle });
       win.once('closed', onDestroyed);
-      win.webContents.send('close:discard', { requestId: leaseId });
+      win.webContents.send('close:discard', { requestId: id, leaseId });
     });
+    return { result, cancel: () => settle(false) };
   };
   const rollbackRendererDiscardFence = async (win: BrowserWindow | null, leaseId: string | undefined): Promise<void> => {
     if (!leaseId || !win || win.isDestroyed()) return;
+    const id = requestId('discard-rollback', win);
     await new Promise<void>((resolve) => {
-      const onDestroyed = () => pending.resolve();
-      const pending = {
-        webContentsId: win.webContents.id,
-        resolve: () => {
-          win.removeListener('closed', onDestroyed);
-          pendingDiscard.delete(leaseId);
-          resolve();
-        },
+      let settled = false;
+      let settle: () => void = () => {};
+      const onDestroyed = () => settle();
+      settle = () => {
+        if (settled) return;
+        settled = true;
+        win.removeListener('closed', onDestroyed);
+        pendingDiscardRollback.delete(id);
+        resolve();
       };
-      pendingDiscard.set(leaseId, pending);
+      pendingDiscardRollback.set(id, { webContentsId: win.webContents.id, resolve: settle });
       win.once('closed', onDestroyed);
-      win.webContents.send('close:discard-rollback', { requestId: leaseId });
+      win.webContents.send('close:discard-rollback', { requestId: id, leaseId });
     });
   };
   const leaseIdFor = (windowId: number) => closeLeases.get(windowId)?.id;
@@ -348,11 +363,24 @@ export function createAppWindows({
         closeLeases.delete(target.windowId);
       }));
     };
-    const discardResults = await Promise.all(requestedDiscards.map(async (target) => {
-      const win = BrowserWindow.fromId(target.windowId);
-      return !!win && await fenceRendererDiscard(win, leaseIdFor(target.windowId));
+    const prepares = requestedDiscards.map((target) => ({
+      target,
+      ...beginFenceRendererDiscard(BrowserWindow.fromId(target.windowId), leaseIdFor(target.windowId)),
     }));
-    if (discardResults.some((fenced) => !fenced)) {
+    let failedPrepare = false;
+    let failPrepare: () => void = () => {};
+    const prepareFailed = new Promise<void>((resolve) => {
+      failPrepare = resolve;
+    });
+    const allPrepared = Promise.all(prepares.map(async ({ result }) => {
+      if (!await result) {
+        failedPrepare = true;
+        failPrepare();
+      }
+    }));
+    await Promise.race([allPrepared, prepareFailed]);
+    if (failedPrepare) {
+      for (const { cancel } of prepares) cancel();
       await rollback(requestedDiscards);
       return { retry: requestedDiscards };
     }

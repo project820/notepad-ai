@@ -73,9 +73,9 @@ export type Api = {
   sendCloseAuthorizeResult: (requestId: string, valid: boolean) => void;
   onCloseConsume: (cb: (requestId: string) => void) => () => void;
   sendCloseConsumeResult: (requestId: string, consumed: boolean) => void;
-  onCloseDiscard: (cb: (requestId: string) => void) => () => void;
+  onCloseDiscard: (cb: (request: { requestId: string; leaseId: string }) => void) => () => void;
   sendCloseDiscardResult: (requestId: string, fenced: boolean) => void;
-  onCloseDiscardRollback: (cb: (requestId: string) => void) => () => void;
+  onCloseDiscardRollback: (cb: (request: { requestId: string; leaseId: string }) => void) => () => void;
   sendCloseLeaseInvalidated: (requestId: string, revision: number) => void;
   setCloseLocale: (locale: 'en' | 'ko' | 'zh-Hans' | 'zh-Hant' | 'ja') => void;
   checkForUpdate: () => Promise<{ updateAvailable: boolean; currentVersion: string; latestVersion: string; url: string } | null>;
