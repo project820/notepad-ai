@@ -45,6 +45,7 @@ export function initToolbarWiring(ctx: AppContext, deps: ToolbarWiringDeps) {
       return;
     }
     if (ctx.activeSurface === 'preview') {
+      if (!deps.tryMutateDocument()) return;
       const inTableCell = !!(document.activeElement as HTMLElement | null)?.closest('.preview-table-wrap');
       if (!ctx.preview.el.contains(document.activeElement)) ctx.preview.el.focus({ preventScroll: true });
       applyToPreview(action);

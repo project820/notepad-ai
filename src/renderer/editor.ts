@@ -191,7 +191,14 @@ export function createEditor(parent: HTMLElement, opts: { onChange: ChangeHandle
     ],
   });
 
-  const view = new EditorView({ state, parent });
+  const view = new EditorView({
+    state,
+    parent,
+    dispatchTransactions(transactions, view) {
+      if (mutationFenced && transactions.some((transaction) => transaction.docChanged)) return;
+      view.update(transactions);
+    },
+  });
 
   return {
     view,

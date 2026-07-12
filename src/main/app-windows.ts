@@ -292,10 +292,12 @@ export function createAppWindows({
     let settle: (fenced: boolean) => void = () => {};
     const result = new Promise<boolean>((resolve) => {
       let settled = false;
+      const timer = setTimeout(() => settle(false), 400);
       const onDestroyed = () => settle(false);
       settle = (fenced) => {
         if (settled) return;
         settled = true;
+        clearTimeout(timer);
         win.removeListener('closed', onDestroyed);
         pendingDiscardPrepare.delete(id);
         resolve(fenced && activeLease(win, leaseId));
