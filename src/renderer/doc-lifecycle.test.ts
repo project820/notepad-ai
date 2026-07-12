@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createAppContext } from './app-context';
 import { initDocLifecycle } from './doc-lifecycle';
 
-function setup() {
+function setup(saveFile = vi.fn(async () => ({ saved: true, filePath: '/tmp/draft.md' }))) {
   (globalThis as { document?: unknown }).document = { activeElement: null };
   const ctx = createAppContext({ textContent: '' } as HTMLElement);
   let doc = 'draft';
@@ -27,7 +27,7 @@ function setup() {
     getSourceMap: () => [],
     onAfterRender: () => {},
   });
-  const saveFile = vi.fn(async () => ({ saved: true, filePath: '/tmp/draft.md' }));
+  const sendCloseLeaseInvalidated = vi.fn();
   const sendCloseLeaseInvalidated = vi.fn();
   const lifecycle = initDocLifecycle(ctx, {
     api: { saveFile, sendCloseLeaseInvalidated } as never,
@@ -85,6 +85,37 @@ describe('document close lease and replacement lifecycle', () => {
 
     expect(saveFile).not.toHaveBeenCalled();
     vi.useRealTimers();
+  });
+  it('waits for an in-flight save beyond 400 ms before completing a discard fence', async () => {
+    vi.useFakeTimers();
+    let releaseSave: (() => void) | undefined;
+    try {
+      const saveFile = vi.fn(() => new Promise<{ saved: boolean; filePath: string }>((resolve) => {
+        releaseSave = () => resolve({ saved: true, filePath: '/tmp/draft.md' });
+      }));
+      const { ctx, lifecycle } = setup(saveFile);
+      ctx.currentPath = '/tmp/draft.md';
+      ctx.dirty = true;
+      lifecycle.beginCloseLease('lease-1');
+
+      const saving = lifecycle.save();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(saveFile).toHaveBeenCalledOnce();
+
+      const fence = lifecycle.fenceDiscard('lease-1');
+      let fenced = false;
+      void fence.then(() => { fenced = true; });
+      await vi.advanceTimersByTimeAsync(401);
+
+      expect(fenced).toBe(false);
+
+      releaseSave!();
+      await expect(saving).resolves.toBe(0);
+      await expect(fence).resolves.toBe(true);
+    } finally {
+      releaseSave?.();
+      vi.useRealTimers();
+    }
   });
   it('re-arms autosave after discard rollback for a dirty named document', async () => {
     vi.useFakeTimers();

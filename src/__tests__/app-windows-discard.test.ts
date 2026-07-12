@@ -92,6 +92,7 @@ import type { WindowRecord } from '../main/window-registry';
 type FakeWindow = InstanceType<typeof electron.BrowserWindow>;
 
 type ReplyPolicy = (win: FakeWindow, channel: string, payload: { requestId: string; leaseId?: string }) => void;
+type StatePolicy = (win: FakeWindow, payload: { requestId: string }) => void;
 
 function registryFor(records: WindowRecord[]) {
   return {
@@ -109,10 +110,15 @@ function registryFor(records: WindowRecord[]) {
 
 async function setup(
   reply: ReplyPolicy,
-  showCloseDialog: () => Promise<'discard' | 'cancel'>,
+  showCloseDialog: () => Promise<'save' | 'discard' | 'cancel'>,
   count = 2,
   authorize: () => boolean = () => true,
   commitQuitSession: () => Promise<void> = async () => {},
+  removeSessionWindow: () => Promise<void> = async () => {},
+  removeSessionWindows: () => Promise<void> = async () => {},
+  replyState: StatePolicy = (win, payload) => {
+    electron.emitIpc('close:state', win, { ...payload, dirty: true, hasPath: true, docEmpty: false, revision: 0, locale: 'en' });
+  },
 ) {
   electron.reset();
   vi.resetModules();
@@ -134,14 +140,14 @@ async function setup(
     convertDocument: async () => ({ ok: false }),
     abortChatsForWebContents: () => {},
     hasSingleInstanceLock: true,
-    removeSessionWindow: async () => {},
-    removeSessionWindows: async () => {},
+    removeSessionWindow,
+    removeSessionWindows,
     commitQuitSession,
     showCloseDialog: async () => showCloseDialog(),
   });
   electron.setOnSend((win, channel, payload) => {
     if (channel === 'close:query-state') {
-      electron.emitIpc('close:state', win, { ...payload, dirty: true, hasPath: true, docEmpty: false, revision: 0, locale: 'en' });
+      replyState(win, payload);
     } else if (channel === 'close:authorize') {
       electron.emitIpc('close:authorize-result', win, { requestId: payload.requestId, valid: authorize() });
     } else {
@@ -153,6 +159,68 @@ async function setup(
 
 describe('discard close IPC waiters', () => {
   beforeEach(() => electron.reset());
+  it('approves a save only after a fresh matching post-save revision', async () => {
+    let stateQueries = 0;
+    const commitQuitSession = vi.fn(async () => {});
+    const { appWindows } = await setup((win, channel, payload) => {
+      if (channel === 'close:save') {
+        electron.emitIpc('close:save-result', win, { requestId: payload.requestId, saved: true, committedRevision: 7 });
+      }
+      if (channel === 'close:consume') {
+        electron.emitIpc('close:consume-result', win, { requestId: payload.requestId, consumed: true });
+      }
+    }, async () => 'save', 1, () => true, commitQuitSession, async () => {}, async () => {}, (win, payload) => {
+      stateQueries += 1;
+      electron.emitIpc('close:state', win, { ...payload, dirty: true, hasPath: true, docEmpty: false, revision: 7, locale: 'en' });
+    });
+
+    await expect(appWindows.approveAllForQuit('quit')).resolves.toBe(true);
+
+    expect(stateQueries).toBe(2);
+    expect(commitQuitSession).toHaveBeenCalledWith([]);
+  });
+
+  it('fails closed when a save result has a stale post-save revision', async () => {
+    let stateQueries = 0;
+    const authorize = vi.fn(() => true);
+    const commitQuitSession = vi.fn(async () => {});
+    const { appWindows } = await setup((win, channel, payload) => {
+      if (channel === 'close:save') {
+        electron.emitIpc('close:save-result', win, { requestId: payload.requestId, saved: true, committedRevision: 7 });
+      }
+    }, async () => 'save', 1, authorize, commitQuitSession, async () => {}, async () => {}, (win, payload) => {
+      stateQueries += 1;
+      electron.emitIpc('close:state', win, { ...payload, dirty: true, hasPath: true, docEmpty: false, revision: stateQueries === 1 ? 7 : 8, locale: 'en' });
+    });
+
+    await expect(appWindows.approveAllForQuit('quit')).resolves.toBe(false);
+
+    expect(stateQueries).toBe(2);
+    expect(authorize).not.toHaveBeenCalled();
+    expect(commitQuitSession).not.toHaveBeenCalled();
+  });
+
+  it('cancels dirty close and quit without session-removal or quit-commit callbacks', async () => {
+    const removeSessionWindow = vi.fn(async () => {});
+    const removeSessionWindows = vi.fn(async () => {});
+    const commitQuitSession = vi.fn(async () => {});
+    const { appWindows, wins } = await setup(
+      () => {},
+      async () => 'cancel',
+      1,
+      () => true,
+      commitQuitSession,
+      removeSessionWindow,
+      removeSessionWindows,
+    );
+
+    await expect(appWindows.approveClose(wins[0])).resolves.toBe(false);
+    await expect(appWindows.approveAllForQuit('quit')).resolves.toBe(false);
+
+    expect(removeSessionWindow).not.toHaveBeenCalled();
+    expect(removeSessionWindows).not.toHaveBeenCalled();
+    expect(commitQuitSession).not.toHaveBeenCalled();
+  });
 
   it('cancels a peer prepare and rolls back both targets when one prepare fails', async () => {
     const rollbackTargets: number[] = [];
