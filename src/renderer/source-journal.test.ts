@@ -73,6 +73,16 @@ describe('structural source journal golden assembly', () => {
     },
   );
 });
+  it('interleaves every source slice while structurally editing a later paragraph', () => {
+    const source = '> a\n> b\n\nfirst\n\nsecond\n';
+    const edit: NormalizedEdit = {
+      inputType: 'deleteContentBackward', replacementKind: 'none', boundary: 'trailing', boundaryGaps: [],
+      range: { kind: 'selection', coverage: 'whole' },
+      affected: { beforeIds: [2], afterIds: [], delta: 'remove' },
+    };
+    const disposition = classifyGapDisposition(edit);
+    expect(applyStructuralEdit(table(source), edit, disposition as never, [])).toBe('> a\n> b\n\nfirst\n');
+  });
 describe('structural safety boundary', () => {
   it.each([
     ['list split', '- first\n- second\n', { inputType: 'insertParagraph', replacementKind: 'text', boundary: 'middle', boundaryGaps: [], range: { kind: 'collapsed', edge: 'interior' }, affected: { beforeIds: [0], afterIds: [0, 9], delta: 'add' } }],

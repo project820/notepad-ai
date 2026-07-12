@@ -88,9 +88,13 @@ export function capturePreviewEditSnapshot(root: HTMLElement, event: InputEvent)
   const ownerIds = Array.from(root.querySelectorAll<HTMLElement>('[data-run-id]'))
     .map((owner) => Number(owner.dataset.runId))
     .filter(Number.isInteger);
-  const selectedIds = ownerIdsInRange(root, range);
   const normalized = normalizedRange(root, range);
   const caret = ownerFor(toRange(range)?.startContainer ?? null);
+  // Collapsed ranges have engine-specific intersectsNode behavior. Resolve the
+  // owner from the boundary point instead of depending on that DOM quirk.
+  const selectedIds = normalized.kind === 'collapsed' && caret
+    ? [Number(caret.dataset.runId)]
+    : ownerIdsInRange(root, range);
   if (normalized.kind === 'collapsed' && caret) {
     const index = ownerIds.indexOf(Number(caret.dataset.runId));
     if (normalized.edge === 'blockStart' && event.inputType === 'deleteContentBackward' && index > 0) selectedIds.unshift(ownerIds[index - 1]);
@@ -231,7 +235,7 @@ export function initPreviewEditing(ctx: AppContext, deps: PreviewEditingDeps) {
         metrics.journalPatchCount += 1;
         deps.onCommitPath?.('journal');
         md = result.markdown;
-      } else if (structural && result.reason?.startsWith('structural-unsupported-')) {
+      } else if (structural && (result.reason?.startsWith('structural-unsupported-') || result.reason?.startsWith('structural-split-'))) {
         // Explicit B6: unsupported structural prefixes are converted as a whole
         // document rather than silently assembling incorrect source bytes.
         metrics.fullSerializeCount += 1;

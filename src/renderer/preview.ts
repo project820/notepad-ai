@@ -156,9 +156,22 @@ export function createPreview(parent: HTMLElement): PreviewHandle {
         if (!support.ok) return { ok: false, markdown: source, reason: support.reason };
         const firstOwner = el.querySelector<HTMLElement>(`[data-run-id="${structural.edit.affected.beforeIds[0]}"]`);
         const nextUntyped = firstOwner?.nextElementSibling as HTMLElement | null;
-        const replacement = structural.disposition.kind === 'split' && nextUntyped && !nextUntyped.hasAttribute('data-run-id')
-          ? `${firstOwner?.textContent ?? ''}\n\n${nextUntyped.textContent ?? ''}`
-          : undefined;
+        let replacement: string | undefined;
+        if (structural.disposition.kind === 'split') {
+          if (!firstOwner || !nextUntyped || nextUntyped.hasAttribute('data-run-id')) {
+            return { ok: false, markdown: source, reason: 'structural-split-owner-missing' };
+          }
+          const firstRun = runTable.runs.find((run) => run.runId === structural.edit.affected.beforeIds[0]);
+          if (!firstRun) return { ok: false, markdown: source, reason: 'structural-split-run-missing' };
+          const left = serializeChangedRun(firstRun.subtype, firstOwner);
+          const right = serializeChangedRun(firstRun.subtype, nextUntyped);
+          if (left.kind === 'rerender' || right.kind === 'rerender' || left.kind === 'verbatim' || right.kind === 'verbatim') {
+            return { ok: false, markdown: source, reason: 'structural-split-serialize-unsupported' };
+          }
+          const leftText = left.segments.join('\n');
+          const rightText = right.segments.join('\n');
+          replacement = `${leftText}\n\n${rightText}`;
+        }
         markdown = applyStructuralEdit(runTable, structural.edit, structural.disposition, changed, replacement);
       } else {
         markdown = assembleSource(runTable, changed);

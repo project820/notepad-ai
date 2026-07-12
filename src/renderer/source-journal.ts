@@ -274,7 +274,9 @@ export function structuralJournalSupport(
     .filter((run): run is DomContentRun => run != null)
     .sort((a, b) => a.sourceSlices[0][0] - b.sourceSlices[0][0]);
   if (runs.length === 0) return { ok: false, reason: 'structural-unsupported-shape' };
-  if (!runs.every((run) => run.subtype === 'paragraph')) return { ok: false, reason: 'structural-unsupported-subtype' };
+  if (!runs.every((run) => run.subtype === 'paragraph' && run.sourceSlices.length === 1)) {
+    return { ok: false, reason: 'structural-unsupported-subtype' };
+  }
   if ((disposition.kind === 'split' && runs.length !== 1) || (disposition.kind === 'merge' && runs.length !== 2)) {
     return { ok: false, reason: 'structural-unsupported-shape' };
   }
@@ -294,12 +296,24 @@ function intervalText(runTable: RunTable, interval: JournalInterval): string {
     : runTable.source.slice(jsAtByte(runTable.source, interval.span[0]), jsAtByte(runTable.source, interval.span[1]));
 }
 
-function intervalStart(interval: JournalInterval): number {
-  return interval.kind === 'content' ? interval.sourceSlices[0][0] : interval.span[0];
+type OrderedPiece =
+  | { kind: 'source'; start: number; end: number; text: string }
+  | { kind: 'content'; start: number; end: number; run: DomContentRun; sliceIndex: number };
+
+function orderedPieces(runTable: RunTable): OrderedPiece[] {
+  const pieces: OrderedPiece[] = [];
+  for (const interval of runTable.intervals) {
+    if (interval.kind !== 'content') {
+      pieces.push({ kind: 'source', start: interval.span[0], end: interval.span[1], text: intervalText(runTable, interval) });
+      continue;
+    }
+    interval.sourceSlices.forEach(([start, end], sliceIndex) => pieces.push({ kind: 'content', start, end, run: interval, sliceIndex }));
+  }
+  return pieces.sort((a, b) => a.start - b.start || a.end - b.end);
 }
 
-function intervalEnd(interval: JournalInterval): number {
-  return interval.kind === 'content' ? interval.sourceSlices.at(-1)![1] : interval.span[1];
+function intervalStart(interval: JournalInterval): number {
+  return interval.kind === 'content' ? interval.sourceSlices[0][0] : interval.span[0];
 }
 
 /**
@@ -331,24 +345,22 @@ export function applyStructuralEdit(
   const deleteUntil = nextSurvivor ? intervalStart(nextSurvivor) : byteLength(runTable.source);
   let output = '';
 
-  for (const interval of runTable.intervals) {
-    if (interval.kind === 'content') {
-      if (!selectedIds.has(interval.runId)) {
-        output += intervalText(runTable, interval);
-      } else if (interval.runId === first.runId) {
+  for (const piece of orderedPieces(runTable)) {
+    if (piece.kind === 'content') {
+      if (!selectedIds.has(piece.run.runId)) {
+        output += runTable.source.slice(jsAtByte(runTable.source, piece.start), jsAtByte(runTable.source, piece.end));
+      } else if (piece.run.runId === first.runId && piece.sliceIndex === 0) {
         if (disposition.kind !== 'whole-block-delete') output += rendered;
       }
       continue;
     }
 
-    const start = intervalStart(interval);
-    const end = intervalEnd(interval);
     if (disposition.kind === 'whole-block-delete') {
-      if (disposition.boundary !== 'trailing' && start >= firstStart && end <= deleteUntil) continue;
-    } else if ((disposition.kind === 'merge' || disposition.kind === 'multi-selection-replace') && start >= firstStart && end <= lastEnd) {
+      if (disposition.boundary !== 'trailing' && piece.start >= firstStart && piece.end <= deleteUntil) continue;
+    } else if ((disposition.kind === 'merge' || disposition.kind === 'multi-selection-replace') && piece.start >= firstStart && piece.end <= lastEnd) {
       continue;
     }
-    output += intervalText(runTable, interval);
+    output += piece.text;
   }
 
   if (disposition.kind === 'whole-block-delete' && disposition.boundary === 'all') return '';
