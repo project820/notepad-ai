@@ -1,5 +1,27 @@
 import type { ContentRunKind } from './source-journal';
 
+// Kept byte-for-byte compatible with Turndown's markdownEscapes in
+// turndown.cjs.js. Inline text is not trusted to already be markdown-safe.
+const markdownEscapes: ReadonlyArray<readonly [RegExp, string]> = [
+  [/\\/g, '\\\\'],
+  [/\*/g, '\\*'],
+  [/^-/g, '\\-'],
+  [/^\+ /g, '\\+ '],
+  [/^(=+)/g, '\\$1'],
+  [/^(#{1,6}) /g, '\\$1 '],
+  [/`/g, '\\`'],
+  [/^~~~/g, '\\~~~'],
+  [/\[/g, '\\['],
+  [/\]/g, '\\]'],
+  [/^>/g, '\\>'],
+  [/_/g, '\\_'],
+  [/^(\d+)\. /g, '$1\\. '],
+];
+
+function escapeMarkdownText(value: string): string {
+  return markdownEscapes.reduce((escaped, [pattern, replacement]) => escaped.replace(pattern, replacement), value);
+}
+
 export type SerializeResult =
   | { kind: 'segments'; segments: readonly string[] }
   | { kind: 'verbatim'; text: string }
@@ -7,7 +29,7 @@ export type SerializeResult =
   | { kind: 'rerender'; reason: string };
 
 function inline(node: Node): string | null {
-  if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? '';
+  if (node.nodeType === Node.TEXT_NODE) return escapeMarkdownText(node.textContent ?? '');
   if (node.nodeType !== Node.ELEMENT_NODE) return '';
   const el = node as HTMLElement;
   const tag = el.tagName.toLowerCase();

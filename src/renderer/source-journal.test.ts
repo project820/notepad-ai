@@ -111,6 +111,19 @@ describe('gap classifier', () => {
     expect(classifyGapDisposition({ ...base, affected: { beforeIds: [1], afterIds: [2], delta: 'replace' } })).toMatchObject({ kind: 'rerender' });
   });
 });
+  it('escapes literal markdown text so edited paragraphs remain paragraphs after reparse', () => {
+    const cases = [
+      ['# not a heading', '\\# not a heading'],
+      ['\\# escaped', '\\\\# escaped'],
+      ['*star* [link]', '\\*star\\* \\[link\\]'],
+    ] as const;
+    for (const [input, expected] of cases) {
+      const p = document.createElement('p');
+      p.textContent = input;
+      expect(serializeChangedRun('paragraph', p)).toEqual({ kind: 'segments', segments: [expected] });
+      expect(table(expected).runs[0]?.subtype).toBe('paragraph');
+    }
+  });
 
 describe('fragment serializer', () => {
   it('keeps soft breaks as source-owned segment boundaries', () => {

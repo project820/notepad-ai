@@ -32,5 +32,18 @@ describe('preview source patch', () => {
     expect(preview.getRunTable()).not.toBeNull();
     expect(preview.el.querySelectorAll('[data-run-id]')).toHaveLength(7);
   });
+  it.each([
+    ['# not a heading', '\\# not a heading'],
+    ['\\# escaped', '\\\\# escaped'],
+    ['*star* [link]', '\\*star\\* \\[link\\]'],
+  ] as const)('commits literal %j without changing paragraph structure', (literal, expected) => {
+    const source = 'original\n';
+    const preview = createPreview(document.createElement('div'));
+    preview.setDoc(source);
+    preview.el.querySelector<HTMLElement>('[data-run-id="0"]')!.textContent = literal;
+    expect(preview.commitSourcePatch(source, [0])).toMatchObject({ ok: true, markdown: `${expected}\n` });
+    expect(preview.el.querySelector('h1')).toBeNull();
+    expect(preview.getRunTable()?.runs[0]?.subtype).toBe('paragraph');
+  });
 
 });

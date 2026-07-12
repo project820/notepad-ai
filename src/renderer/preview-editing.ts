@@ -235,7 +235,7 @@ export function initPreviewEditing(ctx: AppContext, deps: PreviewEditingDeps) {
         metrics.journalPatchCount += 1;
         deps.onCommitPath?.('journal');
         md = result.markdown;
-      } else if (structural && (result.reason?.startsWith('structural-unsupported-') || result.reason?.startsWith('structural-split-'))) {
+      } else if (result.reason === 'journal-reparse-mismatch' || (structural && (result.reason?.startsWith('structural-unsupported-') || result.reason?.startsWith('structural-split-')))) {
         // Explicit B6: unsupported structural prefixes are converted as a whole
         // document rather than silently assembling incorrect source bytes.
         metrics.fullSerializeCount += 1;

@@ -82,6 +82,26 @@ export function createPreview(parent: HTMLElement): PreviewHandle {
   const settledCallbacks: Array<(result: RenderSettled) => void> = [];
   let sourceMap: SourceLineRange[] = [];
   let runTable: RunTable | null = null;
+  function journalShapeMatches(
+    markdown: string,
+    structural?: { edit: NormalizedEdit; disposition: Exclude<ClassifyResult, { kind: 'single-block' | 'rerender' }> },
+  ): boolean {
+    if (!runTable) return false;
+    const next = buildRunTable(md.parse(markdown, {}), markdown).runTable.runs;
+    let expected = [...runTable.runs.map((run) => run.subtype)];
+    if (structural) {
+      const selected = structural.edit.affected.beforeIds
+        .map((id) => runTable!.runs.findIndex((run) => run.runId === id))
+        .filter((index) => index >= 0)
+        .sort((a, b) => a - b);
+      if (selected.length === 0) return false;
+      const first = selected[0];
+      if (structural.disposition.kind === 'split') expected.splice(first, 1, 'paragraph', 'paragraph');
+      else if (structural.disposition.kind === 'multi-selection-replace') expected.splice(first, selected.length, 'paragraph');
+      else expected.splice(first, selected.length);
+    }
+    return next.length === expected.length && next.every((run, index) => run.subtype === expected[index]);
+  }
 
   function render(source: string): void {
     const rollback = beforeCallbacks.map((cb) => cb()).filter((release): release is () => void => typeof release === 'function');
@@ -175,6 +195,9 @@ export function createPreview(parent: HTMLElement): PreviewHandle {
         markdown = applyStructuralEdit(runTable, structural.edit, structural.disposition, changed, replacement);
       } else {
         markdown = assembleSource(runTable, changed);
+      }
+      if (!journalShapeMatches(markdown, structural)) {
+        return { ok: false, markdown: source, reason: 'journal-reparse-mismatch' };
       }
       const savedBookmark = bookmark(el);
       render(markdown);
