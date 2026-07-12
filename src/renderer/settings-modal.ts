@@ -24,6 +24,27 @@ const PROVIDER_STATUS_ERROR_KEYS: Record<ProviderAuthStatusCode, string> = {
 // (which uses `require('electron')`). Ollama / LM Studio use fixed default ports.
 const DEFAULT_OLLAMA_BASE_URL = 'http://127.0.0.1:11434';
 const DEFAULT_LMSTUDIO_BASE_URL = 'http://127.0.0.1:1234';
+const KNOWN_PROVIDER_ROWS: readonly ProviderStatusView[] = [
+  { provider: 'chatgpt', label: 'ChatGPT', authKind: 'oauth', connected: false },
+  { provider: 'claude', label: 'Claude', authKind: 'api_key', connected: false },
+  { provider: 'openrouter', label: 'OpenRouter', authKind: 'api_key', connected: false },
+  { provider: 'ollama', label: 'Ollama', authKind: 'local', connected: false },
+  { provider: 'lmstudio', label: 'LM Studio', authKind: 'local', connected: false },
+  { provider: 'grok', label: 'Grok (CLI)', authKind: 'cli', connected: false },
+];
+
+type ProviderSnapshot = {
+  statuses?: ProviderAuthStatus[];
+  statusLoadFailed?: boolean;
+  config?: { ollama: string; lmstudio: string };
+  models?: ModelRef[];
+};
+
+type ProviderSnapshotPatch = Pick<ProviderSnapshot, 'statuses' | 'statusLoadFailed' | 'config' | 'models'>;
+
+function reconcile(snapshot: ProviderSnapshot, patch: ProviderSnapshotPatch): ProviderSnapshot {
+  return { ...snapshot, ...patch };
+}
 
 export type SettingsModalDeps = {
   /** Fired after any auth change (sign-in/out, key save/delete) so callers can refresh model caches. */
@@ -113,9 +134,83 @@ export function openSettingsModal(deps: SettingsModalDeps): void {
   const provHost = root.querySelector('#settings-providers') as HTMLElement;
   const mdHandlerHost = root.querySelector('#settings-md-handler') as HTMLElement;
   let provHandle: ProviderSettingsHandle | null = null;
+  let generation = 0;
+  const snapshots = new Map<number, ProviderSnapshot>();
+
+  const viewsFor = (snapshot: ProviderSnapshot): ProviderStatusView[] => {
+    if (!snapshot.statuses && !snapshot.statusLoadFailed) {
+      return KNOWN_PROVIDER_ROWS.map((row) => ({ ...row, loading: true }));
+    }
+    if (snapshot.statusLoadFailed) {
+      return KNOWN_PROVIDER_ROWS.map((row) => ({ ...row, loading: true }));
+    }
+    const local: LocalViewContext = {
+      config: snapshot.config ?? {
+        ollama: DEFAULT_OLLAMA_BASE_URL,
+        lmstudio: DEFAULT_LMSTUDIO_BASE_URL,
+      },
+      modelCount: (provider) => (snapshot.models ?? []).filter((model) => model.provider === provider).length,
+    };
+    const statusesByProvider = new Map(snapshot.statuses!.map((status) => [status.provider, status]));
+    const emptyStatusResult = snapshot.statuses!.length === 0;
+    return KNOWN_PROVIDER_ROWS.map((row) => {
+      const status = statusesByProvider.get(row.provider);
+      if (!status) return { ...row, loading: !emptyStatusResult };
+      return toView(status, local) ?? { ...row };
+    });
+  };
+
+  const patchFromSnapshot = (gen: number, patch: ProviderSnapshotPatch) => {
+    if (gen !== generation || !root.isConnected) return;
+    const next = reconcile(snapshots.get(gen) ?? {}, patch);
+    snapshots.set(gen, next);
+    provHandle?.patch({
+      statuses: viewsFor(next),
+      loadError: next.statusLoadFailed ? t('settings.prov.statusLoadFailed') : undefined,
+    });
+  };
+
+  const loadProviders = (): Promise<void> => {
+    const gen = ++generation;
+    snapshots.set(gen, {});
+    // Start all IPC reads before registering any completion handler. No resource
+    // (especially the model cache refresh) is allowed to delay the skeleton paint.
+    let statusRequest: Promise<ProviderAuthStatus[]>;
+    let configRequest: Promise<{ ollama: string; lmstudio: string }>;
+    let modelsRequest: Promise<ModelRef[]>;
+    try {
+      statusRequest = window.api.aiProvidersStatus();
+    } catch {
+      statusRequest = Promise.reject();
+    }
+    try {
+      configRequest = window.api.localAiGetConfig();
+    } catch {
+      configRequest = Promise.reject();
+    }
+    try {
+      modelsRequest = window.api.aiModels(true);
+    } catch {
+      modelsRequest = Promise.reject();
+    }
+    const statusDone = statusRequest.then(
+      (statuses) => patchFromSnapshot(gen, { statuses, statusLoadFailed: false }),
+      () => patchFromSnapshot(gen, { statusLoadFailed: true }),
+    );
+    void configRequest.then(
+      (config) => patchFromSnapshot(gen, { config }),
+      () => patchFromSnapshot(gen, {}),
+    );
+    void modelsRequest.then(
+      (models) => patchFromSnapshot(gen, { models }),
+      () => patchFromSnapshot(gen, {}),
+    );
+    return statusDone;
+  };
 
   let releaseFocusTrap: (() => void) | null = null;
   const close = () => {
+    generation += 1;
     releaseFocusTrap?.();
     releaseFocusTrap = null;
     provHandle?.destroy();
@@ -130,92 +225,57 @@ export function openSettingsModal(deps: SettingsModalDeps): void {
     onEscape: close,
   });
 
-  async function renderProviders() {
-    provHandle?.destroy();
-    let statusesLoaded = true;
-    let statuses: ProviderAuthStatus[] = [];
-    let localConfig: { ollama: string; lmstudio: string } = {
-      ollama: DEFAULT_OLLAMA_BASE_URL,
-      lmstudio: DEFAULT_LMSTUDIO_BASE_URL,
-    };
-    let models: ModelRef[] = [];
-    try {
-      statuses = await window.api.aiProvidersStatus();
-    } catch {
-      statusesLoaded = false;
-    }
-    try {
-      localConfig = await window.api.localAiGetConfig();
-    } catch {
-      /* keep default localhost URLs */
-    }
-    try {
-      // Snapshot for per-provider model counts + a background refresh kick so a
-      // freshly started local server appears on the next settings open. Never
-      // blocks: the registry returns the current cache snapshot immediately.
-      models = await window.api.aiModels(true);
-    } catch {
-      /* no counts → local rows show the run-server hint */
-    }
-    const local: LocalViewContext = {
-      config: localConfig,
-      modelCount: (provider) => models.filter((m) => m.provider === provider).length,
-    };
-    provHandle = mountProviderSettingsPanel(provHost, {
-      statuses: statuses.map((s) => toView(s, local)).filter((v): v is ProviderStatusView => v !== null),
-      loadError: statusesLoaded ? undefined : t('settings.prov.statusLoadFailed'),
-      onRetryStatus: () => void renderProviders(),
-      onChatgptSignIn: () =>
-        openLoginModal({
-          onAfterLogin: () => {
-            deps.onAfterAuthChange?.();
-            void renderProviders();
-          },
-        }),
-      onChatgptSignOut: async () => {
-        await window.api.authLogout();
-        deps.onAfterAuthChange?.();
-        void renderProviders();
-      },
-      onSaveKey: async (provider, key) => {
-        await window.api.aiSetApiKey(provider, key);
-        deps.onAfterAuthChange?.();
-        void renderProviders();
-      },
-      onDeleteKey: async (provider) => {
-        await window.api.aiDeleteProviderKey(provider);
-        deps.onAfterAuthChange?.();
-        void renderProviders();
-      },
-      onSetCustomModel: (provider, modelId) => {
-        deps.onSetCustomModel(provider, modelId);
-        close();
-      },
-      onSaveLocalUrl: async (provider, url) => {
-        try {
-          await window.api.localAiSetConfig({ [provider]: url });
-        } catch {
-          /* invalid URL rejected in main; re-render keeps the prior value */
-        }
-        deps.onAfterAuthChange?.();
-        void renderProviders();
-      },
-      onResetLocalUrl: async (provider) => {
-        const def = provider === 'ollama' ? DEFAULT_OLLAMA_BASE_URL : DEFAULT_LMSTUDIO_BASE_URL;
-        try {
-          await window.api.localAiSetConfig({ [provider]: def });
-        } catch {
-          /* ignore */
-        }
-        deps.onAfterAuthChange?.();
-        void renderProviders();
-      },
-    });
-  }
-
+  provHandle = mountProviderSettingsPanel(provHost, {
+    statuses: KNOWN_PROVIDER_ROWS.map((row) => ({ ...row, loading: true })),
+    onRetryStatus: () => void loadProviders(),
+    onChatgptSignIn: () =>
+      openLoginModal({
+        onAfterLogin: () => {
+          deps.onAfterAuthChange?.();
+          void loadProviders();
+        },
+      }),
+    onChatgptSignOut: async () => {
+      await window.api.authLogout();
+      deps.onAfterAuthChange?.();
+      await loadProviders();
+    },
+    onSaveKey: async (provider, key) => {
+      await window.api.aiSetApiKey(provider, key);
+      deps.onAfterAuthChange?.();
+      await loadProviders();
+    },
+    onDeleteKey: async (provider) => {
+      await window.api.aiDeleteProviderKey(provider);
+      deps.onAfterAuthChange?.();
+      await loadProviders();
+    },
+    onSetCustomModel: (provider, modelId) => {
+      deps.onSetCustomModel(provider, modelId);
+      close();
+    },
+    onSaveLocalUrl: async (provider, url) => {
+      try {
+        await window.api.localAiSetConfig({ [provider]: url });
+      } catch {
+        /* invalid URL rejected in main; retain the last confirmed configuration */
+      }
+      deps.onAfterAuthChange?.();
+      await loadProviders();
+    },
+    onResetLocalUrl: async (provider) => {
+      const def = provider === 'ollama' ? DEFAULT_OLLAMA_BASE_URL : DEFAULT_LMSTUDIO_BASE_URL;
+      try {
+        await window.api.localAiSetConfig({ [provider]: def });
+      } catch {
+        /* ignore */
+      }
+      deps.onAfterAuthChange?.();
+      await loadProviders();
+    },
+  });
   mountMdHandlerSection(mdHandlerHost);
-
-  void renderProviders();
+  void loadProviders();
 }
 
 /**
