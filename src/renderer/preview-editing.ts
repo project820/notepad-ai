@@ -13,13 +13,15 @@ type PreviewEditingDeps = {
 
 export function initPreviewEditing(ctx: AppContext, deps: PreviewEditingDeps) {
   let previewSyncTimer: ReturnType<typeof setTimeout> | null = null;
+  let previewEditPending = false;
 
   function flushPreviewToSource(): boolean {
-    if (!deps.tryMutateDocument()) return false;
+    if (!previewEditPending || !deps.tryMutateDocument()) return false;
     ctx.preview.el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach((el) => {
       el.toggleAttribute('checked', el.checked);
     });
     const md = deps.htmlToMarkdown(ctx.preview.el.innerHTML);
+    previewEditPending = false;
     if (md.trim() === ctx.editor.getDoc().trim()) return false;
     ctx.suppressEditorChange = true;
     ctx.editor.setDoc(md);
@@ -28,9 +30,17 @@ export function initPreviewEditing(ctx: AppContext, deps: PreviewEditingDeps) {
     return true;
   }
 
+  function flushPendingPreviewToSource(): boolean {
+    if (!previewEditPending) return false;
+    if (previewSyncTimer) clearTimeout(previewSyncTimer);
+    previewSyncTimer = null;
+    return flushPreviewToSource();
+  }
+
   function syncPreviewToSource() {
     if (previewSyncTimer) clearTimeout(previewSyncTimer);
     previewSyncTimer = setTimeout(() => {
+      previewSyncTimer = null;
       if (!ctx.editingInPreview) return;
       flushPreviewToSource();
     }, 350);
@@ -38,12 +48,14 @@ export function initPreviewEditing(ctx: AppContext, deps: PreviewEditingDeps) {
 
   ctx.preview.el.addEventListener('input', () => {
     ctx.editingInPreview = true;
+    previewEditPending = true;
     syncPreviewToSource();
   });
   ctx.preview.el.addEventListener('change', (e) => {
     const target = e.target as HTMLInputElement | null;
     if (target && target.type === 'checkbox') {
       ctx.editingInPreview = true;
+      previewEditPending = true;
       syncPreviewToSource();
     }
   });
@@ -56,23 +68,15 @@ export function initPreviewEditing(ctx: AppContext, deps: PreviewEditingDeps) {
       if (!ctx.preview.el.contains(document.activeElement)) {
         ctx.editingInPreview = false;
         if (previewSyncTimer) clearTimeout(previewSyncTimer);
-        if (!deps.tryMutateDocument()) return;
-        ctx.preview.el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach((el) => {
-          el.toggleAttribute('checked', el.checked);
-        });
-        const md = deps.htmlToMarkdown(ctx.preview.el.innerHTML);
-        if (md.trim() !== ctx.editor.getDoc().trim()) {
-          ctx.suppressEditorChange = true;
-          ctx.editor.setDoc(md);
-          ctx.suppressEditorChange = false;
-          deps.onSuppressedEditorChange(md);
-        }
+        previewSyncTimer = null;
+        flushPreviewToSource();
+        if (previewEditPending) return;
         ctx.preview.setDoc(ctx.editor.getDoc());
       }
     }, 100);
   });
 
-  return { flushPreviewToSource, syncPreviewToSource };
+  return { flushPendingPreviewToSource, flushPreviewToSource, syncPreviewToSource };
 }
 export function createHtmlViewToggle(
   ctx: AppContext,

@@ -163,7 +163,7 @@ applyPreviewMode();
 ctx.editor.applyTheme(resolvedDark(prefs.theme));
 
 const { selectionSync, scheduleLineAlign } = initPaneSync(ctx, { prefs, editorHost, createRafThrottle });
-const { flushPreviewToSource, syncPreviewToSource } = initPreviewEditing(ctx, {
+const { flushPendingPreviewToSource, flushPreviewToSource, syncPreviewToSource } = initPreviewEditing(ctx, {
   htmlToMarkdown,
   t,
   onSuppressedEditorChange: docLifecycle.onSuppressedEditorChange,
@@ -208,6 +208,7 @@ docLifecycle.wireMenuActions(cyclePreviewMode);
 window.api.setCloseLocale(getLocale());
 onLocaleChange((locale) => window.api.setCloseLocale(locale));
 window.api.onCloseQueryState((requestId) => {
+  flushPendingPreviewToSource();
   docLifecycle.beginCloseLease(requestId);
   window.api.sendCloseState(requestId, {
     dirty: ctx.dirty,
