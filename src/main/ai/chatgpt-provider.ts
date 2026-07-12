@@ -9,7 +9,7 @@
 
 import { getStatus } from '../codex-auth';
 import { streamChat } from '../codex-client';
-import { getModels } from '../codex-models';
+import { getAccountModels, getModels } from '../codex-models';
 import { humanizeEngineIdForProvider } from './model-catalog';
 import { appendWriteReanchor } from './messages';
 import type { AiChatEvent, AiChatRequest, AiProvider, ModelRef, ProviderAuthStatus } from './types';
@@ -45,6 +45,16 @@ export class ChatGptProvider implements AiProvider {
       requiresAuth: true,
     }));
   }
+  async listAccountModels(): Promise<ModelRef[]> {
+    const models = await getAccountModels();
+    return models.map((m) => ({
+      provider: 'chatgpt' as const,
+      id: m.id,
+      label: m.label,
+      humanizeEngineId: humanizeEngineIdForProvider('chatgpt'),
+      requiresAuth: true,
+    }));
+  }
 
   async streamChat(req: AiChatRequest, onEvent: (e: AiChatEvent) => void): Promise<void> {
     await streamChat(
@@ -55,6 +65,7 @@ export class ChatGptProvider implements AiProvider {
         model: req.model.id,
         signal: req.signal,
         maxOutputTokens: req.maxOutputTokens,
+        reasoningEffort: req.reasoningEffort === 'max' ? undefined : req.reasoningEffort,
       },
       (e) => onEvent(e),
     );

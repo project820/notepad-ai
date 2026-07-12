@@ -1,4 +1,4 @@
-import type { AiProviderId, ModelRef, ProviderAuthStatus } from '../main/ai/types';
+import type { AiProviderId, ModelRef, ProviderAuthStatus, ReasoningEffort } from '../main/ai/types';
 import type { AuthSnapshot, LoginUpdate } from '../shared/auth-protocol';
 import type { FileTreeEntry } from '../shared/file-types';
 
@@ -32,6 +32,24 @@ type ProjectWizardSaveApprovedDraftResult = {
   overviewPath: string;
   markdown: string;
 };
+type AiChatRequest = {
+  id: string;
+  instructions: string;
+  history: { role: 'user' | 'assistant'; text: string }[];
+  userText: string;
+  model?: string | { provider: AiProviderId; id: string };
+  surfaceMode?: 'write' | 'advise' | 'html' | 'block';
+  images?: { mime: string; base64: string; bytes: number; name?: string }[];
+  reasoningEffort?: ReasoningEffort;
+};
+
+export type ReasoningCapabilitiesSnapshot = {
+  featureEnabled: boolean;
+  snapshotGeneration: number;
+  models: Array<{ modelId: string; efforts: ReasoningEffort[] }>;
+  accountModels: string[];
+};
+
 
 export type Api = {
   onFileOpened: (cb: (file: { filePath: string; content: string }) => void) => void;
@@ -50,10 +68,11 @@ export type Api = {
   authCancelLogin: () => Promise<void>;
   authLogout: () => Promise<void>;
   onAuthLoginUpdate: (cb: (u: LoginUpdate) => void) => () => void;
-  aiChat: (id: string, instructions: string, history: { role: 'user' | 'assistant'; text: string }[], userText: string, model?: string | { provider: AiProviderId; id: string }, surfaceMode?: 'write' | 'advise' | 'html' | 'block', images?: { mime: string; base64: string; bytes: number; name?: string }[]) => Promise<void>;
+  aiChat: (request: AiChatRequest) => Promise<void>;
   aiCancel: (id: string) => Promise<void>;
   onAiChatEvent: (id: string, cb: (e: { kind: 'delta' | 'done' | 'error'; text?: string; message?: string; errorKind?: string }) => void) => () => void;
   aiModels: (force?: boolean) => Promise<ModelRef[]>;
+  aiReasoningCapabilities: () => Promise<ReasoningCapabilitiesSnapshot>;
   aiProvidersStatus: () => Promise<ProviderAuthStatus[]>;
   aiHasAnyAuth: () => Promise<boolean>;
   aiSetApiKey: (provider: AiProviderId, key: string) => Promise<{ persisted: boolean }>;

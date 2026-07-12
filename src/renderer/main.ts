@@ -298,6 +298,7 @@ installBlockAi({
   getQuality: () => unifiedChatWiring.currentStyle().difficulty,
   getNaturalness: () => unifiedChatWiring.currentStyle().naturalness,
   openAiSettings: openSettings,
+  getReasoningEffort: () => prefs.reasoningEffort,
 });
 
 installSelectionFormatMenu({

@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { AiProviderErrorKind, AiProviderId, ModelRef, ProviderAuthStatus } from './ai/types';
+import type { AiProviderErrorKind, AiProviderId, ModelRef, ProviderAuthStatus, ReasoningEffort } from './ai/types';
 import type { FileTreeEntry } from '../shared/file-types';
 import type { AuthSnapshot, LoginUpdate } from '../shared/auth-protocol';
 
@@ -41,6 +41,24 @@ type ProjectWizardSaveApprovedDraftResult = {
   status: 'not_ready' | 'partially_ready' | 'ready';
   overviewPath: string;
   markdown: string;
+};
+
+type AiChatRequest = {
+  id: string;
+  instructions: string;
+  history: { role: 'user' | 'assistant'; text: string }[];
+  userText: string;
+  model?: string | { provider: AiProviderId; id: string };
+  surfaceMode?: 'write' | 'advise' | 'html' | 'block';
+  images?: { mime: string; base64: string; bytes: number; name?: string }[];
+  reasoningEffort?: ReasoningEffort;
+};
+
+type ReasoningCapabilitiesSnapshot = {
+  featureEnabled: boolean;
+  snapshotGeneration: number;
+  models: Array<{ modelId: string; efforts: ReasoningEffort[] }>;
+  accountModels: string[];
 };
 
 const api = {
@@ -94,16 +112,7 @@ const api = {
   },
 
   // AI Chat — streaming
-  aiChat: (
-    id: string,
-    instructions: string,
-    history: { role: 'user' | 'assistant'; text: string }[],
-    userText: string,
-    model?: string | { provider: AiProviderId; id: string },
-    surfaceMode?: 'write' | 'advise' | 'html' | 'block',
-    images?: { mime: string; base64: string; bytes: number; name?: string }[],
-  ): Promise<void> =>
-    ipcRenderer.invoke('ai:chat', { id, instructions, history, userText, model, surfaceMode, images }),
+  aiChat: (request: AiChatRequest): Promise<void> => ipcRenderer.invoke('ai:chat', request),
   aiCancel: (id: string): Promise<void> => ipcRenderer.invoke('ai:cancel', id),
   onAiChatEvent: (
     id: string,
@@ -116,6 +125,8 @@ const api = {
   },
 
   aiModels: (force?: boolean): Promise<ModelRef[]> => ipcRenderer.invoke('ai:models', force),
+  aiReasoningCapabilities: (): Promise<ReasoningCapabilitiesSnapshot> =>
+    ipcRenderer.invoke('ai:reasoning-capabilities'),
 
   // Multi-provider auth (v1)
   aiProvidersStatus: (): Promise<ProviderAuthStatus[]> =>

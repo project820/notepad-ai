@@ -114,11 +114,11 @@ describe('block-ai auth affordance (PR-2 Bug A)', () => {
     const { view, aiChat, emit } = mountAuth(openAiSettings);
     await openAndGenerate(view);
 
-    // aiChat carries the 6th surfaceMode arg = 'block' on a normal send.
     expect(aiChat).toHaveBeenCalledTimes(1);
-    const call = aiChat.mock.calls[0];
-    expect(call[4]).toEqual({ provider: 'chatgpt', id: 'gpt-5.4-mini' }); // model
-    expect(call[5]).toBe('block'); // surfaceMode
+    expect(aiChat.mock.calls[0][0]).toMatchObject({
+      model: { provider: 'chatgpt', id: 'gpt-5.4-mini' },
+      surfaceMode: 'block',
+    });
 
     // Auth error arrives carrying a hostile raw body that must never reach the DOM.
     const RAW = '<img src=x onerror="alert(1)">RAW_AUTH_LEAK';

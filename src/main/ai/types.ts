@@ -70,6 +70,7 @@ export type ChatTurn = { role: 'user' | 'assistant'; text: string };
 
 /** Which chat surface initiated the turn — drives Write-only output re-anchoring. */
 export type SurfaceMode = 'write' | 'advise' | 'html' | 'block';
+export type ReasoningEffort = 'none' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 /** A user-attached image for a multimodal turn (OCR or direct vision). */
 export type AiImageAttachment = {
@@ -240,6 +241,8 @@ export type AiChatRequest = {
   surfaceMode?: SurfaceMode;
   /** Attached images for a multimodal turn (vision-direct or OCR fallback). */
   images?: AiImageAttachment[];
+  /** Optional reasoning tier; main validates it against the current capability snapshot. */
+  reasoningEffort?: ReasoningEffort;
 };
 
 export type AiChatEvent =
@@ -295,6 +298,8 @@ export interface AiProvider {
   getAuthStatus(): Promise<ProviderAuthStatus>;
   /** Curated/known models for this provider (may include live-fetched ones). */
   listModels(): Promise<ModelRef[]>;
+  /** Current-account model IDs only; excludes generic fallback catalogs. */
+  listAccountModels?(): Promise<ModelRef[]>;
   /** Stream a chat completion. Emits delta/done/error via onEvent. */
   streamChat(req: AiChatRequest, onEvent: (e: AiChatEvent) => void): Promise<void>;
 }

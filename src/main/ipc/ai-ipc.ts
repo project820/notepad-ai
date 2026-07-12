@@ -1,7 +1,7 @@
 import type { ChatTurn } from '../codex-client';
 import { handleTrusted } from '../ipc-guard';
 import { htmlExportMaxTokens, isHtmlExportInstructions } from '../ai/output-budget';
-import { isAiProviderId, validateImageAttachments, validateChatTextPayload, type AiProviderId } from '../ai/types';
+import { isAiProviderId, validateImageAttachments, validateChatTextPayload, type AiProviderId, type ReasoningEffort } from '../ai/types';
 import type { ProviderRegistry } from '../ai/provider-registry';
 
 type AiIpcDeps = {
@@ -35,6 +35,7 @@ export function registerAiIpc({ getRegistry }: AiIpcDeps): void {
       model?: string | { provider: AiProviderId; id: string };
       surfaceMode?: string;
       images?: unknown;
+      reasoningEffort?: ReasoningEffort;
     },
   ) => {
     const shapeCheck = validateChatTextPayload(payload);
@@ -75,6 +76,7 @@ export function registerAiIpc({ getRegistry }: AiIpcDeps): void {
               ? payload.surfaceMode
               : undefined,
           images: imgCheck.images.length ? imgCheck.images : undefined,
+          reasoningEffort: payload.reasoningEffort,
           signal: controller.signal,
           maxOutputTokens: isHtmlExportInstructions(payload.instructions)
             ? htmlExportMaxTokens(model.provider, model.id)
@@ -93,6 +95,7 @@ export function registerAiIpc({ getRegistry }: AiIpcDeps): void {
     activeChats.delete(key);
   });
   handleTrusted('ai:models', async (_e, force?: boolean) => getRegistry().getAvailableModels(force === true));
+  handleTrusted('ai:reasoning-capabilities', async () => getRegistry().getReasoningCapabilities());
   handleTrusted('local-ai:get-config', async () => getRegistry().getLocalConfig());
   handleTrusted('local-ai:set-config', async (_e, partial: { ollama?: string; lmstudio?: string }) =>
     getRegistry().setLocalConfig(partial ?? {}));

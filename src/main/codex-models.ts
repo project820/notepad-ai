@@ -63,6 +63,39 @@ async function writeCache(cache: Cache) {
     /* ignore */
   }
 }
+function parseModels(payload: any): ModelInfo[] {
+  const raw: any[] =
+    (Array.isArray(payload?.data) && payload.data) ||
+    (Array.isArray(payload?.models) && payload.models) ||
+    (Array.isArray(payload) && payload) ||
+    [];
+  return raw
+    .map((m: any) => (typeof m === 'string' ? { id: m } : { id: m?.id, label: m?.display_name ?? m?.label }))
+    .filter((m: ModelInfo) => typeof m.id === 'string' && m.id);
+}
+
+async function fetchLiveModels(token: string): Promise<ModelInfo[]> {
+  const r = await fetch(`${CODEX_BASE_URL}/models?client_version=1.0.0`, {
+    method: 'GET',
+    headers: cloudflareHeaders(token),
+  });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const models = parseModels(await r.json());
+  if (models.length === 0) throw new Error('empty model list');
+  return models;
+}
+
+/** Current-account models only; never substitutes the generic fallback catalog. */
+export async function getAccountModels(): Promise<ModelInfo[]> {
+  const token = await getAccessToken();
+  if (!token) return [];
+  try {
+    return await fetchLiveModels(token);
+  } catch {
+    return [];
+  }
+}
+
 
 export async function getModels(forceRefresh = false): Promise<ModelInfo[]> {
   if (!forceRefresh) {
@@ -75,22 +108,7 @@ export async function getModels(forceRefresh = false): Promise<ModelInfo[]> {
   if (!token) return FALLBACK_MODELS.map((id) => ({ id }));
 
   try {
-    const r = await fetch(`${CODEX_BASE_URL}/models?client_version=1.0.0`, {
-      method: 'GET',
-      headers: cloudflareHeaders(token),
-    });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const j = await r.json();
-    // Shape may vary: { data: [{id, ...}, ...] } or { models: [...] } — try both.
-    const raw: any[] =
-      (Array.isArray(j?.data) && j.data) ||
-      (Array.isArray(j?.models) && j.models) ||
-      (Array.isArray(j) && j) ||
-      [];
-    const models = raw
-      .map((m: any) => (typeof m === 'string' ? { id: m } : { id: m?.id, label: m?.display_name ?? m?.label }))
-      .filter((m: ModelInfo) => typeof m.id === 'string' && m.id);
-    if (models.length === 0) throw new Error('empty model list');
+    const models = await fetchLiveModels(token);
     await writeCache({ fetchedAt: Date.now(), models });
     return models;
   } catch {

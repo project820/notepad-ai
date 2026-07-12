@@ -100,8 +100,25 @@ export function initToolbarWiring(ctx: AppContext, deps: ToolbarWiringDeps) {
     getTypography: () => clampTypography(deps.prefs.typography),
     onTypographyChange: (next) => { deps.prefs.typography = clampTypography(next); savePrefs(deps.prefs); deps.applyTypography(deps.prefs.typography); deps.scheduleLineAlign(); },
     onOpenSettings: deps.openSettings,
-    onSignIn: () => openLoginModal({ onAfterLogin: (auth) => { deps.setAuth(auth); deps.paintAuthPill(auth); } }),
-    onSignOut: async () => { await window.api.authLogout(); const auth = { signedIn: false }; deps.setAuth(auth); deps.paintAuthPill(auth); ctx.setStatus(deps.t('status.signedOut')); },
+    getReasoningEffort: () => deps.prefs.reasoningEffort,
+    onReasoningEffortChange: (effort) => {
+      deps.prefs.reasoningEffort = effort;
+      savePrefs(deps.prefs);
+    },
+    loadReasoningCapabilities: () => window.api.aiReasoningCapabilities(),
+    onSignIn: () => openLoginModal({ onAfterLogin: (auth) => {
+      deps.setAuth(auth);
+      deps.paintAuthPill(auth);
+      void window.api.aiReasoningCapabilities?.();
+    } }),
+    onSignOut: async () => {
+      await window.api.authLogout();
+      void window.api.aiReasoningCapabilities?.();
+      const auth = { signedIn: false };
+      deps.setAuth(auth);
+      deps.paintAuthPill(auth);
+      ctx.setStatus(deps.t('status.signedOut'));
+    },
     onFormat: dispatchFormat,
     onInsertTable: (rows, cols) => {
       if (!deps.tryMutateDocument()) return;

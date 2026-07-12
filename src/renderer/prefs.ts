@@ -34,6 +34,10 @@ export type Prefs = {
   htmlModel?: SelectedModel;
   /** v0.4 workspace root path for the file-tree panel (back-filled lazily; no default). */
   workspaceRoot?: string;
+  /** Capability-gated reasoning tier. Persisted while transport verification remains off. */
+  reasoningEffort?: 'none' | 'low' | 'medium' | 'high' | 'xhigh';
+  /** Reserved for a future verified reasoning mode; no mode is currently accepted. */
+  reasoningMode?: string;
 };
 
 const KEY = 'notepad-ai:prefs:v1';
@@ -98,6 +102,18 @@ function remapStaleClaudeModel(sel: SelectedModel | undefined): SelectedModel | 
   const target = STALE_CLAUDE_MODEL_IDS[sel.id];
   return target ? { provider: 'claude', id: target } : sel;
 }
+const ALLOWED_REASONING_EFFORTS = new Set<NonNullable<Prefs['reasoningEffort']>>([
+  'none', 'low', 'medium', 'high', 'xhigh',
+]);
+
+function sanitizeReasoningPrefs(prefs: Prefs): void {
+  if (!ALLOWED_REASONING_EFFORTS.has(prefs.reasoningEffort as NonNullable<Prefs['reasoningEffort']>)) {
+    delete prefs.reasoningEffort;
+  }
+  // `pro` and every other mode are outside the verified transport contract.
+  delete prefs.reasoningMode;
+}
+
 
 /**
  * Pure prefs migration: merges defaults + stored prefs, then back-fills the v1
@@ -122,6 +138,7 @@ export function migratePrefs(parsed: Partial<Prefs> | null | undefined): Prefs {
   merged.blockSelectedModel = remapStaleClaudeModel(merged.blockSelectedModel);
   merged.htmlModel = remapStaleClaudeModel(merged.htmlModel);
   merged.typography = clampTypography(merged.typography);
+  sanitizeReasoningPrefs(merged);
   return merged;
 }
 

@@ -56,6 +56,7 @@ export type ChatRequest = {
   model?: string;
   signal?: AbortSignal;
   maxOutputTokens?: number;
+  reasoningEffort?: 'none' | 'low' | 'medium' | 'high' | 'xhigh';
 };
 
 export type ChatEvent =
@@ -98,6 +99,7 @@ export async function streamChat(req: ChatRequest, onEvent: (e: ChatEvent) => vo
     store: false,
     stream: true,
     ...(req.maxOutputTokens ? { max_output_tokens: req.maxOutputTokens } : {}),
+    ...(req.reasoningEffort ? { reasoning: { effort: req.reasoningEffort } } : {}),
   };
 
   let currentToken = token;

@@ -80,6 +80,8 @@ export type BlockAiDeps = {
   /** Optional — open the AI settings / login modal so the user can re-authenticate
    *  after an `errorKind:'auth'` chat failure (e.g. an expired ChatGPT session). */
   openAiSettings?: () => void;
+  /** Capability-gated reasoning tier from the shared preferences. */
+  getReasoningEffort?: () => 'none' | 'low' | 'medium' | 'high' | 'xhigh' | undefined;
 };
 
 const md = new MarkdownIt({ html: false, linkify: true, breaks: true });
@@ -405,7 +407,15 @@ export function installBlockAi(deps: BlockAiDeps) {
 
     try {
       // Use the block-AI-specific model (default gpt-5.4-mini), not the global one.
-      await window.api.aiChat(id, instructions, [], userMessage, deps.getBlockModel(), 'block');
+      await window.api.aiChat({
+        id,
+        instructions,
+        history: [],
+        userText: userMessage,
+        model: deps.getBlockModel(),
+        surfaceMode: 'block',
+        reasoningEffort: deps.getReasoningEffort?.(),
+      });
     } catch (err: any) {
       optionsEl.innerHTML = `<div class="ba-error">${escapeHtml(err?.message ?? String(err))}</div>`;
       generateBtn.disabled = false;

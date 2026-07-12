@@ -41,6 +41,11 @@ import {
 } from './types';
 import { supportsVision } from './vision-capabilities';
 import { runOcr, type OcrRunner } from './ocr';
+import {
+  sanitizeReasoning,
+  type ReasoningCapabilitiesSnapshot,
+  type ReasoningCapabilityContext,
+} from './reasoning-capabilities';
 
 export type ProviderMap = Partial<Record<AiProviderId, AiProvider>>;
 
@@ -58,6 +63,52 @@ export class ProviderRegistry {
     /** OCR runner for the non-vision image fallback (injectable for tests). */
     private ocr: OcrRunner = runOcr,
   ) {}
+  private reasoningSnapshotGeneration = 0;
+  private reasoningAccountFingerprint = '';
+
+  private bumpReasoningSnapshot(): void {
+    this.reasoningSnapshotGeneration++;
+  }
+
+  private reasoningContext(): ReasoningCapabilityContext {
+    return {
+      featureEnabled: false,
+      accountAvailableModels: new Set(),
+      transportVerifiedEffortsByModel: {},
+      snapshotGeneration: this.reasoningSnapshotGeneration,
+    };
+  }
+
+  async getReasoningCapabilities(): Promise<ReasoningCapabilitiesSnapshot> {
+    const chatgpt = this.providers.chatgpt;
+    let accountModels: string[] = [];
+    let accountFingerprint = 'signed-out';
+
+    if (chatgpt) {
+      try {
+        const status = await chatgpt.getAuthStatus();
+        accountFingerprint = `${status.connected}:${status.accountLabel ?? ''}`;
+        if (status.connected) {
+          accountModels = (await chatgpt.listAccountModels?.() ?? []).map((model) => model.id).sort();
+          accountFingerprint += `:${accountModels.join('\u0000')}`;
+        }
+      } catch {
+        accountFingerprint = 'unavailable';
+      }
+    }
+
+    if (accountFingerprint !== this.reasoningAccountFingerprint) {
+      this.reasoningAccountFingerprint = accountFingerprint;
+      this.bumpReasoningSnapshot();
+    }
+
+    return {
+      featureEnabled: false,
+      snapshotGeneration: this.reasoningSnapshotGeneration,
+      models: [],
+      accountModels,
+    };
+  }
 
   /** Local (Ollama / LM Studio) providers currently registered. */
   private localProviders(): AiProvider[] {
@@ -93,6 +144,7 @@ export class ProviderRegistry {
    * never block the cloud picker.
    */
   async getAvailableModels(force = false): Promise<ModelRef[]> {
+    if (force) this.bumpReasoningSnapshot();
     const curated = getCuratedModels();
     let live: ModelRef[] = [];
     try {
@@ -224,6 +276,7 @@ export class ProviderRegistry {
         return;
       }
     }
+    outgoing = sanitizeReasoning(outgoing, this.reasoningContext());
     await provider.streamChat(outgoing, onEvent);
   }
 }

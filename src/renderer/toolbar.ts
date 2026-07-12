@@ -4,7 +4,7 @@ import { t, getLocale, setLocale, onLocaleChange, type Locale } from './i18n';
 import { modelKey } from './model-key';
 import { stepTypography, type TypographyPref } from './typography';
 import { formatContextWindow, modelContextWindowTokens } from '../main/ai/output-budget';
-import { isAiProviderId, type AiProviderId } from '../main/ai/types';
+import { isAiProviderId, type AiProviderId, type ReasoningEffort } from '../main/ai/types';
 
 export type Theme = 'system' | 'light' | 'dark';
 export type FontSize = 'sm' | 'md' | 'lg';
@@ -44,6 +44,14 @@ export type ToolbarHandlers = {
   /** Undo / redo the editor (CM6 history). */
   onUndo?: () => void;
   onRedo?: () => void;
+  getReasoningEffort?: () => ReasoningEffort | undefined;
+  onReasoningEffortChange?: (effort: Exclude<ReasoningEffort, 'max'>) => void;
+  loadReasoningCapabilities?: () => Promise<{
+    featureEnabled: boolean;
+    snapshotGeneration: number;
+    models: Array<{ modelId: string; efforts: ReasoningEffort[] }>;
+    accountModels: string[];
+  }>;
 };
 
 // ---- SVG glyphs (no emoji) ----
@@ -107,6 +115,12 @@ const BUTTONS: ButtonSpec[] = [
 ];
 
 let cachedModels: { id: string; label?: string; provider?: string; contextWindow?: number }[] = [];
+
+let reasoningCapabilities: {
+  featureEnabled: boolean;
+  snapshotGeneration: number;
+  models: Array<{ modelId: string; efforts: ReasoningEffort[] }>;
+} = { featureEnabled: false, snapshotGeneration: 0, models: [] };
 
 export function createToolbar(parent: HTMLElement, h: ToolbarHandlers) {
   function renderToolbar() {
@@ -180,11 +194,37 @@ export function createToolbar(parent: HTMLElement, h: ToolbarHandlers) {
   renderToolbar();
 
   // ===== Header right-side icon buttons =====
+  function reasoningEffortsForCurrentModel(): Exclude<ReasoningEffort, 'max'>[] {
+    const current = h.getModel();
+    const provider = typeof current === 'object' ? current.provider : 'chatgpt';
+    const modelId = typeof current === 'object' ? current.id : current;
+    if (provider !== 'chatgpt' || !modelId || !reasoningCapabilities.featureEnabled) return [];
+    return (reasoningCapabilities.models.find((model) => model.modelId === modelId)?.efforts ?? [])
+      .filter((effort): effort is Exclude<ReasoningEffort, 'max'> => effort !== 'max');
+  }
+
+  async function refreshReasoningCapabilities(): Promise<void> {
+    if (!h.loadReasoningCapabilities) return;
+    try {
+      const next = await h.loadReasoningCapabilities();
+      if (next.snapshotGeneration === reasoningCapabilities.snapshotGeneration
+        && next.featureEnabled === reasoningCapabilities.featureEnabled
+        && JSON.stringify(next.models) === JSON.stringify(reasoningCapabilities.models)) return;
+      reasoningCapabilities = next;
+      renderControls();
+    } catch {
+      reasoningCapabilities = { featureEnabled: false, snapshotGeneration: 0, models: [] };
+      renderControls();
+    }
+  }
+
   const controls = document.getElementById('navbar-controls') as HTMLDivElement;
   function renderControls() {
+    const efforts = reasoningEffortsForCurrentModel();
     controls.innerHTML = `
       <button class="hdr-icbtn hdr-ai-consultant" id="hdr-sidechat" data-tooltip="${t('tip.sidechat')}" aria-label="${t('tip.sidechat')}"><span class="hdr-ai-label">Ai</span></button>
       <button class="hdr-icbtn" id="hdr-model" data-tooltip="${t('tip.model')}" aria-label="${t('tip.model')}">${ICONS.sparkle}</button>
+      ${efforts.length > 0 ? `<button class="hdr-icbtn" id="hdr-reasoning" data-tooltip="${t('reasoning.effort')}" aria-label="${t('reasoning.effort')}">${t('reasoning.effort')}</button>` : ''}
       <button class="hdr-icbtn" id="hdr-lang" data-tooltip="${t('tip.language')}" aria-label="${t('tip.language')}">${ICONS.lang}</button>
       <button class="hdr-icbtn" id="hdr-font" data-tooltip="${t('tip.font')}" aria-label="${t('tip.font')}">${ICONS.fontSize}</button>
       <button class="hdr-icbtn" id="hdr-theme" data-tooltip="${t('tip.theme')}" aria-label="${t('tip.theme')}">${ICONS.theme}</button>
@@ -193,6 +233,7 @@ export function createToolbar(parent: HTMLElement, h: ToolbarHandlers) {
     wireControls();
   }
   renderControls();
+  void refreshReasoningCapabilities();
 
   function wireControls() {
     const sideChatBtn = controls.querySelector<HTMLButtonElement>('#hdr-sidechat')!;
@@ -207,7 +248,7 @@ export function createToolbar(parent: HTMLElement, h: ToolbarHandlers) {
     modelBtn.addEventListener('click', () => {
       // Kick a non-blocking background refresh so newly started local servers
       // appear on the next open; the menu below renders the current snapshot.
-      void h.loadModels(true).then((m) => { cachedModels = m; });
+      void h.loadModels(true).then((m) => { cachedModels = m; void refreshReasoningCapabilities(); });
       const PROVIDER_LABELS: Record<string, string> = {
         chatgpt: 'ChatGPT', claude: 'Claude', openrouter: 'OpenRouter', ollama: 'Ollama', lmstudio: 'LM Studio', grok: 'Grok',
       };
@@ -243,9 +284,25 @@ export function createToolbar(parent: HTMLElement, h: ToolbarHandlers) {
         items,
         onSelect: (v) => {
           if (v === '__settings__') h.onOpenSettings?.();
-          else h.onModelChange(v);
+          else {
+            h.onModelChange(v);
+            void refreshReasoningCapabilities();
+          }
         },
         minWidth: 240,
+      });
+    });
+    const reasoningBtn = controls.querySelector<HTMLButtonElement>('#hdr-reasoning');
+    reasoningBtn?.addEventListener('click', () => {
+      const current = h.getReasoningEffort?.();
+      openMenu<Exclude<ReasoningEffort, 'max'>>({
+        anchor: reasoningBtn,
+        items: reasoningEffortsForCurrentModel().map((effort) => ({
+          value: effort,
+          label: t(`reasoning.effort.${effort}`),
+          selected: effort === current,
+        })),
+        onSelect: (effort) => h.onReasoningEffortChange?.(effort),
       });
     });
 

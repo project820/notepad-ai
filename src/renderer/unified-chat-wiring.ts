@@ -118,6 +118,7 @@ export function initUnifiedChatWiring(ctx: AppContext, deps: UnifiedChatWiringDe
       onAfterAuthChange: () => {
         deps.invalidateModels();
         void deps.loadModelsCached(true);
+        void window.api.aiReasoningCapabilities?.();
         void (async () => {
           const auth = await window.api.authStatus();
           paintAuthPill(auth);
@@ -197,7 +198,16 @@ export function initUnifiedChatWiring(ctx: AppContext, deps: UnifiedChatWiringDe
     ucInflight = { id, cleanup };
 
     try {
-      await window.api.aiChat(id, instructions, priorTurns, aiText, currentModelArg(), mode === 'write' ? 'write' : 'advise', attachments);
+      await window.api.aiChat({
+        id,
+        instructions,
+        history: priorTurns,
+        userText: aiText,
+        model: currentModelArg(),
+        surfaceMode: mode === 'write' ? 'write' : 'advise',
+        images: attachments,
+        reasoningEffort: deps.prefs.reasoningEffort,
+      });
     } catch (err: any) {
       stream.fail(err?.message ?? String(err));
       cleanup();
@@ -243,7 +253,14 @@ export function initUnifiedChatWiring(ctx: AppContext, deps: UnifiedChatWiringDe
         void window.api.aiCancel(id);
         cleanup();
       };
-      window.api.aiChat(id, HTML_EXPORT_CONTENT_INSTRUCTIONS, [], prompt, modelArg).catch((err) => {
+      window.api.aiChat({
+        id,
+        instructions: HTML_EXPORT_CONTENT_INSTRUCTIONS,
+        history: [],
+        userText: prompt,
+        model: modelArg,
+        surfaceMode: 'html',
+      }).catch((err) => {
         cleanup();
         reject(err instanceof Error ? err : new Error(String(err)));
       });

@@ -97,6 +97,7 @@ export function openLoginModal(cb: ModalCallbacks) {
         dismiss();
       });
     } else if (update.kind === 'success') {
+      void window.api.aiReasoningCapabilities?.();
       body.innerHTML = `
         <div class="login-ok"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="4,10.5 8.5,15 16,6"/></svg></div>
         <p class="lead">${esc(t('login.success'))}</p>
