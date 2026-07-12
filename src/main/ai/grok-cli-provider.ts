@@ -15,6 +15,7 @@ import { randomUUID } from 'node:crypto';
 
 import type { AiChatEvent, AiChatRequest, AiProvider, ModelRef, ProviderAuthStatus } from './types';
 import { runCliCompletion, probeCliAvailability, buildMinimalEnv, type CliSpawn, type CliLineMapper } from './cli-runner';
+import { resolveTrustedCliCommand, type TrustedCliResult } from './cli-trust';
 import { buildCliPrompt } from './cli-prompt';
 
 /**
@@ -62,20 +63,23 @@ export class GrokCliProvider implements AiProvider {
   readonly id = 'grok' as const;
   readonly authKind = 'cli' as const;
 
-  constructor(private deps: { spawn: CliSpawn; command?: string; writePromptFile?: PromptFileWriter }) {}
+  constructor(private deps: { spawn: CliSpawn; resolveCommand?: () => Promise<TrustedCliResult>; writePromptFile?: PromptFileWriter }) {}
 
-  private cmd(): string {
-    return this.deps.command ?? 'grok';
+  private resolveCommand(): Promise<TrustedCliResult> {
+    return this.deps.resolveCommand?.() ?? resolveTrustedCliCommand('grok');
   }
 
   async getAuthStatus(): Promise<ProviderAuthStatus> {
-    const r = await probeCliAvailability({
-      spawn: this.deps.spawn,
-      command: this.cmd(),
-      probeArgs: ['--version'],
-      env: await buildMinimalEnv(),
-      cwd: os.tmpdir(),
-    });
+    const command = await this.resolveCommand();
+    const r = 'error' in command
+      ? { available: false }
+      : await probeCliAvailability({
+        spawn: this.deps.spawn,
+        command: command.command,
+        probeArgs: ['--version'],
+        env: await buildMinimalEnv(),
+        cwd: os.tmpdir(),
+      });
     // `grok --version` only proves installation. Grok has no documented cheap,
     // non-interactive auth probe, so never infer a signed-in session from it.
     return {
@@ -94,12 +98,17 @@ export class GrokCliProvider implements AiProvider {
   }
 
   async streamChat(req: AiChatRequest, onEvent: (e: AiChatEvent) => void): Promise<void> {
+    const command = await this.resolveCommand();
+    if ('error' in command) {
+      onEvent({ kind: 'error', message: command.error, errorKind: 'provider' });
+      return;
+    }
     const writer = this.deps.writePromptFile ?? defaultWritePromptFile;
     const file = await writer(buildCliPrompt(req));
     try {
       await runCliCompletion({
         spawn: this.deps.spawn,
-        command: this.cmd(),
+        command: command.command,
         // Static argv only: the prompt lives in the temp file, not the command line.
         args: [
           '--prompt-file',

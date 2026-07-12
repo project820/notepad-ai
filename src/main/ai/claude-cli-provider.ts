@@ -11,6 +11,7 @@ import os from 'node:os';
 
 import type { AiChatEvent, AiChatRequest } from './types';
 import { runCliCompletion, probeCliAvailability, buildMinimalEnv, type CliSpawn, type CliLineMapper } from './cli-runner';
+import { resolveTrustedCliCommand, type TrustedCliResult } from './cli-trust';
 import { buildCliPrompt } from './cli-prompt';
 import type { StreamSource } from './fallback-provider';
 
@@ -51,17 +52,19 @@ const CLAUDE_DISALLOWED_TOOLS =
   'Bash Read Write Edit MultiEdit NotebookEdit WebSearch WebFetch Glob Grep Task TodoWrite';
 
 export class ClaudeCliProvider implements StreamSource {
-  constructor(private deps: { spawn: CliSpawn; command?: string }) {}
+  constructor(private deps: { spawn: CliSpawn; resolveCommand?: () => Promise<TrustedCliResult> }) {}
 
-  private cmd(): string {
-    return this.deps.command ?? 'claude';
+  private resolveCommand(): Promise<TrustedCliResult> {
+    return this.deps.resolveCommand?.() ?? resolveTrustedCliCommand('claude');
   }
 
   /** Probe install/login state with static args + minimal env (no prompt content). */
   async isAvailable(): Promise<boolean> {
+    const command = await this.resolveCommand();
+    if ('error' in command) return false;
     const r = await probeCliAvailability({
       spawn: this.deps.spawn,
-      command: this.cmd(),
+      command: command.command,
       probeArgs: ['--version'],
       env: await buildMinimalEnv(),
       cwd: os.tmpdir(),
@@ -81,9 +84,14 @@ export class ClaudeCliProvider implements StreamSource {
       CLAUDE_DISALLOWED_TOOLS,
     ];
     if (req.model?.id) args.push('--model', req.model.id);
+    const command = await this.resolveCommand();
+    if ('error' in command) {
+      onEvent({ kind: 'error', message: command.error, errorKind: 'provider' });
+      return;
+    }
     await runCliCompletion({
       spawn: this.deps.spawn,
-      command: this.cmd(),
+      command: command.command,
       args,
       prompt: buildCliPrompt(req),
       mapLine: mapClaudeStreamJson,

@@ -55,6 +55,8 @@ export type ProviderStatusView = {
   hint?: string;
   /** Claude's CLI transport state, distinct from this row's API-key status. */
   cliStatus?: ProviderAuthStatus['cliStatus'];
+  /** User-approved executable path for CLI transport, if one is configured. */
+  cliOverridePath?: string;
 };
 
 export type ProviderSettingsRenderOptions = {
@@ -74,6 +76,8 @@ export type ProviderSettingsOptions = ProviderSettingsRenderOptions & {
   /** Reset a local provider's server URL to its default. */
   onResetLocalUrl?: (provider: 'ollama' | 'lmstudio') => Promise<void> | void;
   onRetryStatus?: () => void;
+  onSelectCliOverride?: (provider: 'claude' | 'grok') => Promise<void> | void;
+  onClearCliOverride?: (provider: 'claude' | 'grok') => Promise<void> | void;
 };
 
 export type ProviderSettingsHandle = {
@@ -222,6 +226,19 @@ function cliHint(s: ProviderStatusView): string {
     : t('settings.prov.cliDisconnectedHint');
   return `<div class="prov-local-note">${escapeHTML(msg)}</div>`;
 }
+function cliOverrideControl(s: ProviderStatusView): string {
+  if (s.loading || (s.provider !== 'claude' && s.provider !== 'grok')) return '';
+  const disabled = s.busy ? ' disabled' : '';
+  const selected = s.cliOverridePath
+    ? `<div class="prov-local-note" data-cli-override-path="${s.provider}">${escapeHTML(s.cliOverridePath)}</div>
+       <button class="prov-btn" data-prov-action="clear-cli-override" data-prov="${s.provider}" type="button"${disabled}>${escapeHTML(t('settings.prov.cliOverrideClear'))}</button>`
+    : '';
+  return `<div class="prov-cli-override">
+    <button class="prov-btn" data-prov-action="select-cli-override" data-prov="${s.provider}" type="button"${disabled}>${escapeHTML(t('settings.prov.cliOverrideSelect'))}</button>
+    ${selected}
+    <div class="prov-cli-warning">${escapeHTML(t('settings.prov.cliOverrideWarning'))}</div>
+  </div>`;
+}
 
 /** Cloud provider footer: a custom model-ID input (mitigates catalog staleness). */
 function customModelControl(s: ProviderStatusView): string {
@@ -270,6 +287,7 @@ function renderProviderRowContent(s: ProviderStatusView): string {
     ${s.error ? `<div class="prov-error" role="alert">${escapeHTML(s.error)}</div>` : ''}
     ${s.errorDetail ? `<div class="prov-error-detail">${escapeHTML(s.errorDetail)}</div>` : ''}
     <div class="prov-controls">${providerControls(s)}</div>
+    ${cliOverrideControl(s)}
     ${s.hint ? `<div class="prov-local-note">${escapeHTML(s.hint)}</div>` : ''}
     ${footer}
     ${cliOnboardingCard(s)}`;
@@ -428,6 +446,12 @@ export function mountProviderSettingsPanel(
     }
     if (action === 'reset-url' && (prov === 'ollama' || prov === 'lmstudio')) {
       return runRowAction(prov, () => opts.onResetLocalUrl?.(prov));
+    }
+    if (action === 'select-cli-override' && (prov === 'claude' || prov === 'grok')) {
+      return runRowAction(prov, () => opts.onSelectCliOverride?.(prov));
+    }
+    if (action === 'clear-cli-override' && (prov === 'claude' || prov === 'grok')) {
+      return runRowAction(prov, () => opts.onClearCliOverride?.(prov));
     }
     if (action === 'set-custom' && prov) {
       const input = parent.querySelector<HTMLInputElement>(`input[data-prov-custom="${prov}"]`);

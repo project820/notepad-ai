@@ -69,7 +69,7 @@ export const CLI_LIMITS = {
 const PATH_PROBE_CMD = 'echo "GJC_PATH=$PATH"';
 const PATH_SENTINEL = 'GJC_PATH=';
 const RESOLVER_ENV_KEYS = ['HOME', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'TMPDIR', 'PATH'] as const;
-const COMMON_BIN_DIRS = ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin'];
+const COMMON_BIN_DIRS = ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin', '/Applications/cmux.app/Contents/Resources/bin'];
 
 /** Injectable async shell exec (default over node:child_process); overridable in tests. */
 export type ShellExecFn = (

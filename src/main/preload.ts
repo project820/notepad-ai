@@ -144,6 +144,12 @@ const api = {
     partial: { ollama?: string; lmstudio?: string },
   ): Promise<{ ollama: string; lmstudio: string }> =>
     ipcRenderer.invoke('local-ai:set-config', partial),
+  cliOverrides: (): Promise<Record<'claude' | 'grok', { path: string } | null>> =>
+    ipcRenderer.invoke('cli:overrides'),
+  cliSelectOverride: (cli: 'claude' | 'grok'): Promise<{ ok: boolean; path?: string; error?: string; cancelled?: boolean }> =>
+    ipcRenderer.invoke('cli:select-override', cli),
+  cliClearOverride: (cli: 'claude' | 'grok'): Promise<void> =>
+    ipcRenderer.invoke('cli:clear-override', cli),
 
 
   projectWizardStart: (projectFolder: string): Promise<ProjectWizardStateResult> =>

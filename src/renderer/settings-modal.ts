@@ -40,9 +40,10 @@ type ProviderSnapshot = {
   statusLoadFailed?: boolean;
   config?: { ollama: string; lmstudio: string };
   models?: ModelRef[];
+  cliOverrides?: Record<'claude' | 'grok', { path: string } | null>;
 };
 
-type ProviderSnapshotPatch = Pick<ProviderSnapshot, 'statuses' | 'statusLoadFailed' | 'config' | 'models'>;
+type ProviderSnapshotPatch = Pick<ProviderSnapshot, 'statuses' | 'statusLoadFailed' | 'config' | 'models' | 'cliOverrides'>;
 
 function reconcile(snapshot: ProviderSnapshot, patch: ProviderSnapshotPatch): ProviderSnapshot {
   return { ...snapshot, ...patch };
@@ -76,7 +77,11 @@ function localizedProviderStatusError(s: ProviderAuthStatus): string | undefined
   return s.error ? t('settings.prov.error.unknown') : undefined;
 }
 
-export function toView(s: ProviderAuthStatus, local: LocalViewContext): ProviderStatusView | null {
+export function toView(
+  s: ProviderAuthStatus,
+  local: LocalViewContext,
+  cliOverrides?: Record<'claude' | 'grok', { path: string } | null>,
+): ProviderStatusView | null {
   if (s.authKind === 'local' && (s.provider === 'ollama' || s.provider === 'lmstudio')) {
     // Local servers are discovery, not auth: render a URL row + run-server hint.
     return {
@@ -106,6 +111,7 @@ export function toView(s: ProviderAuthStatus, local: LocalViewContext): Provider
       error: localizedProviderStatusError(s),
       errorCode: s.errorCode,
       errorDetail: s.error,
+      cliOverridePath: s.provider === 'grok' ? cliOverrides?.grok?.path : undefined,
     };
   }
   if (s.provider !== 'chatgpt' && s.provider !== 'claude' && s.provider !== 'openrouter') return null;
@@ -124,6 +130,7 @@ export function toView(s: ProviderAuthStatus, local: LocalViewContext): Provider
     // Claude uses the local `claude` CLI first (free); the API key is an optional fallback.
     cliStatus: s.cliStatus,
     hint: s.provider === 'claude' && !s.errorCode ? t('settings.prov.claudeCliHint') : undefined,
+    cliOverridePath: s.provider === 'claude' ? cliOverrides?.claude?.path : undefined,
   };
 }
 
@@ -173,7 +180,7 @@ export function openSettingsModal(deps: SettingsModalDeps): void {
     return KNOWN_PROVIDER_ROWS.map((row) => {
       const status = statusesByProvider.get(row.provider);
       if (!status) return { ...row, loading: !statusResultWasEmpty };
-      return toView(status, local) ?? { ...row, loading: true };
+      return toView(status, local, snapshot.cliOverrides) ?? { ...row, loading: true };
     });
   };
 
@@ -195,6 +202,7 @@ export function openSettingsModal(deps: SettingsModalDeps): void {
     let statusRequest: Promise<ProviderAuthStatus[]>;
     let configRequest: Promise<{ ollama: string; lmstudio: string }>;
     let modelsRequest: Promise<ModelRef[]>;
+    let cliOverridesRequest: Promise<Record<'claude' | 'grok', { path: string } | null>>;
     try {
       statusRequest = window.api.aiProvidersStatus();
     } catch {
@@ -210,6 +218,11 @@ export function openSettingsModal(deps: SettingsModalDeps): void {
     } catch {
       modelsRequest = Promise.reject();
     }
+    try {
+      cliOverridesRequest = window.api.cliOverrides();
+    } catch {
+      cliOverridesRequest = Promise.reject();
+    }
     const statusDone = statusRequest.then(
       (statuses) => patchFromSnapshot(gen, { statuses, statusLoadFailed: false }),
       () => patchFromSnapshot(gen, { statusLoadFailed: true }),
@@ -220,6 +233,10 @@ export function openSettingsModal(deps: SettingsModalDeps): void {
     );
     void modelsRequest.then(
       (models) => patchFromSnapshot(gen, { models }),
+      () => patchFromSnapshot(gen, {}),
+    );
+    void cliOverridesRequest.then(
+      (cliOverrides) => patchFromSnapshot(gen, { cliOverrides }),
       () => patchFromSnapshot(gen, {}),
     );
     return statusDone;
@@ -288,6 +305,14 @@ export function openSettingsModal(deps: SettingsModalDeps): void {
         /* ignore */
       }
       deps.onAfterAuthChange?.();
+      await loadProviders();
+    },
+    onSelectCliOverride: async (provider) => {
+      await window.api.cliSelectOverride(provider);
+      await loadProviders();
+    },
+    onClearCliOverride: async (provider) => {
+      await window.api.cliClearOverride(provider);
       await loadProviders();
     },
   });

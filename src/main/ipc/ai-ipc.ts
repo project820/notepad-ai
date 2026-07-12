@@ -3,6 +3,7 @@ import { handleTrusted } from '../ipc-guard';
 import { htmlExportMaxTokens, isHtmlExportInstructions } from '../ai/output-budget';
 import { isAiProviderId, validateImageAttachments, validateChatTextPayload, type AiProviderId, type ReasoningEffort } from '../ai/types';
 import type { ProviderRegistry } from '../ai/provider-registry';
+import { getCliOverrideStore, type TrustedCliName } from '../ai/cli-trust';
 
 type AiIpcDeps = {
   getRegistry: () => ProviderRegistry;
@@ -99,4 +100,26 @@ export function registerAiIpc({ getRegistry }: AiIpcDeps): void {
   handleTrusted('local-ai:get-config', async () => getRegistry().getLocalConfig());
   handleTrusted('local-ai:set-config', async (_e, partial: { ollama?: string; lmstudio?: string }) =>
     getRegistry().setLocalConfig(partial ?? {}));
+  handleTrusted('cli:overrides', async () => {
+    const store = getCliOverrideStore();
+    const entries = await Promise.all((['claude', 'grok'] as const).map(async (cli) => {
+      const value = await store.get(cli);
+      return [cli, value ? { path: value.identity.realpath } : null] as const;
+    }));
+    return Object.fromEntries(entries) as Record<'claude' | 'grok', { path: string } | null>;
+  });
+  handleTrusted('cli:select-override', async (event, cli: TrustedCliName) => {
+    if (cli !== 'claude' && cli !== 'grok') return { ok: false, error: 'Unsupported CLI.' };
+    const { dialog, BrowserWindow } = require('electron') as typeof import('electron');
+    const options: import('electron').OpenDialogOptions = { properties: ['openFile'], title: 'Select CLI executable' };
+    const owner = BrowserWindow.fromWebContents(event.sender);
+    const result = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options);
+    if (result.canceled || !result.filePaths[0]) return { ok: false, cancelled: true };
+    const approved = await getCliOverrideStore().approve(cli, result.filePaths[0]);
+    return 'error' in approved ? { ok: false, error: approved.error } : { ok: true, path: result.filePaths[0] };
+  });
+  handleTrusted('cli:clear-override', async (_event, cli: TrustedCliName) => {
+    if (cli !== 'claude' && cli !== 'grok') throw new Error('Unsupported CLI.');
+    await getCliOverrideStore().clear(cli);
+  });
 }
