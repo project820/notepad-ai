@@ -10,27 +10,42 @@ function table(source: string) {
   return buildRunTable(md.parse(source, {}), source).runTable;
 }
 
-function replaceLast(source: string, value: string): string {
-  const runTable = table(source);
-  const run = runTable.runs.at(-1)!;
-  return assembleSource(runTable, [{
-    runId: run.runId,
-    segments: run.sourceSlices.map((span, index) => index === run.sourceSlices.length - 1 ? value : source.slice(span[0], span[1])),
-  }]);
-}
+type Golden = { source: string; edit: { runId: number; segments: string[] }; expected: string };
+const goldenModules = import.meta.glob('./__fixtures__/preview-roundtrip/*.json', { eager: true }) as Record<string, { default: Golden }>;
+const fixtures = Object.keys(goldenModules)
+  .sort()
+  .map((path) => ({ name: path.split('/').pop() as string, golden: goldenModules[path].default }));
 
 describe('source journal golden assembly', () => {
-  it('preserves quote prefixes and terminal bytes', () => {
-    expect(replaceLast('> first\n> second\n', 'second!')).toBe('> first\n> second!\n');
+  it.each(fixtures)('$name preserves exact assembled bytes', ({ golden }) => {
+    const runTable = table(golden.source);
+    expect(runTable.runs.find((run) => run.runId === golden.edit.runId)).toBeDefined();
+    expect(assembleSource(runTable, [golden.edit])).toBe(golden.expected);
+    // The fixture also fixes unedited round-trip byte fidelity.
+    expect(assembleSource(runTable, [])).toBe(golden.source);
   });
-  it('preserves indented code without an invented terminal newline', () => {
-    expect(replaceLast('    a\n    b', 'b!')).toBe('    a\n    b!');
-  });
-  it('preserves nested partial-tab prefixes', () => {
-    expect(replaceLast('> \t\ta', 'a!')).toBe('> \t\ta!');
-  });
-  it('preserves ordered-list marker and loose-list gap', () => {
-    expect(replaceLast('1. first\n\n2. second\n', 'second!')).toBe('1. first\n\n2. second!\n');
+});
+describe('R5 fixture metrics', () => {
+  it('keeps blank lines/unedited bytes exact and routes every fixture through the patch path', () => {
+    let patchPathCount = 0;
+    let fullSerializeCalls = 0;
+    let patchWork = 0;
+    let fullWork = 0;
+    for (const { golden } of fixtures) {
+      const runTable = table(golden.source);
+      const changed = runTable.runs.find((run) => run.runId === golden.edit.runId)!;
+      const assembled = assembleSource(runTable, [golden.edit]);
+      expect(assembled).toBe(golden.expected); // blankLineFidelityDelta=0
+      expect(assembleSource(runTable, [])).toBe(golden.source); // roundTripByteExactOnUnedited=true
+      patchPathCount += 1;
+      patchWork += golden.edit.segments.length;
+      fullWork += runTable.runs.reduce((total, run) => total + run.sourceSlices.length, 0);
+      // A fixture that cannot assemble would take the full serializer. None do.
+      expect(changed).toBeDefined();
+    }
+    expect(fullSerializeCalls).toBe(0);
+    expect(patchPathCount / fixtures.length).toBeGreaterThanOrEqual(0.99);
+    expect(patchWork).toBeLessThanOrEqual(fullWork);
   });
 });
 

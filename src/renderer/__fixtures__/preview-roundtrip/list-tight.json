@@ -1,0 +1,1 @@
+{"source":"- first\n- second\n","edit":{"runId":1,"segments":["second!"]},"expected":"- first\n- second!\n"}

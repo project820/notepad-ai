@@ -3,14 +3,17 @@ import { sanitizeReasoning, type ReasoningCapabilityContext } from '../main/ai/r
 import { migratePrefs } from '../renderer/prefs';
 import type { AiChatRequest, AiProvider } from '../main/ai/types';
 import { ProviderRegistry } from '../main/ai/provider-registry';
+import { appendWriteReanchor } from '../main/ai/messages';
 const auth = vi.hoisted(() => ({
   getAccessToken: vi.fn(),
   forceRefreshAccessToken: vi.fn(),
+  getStatus: vi.fn(),
 }));
 
 vi.mock('../main/codex-auth', () => ({
   getAccessToken: auth.getAccessToken,
   forceRefreshAccessToken: auth.forceRefreshAccessToken,
+  getStatus: auth.getStatus,
 }));
 
 
@@ -25,7 +28,7 @@ const request = (overrides: Partial<AiChatRequest> = {}): AiChatRequest => ({
 const verifiedContext = (): ReasoningCapabilityContext => ({
   featureEnabled: true,
   accountAvailableModels: new Set(['gpt-5.6-sol']),
-  transportVerifiedEffortsByModel: { 'gpt-5.6-sol': ['low', 'max'] },
+  transportVerifiedEffortsByModel: { 'gpt-5.6-sol': ['high', 'max'] },
   snapshotGeneration: 1,
 });
 
@@ -38,7 +41,7 @@ describe('sanitizeReasoning', () => {
   it('strips unknown model, non-ChatGPT provider, unverified effort, and max', () => {
     expect(sanitizeReasoning(request({ model: { provider: 'chatgpt', id: 'other' }, reasoningEffort: 'low' }), verifiedContext()).reasoningEffort).toBeUndefined();
     expect(sanitizeReasoning(request({ model: { provider: 'claude', id: 'gpt-5.6-sol' }, reasoningEffort: 'low' }), verifiedContext()).reasoningEffort).toBeUndefined();
-    expect(sanitizeReasoning(request({ reasoningEffort: 'high' }), verifiedContext()).reasoningEffort).toBeUndefined();
+    expect(sanitizeReasoning(request({ reasoningEffort: 'low' }), verifiedContext()).reasoningEffort).toBeUndefined();
     expect(sanitizeReasoning(request({ reasoningEffort: 'max' }), verifiedContext()).reasoningEffort).toBeUndefined();
   });
 });
@@ -102,30 +105,65 @@ describe('G5 request wiring', () => {
   });
 });
  
-describe('ChatGPT exact request body after flag-off sanitization', () => {
-  it.each(['unified', 'block', 'HTML export', 'max/pro dropped'])(
-    '%s omits reasoning',
-    async () => {
-      auth.getAccessToken.mockResolvedValue('token');
-      const bodies: unknown[] = [];
-      global.fetch = vi.fn(async (_url: unknown, init: RequestInit) => {
-        bodies.push(JSON.parse(String(init.body)));
-        return new Response(null, { status: 200 });
-      }) as unknown as typeof fetch;
+describe('ChatGPT exact request body after sanitization', () => {
+  const expectedBody = (reasoning?: 'high', surfaceMode?: AiChatRequest['surfaceMode']) => ({
+    model: 'gpt-5.6-sol',
+    instructions: appendWriteReanchor('instructions', surfaceMode),
+    input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'message' }] }],
+    store: false,
+    stream: true,
+    ...(reasoning ? { reasoning: { effort: reasoning } } : {}),
+  });
 
-      const { ChatGptProvider } = await import('../main/ai/chatgpt-provider');
-      await new ChatGptProvider().streamChat(
-        request({ surfaceMode: 'html', reasoningEffort: undefined }),
-        () => {},
-      );
+  async function streamBody(
+    req: AiChatRequest,
+    context?: ReasoningCapabilityContext,
+  ): Promise<Record<string, unknown>> {
+    auth.getStatus.mockResolvedValue({ signedIn: true });
+    auth.getAccessToken.mockResolvedValue('token');
+    const bodies: Record<string, unknown>[] = [];
+    global.fetch = vi.fn(async (_url: unknown, init: RequestInit) => {
+      bodies.push(JSON.parse(String(init.body)));
+      return new Response(null, { status: 200 });
+    }) as unknown as typeof fetch;
 
-      expect(bodies).toEqual([{
-        model: 'gpt-5.6-sol',
-        instructions: 'instructions',
-        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'message' }] }],
-        store: false,
-        stream: true,
-      }]);
-    },
-  );
+    const { ChatGptProvider } = await import('../main/ai/chatgpt-provider');
+    const registry = new ProviderRegistry(
+      {} as never,
+      { chatgpt: new ChatGptProvider() },
+      undefined,
+      undefined,
+      undefined,
+      context,
+    );
+    await registry.streamProviderChat(req, () => {});
+    expect(bodies).toHaveLength(1);
+    return bodies[0];
+  }
+
+  it('does not transmit unified effort when the production flag is off', async () => {
+    expect(await streamBody(request({ surfaceMode: 'write', reasoningEffort: 'high' })))
+      .toEqual(expectedBody(undefined, 'write'));
+  });
+
+  it('wires verified unified and Block AI efforts through to the ChatGPT body', async () => {
+    expect(await streamBody(request({ surfaceMode: 'write', reasoningEffort: 'high' }), verifiedContext()))
+      .toEqual(expectedBody('high', 'write'));
+    expect(await streamBody(request({ surfaceMode: 'block', reasoningEffort: 'high' }), verifiedContext()))
+      .toEqual(expectedBody('high', 'block'));
+  });
+
+  it('keeps HTML export at the server default even with a verified capability', async () => {
+    expect(await streamBody(request({ surfaceMode: 'html' }), verifiedContext()))
+      .toEqual(expectedBody(undefined, 'html'));
+  });
+
+  it('strips max and never transmits a pro mode', async () => {
+    const req = { ...request({ surfaceMode: 'write', reasoningEffort: 'max' }), reasoningMode: 'pro' };
+    const body = await streamBody(req, verifiedContext());
+
+    expect(body).toEqual(expectedBody(undefined, 'write'));
+    expect(body).not.toHaveProperty('reasoning');
+    expect(body).not.toHaveProperty('reasoningMode');
+  });
 });

@@ -60,6 +60,8 @@ export class ProviderRegistry {
     private localConfig?: LocalConfigStore,
     /** OCR runner for the non-vision image fallback (injectable for tests). */
     private ocr: OcrRunner = runOcr,
+    /** Explicit capability seam for focused transport tests. Production leaves this unset. */
+    private reasoningContextOverride?: ReasoningCapabilityContext,
   ) {}
   private reasoningSnapshotGeneration = 0;
   private reasoningAccountFingerprint = '';
@@ -69,7 +71,7 @@ export class ProviderRegistry {
   }
 
   private reasoningContext(): ReasoningCapabilityContext {
-    return {
+    return this.reasoningContextOverride ?? {
       featureEnabled: false,
       accountAvailableModels: new Set(),
       transportVerifiedEffortsByModel: {},

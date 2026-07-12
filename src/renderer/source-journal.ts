@@ -30,7 +30,7 @@ type DomContentRun = {
   syntheticIndentPrefixes?: readonly string[];
 };
 type JournalInterval = SourceOnlySlice | DomContentRun;
-type MapId = number;
+export type MapId = number;
 
 export type NormalizedEdit = {
   inputType: string;
@@ -135,6 +135,23 @@ function subtypeFor(tokens: ReturnType<MarkdownIt['parse']>, index: number): Con
   return 'paragraph';
 }
 
+function activeTokenSourceRange(
+  tokens: ReturnType<MarkdownIt['parse']>,
+  index: number,
+  source: string,
+): [number, number] | null {
+  const stack: ReturnType<MarkdownIt['parse']> = [];
+  for (let i = 0; i < index; i++) {
+    const token = tokens[i];
+    if (token.nesting === 1) stack.push(token);
+    else if (token.nesting === -1) stack.pop();
+  }
+  for (let i = stack.length - 1; i >= 0; i--) {
+    const range = tokenSourceRange(source, stack[i]);
+    if (range) return range;
+  }
+  return null;
+}
 function tokenSourceRange(source: string, token: ReturnType<MarkdownIt['parse']>[number]): [number, number] | null {
   if (!token.map) return null;
   const lines = source.match(/.*(?:\n|$)/g) ?? [];
@@ -153,15 +170,15 @@ export function buildRunTable(tokens: ReturnType<MarkdownIt['parse']>, source: s
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i];
     const subtype = subtypeFor(tokens, i);
-    const range = tokenSourceRange(source, token);
+    const range = tokenSourceRange(source, token) ?? activeTokenSourceRange(tokens, i, source);
     if (!subtype || !range || (!token.content && token.type !== 'inline')) continue;
     let slices: ByteInterval[];
     let syntheticIndentPrefixes: string[] | undefined;
     if (token.type === 'fence') {
       const openingEnd = source.indexOf('\n', range[0]);
-      const closeStart = source.lastIndexOf('\n', range[1] - 1);
-      const bodyStart = openingEnd < 0 ? range[1] : openingEnd + 1;
-      const bodyEnd = closeStart > bodyStart && /^\s*(```|~~~)/.test(source.slice(closeStart + 1, range[1])) ? closeStart + 1 : range[1];
+      const bodyStart = openingEnd < 0 ? source.length : openingEnd + 1;
+      const closing = source.slice(bodyStart).search(/^ {0,3}(`{3,}|~{3,})/m);
+      const bodyEnd = closing < 0 ? source.length : bodyStart + closing;
       slices = [byteSpan(source, bodyStart, bodyEnd)];
     } else if (token.type === 'code_block') {
       const area = source.slice(range[0], range[1]);

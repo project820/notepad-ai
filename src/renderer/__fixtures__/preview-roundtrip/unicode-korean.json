@@ -1,0 +1,1 @@
+{"source":"첫 줄\n\n\n둘째 줄\n","edit":{"runId":1,"segments":["둘째 줄!"]},"expected":"첫 줄\n\n\n둘째 줄!\n"}

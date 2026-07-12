@@ -39,13 +39,15 @@ function installApi() {
   const status = deferred<ProviderAuthStatus[]>();
   const config = deferred<{ ollama: string; lmstudio: string }>();
   const modelSnapshot = deferred<ModelRef[]>();
+  const authLogout = vi.fn().mockResolvedValue(undefined);
   (window as unknown as { api: unknown }).api = {
     aiProvidersStatus: vi.fn(() => status.promise),
     localAiGetConfig: vi.fn(() => config.promise),
     aiModels: vi.fn(() => modelSnapshot.promise),
+    authLogout,
     mdHandlerStatus: vi.fn().mockResolvedValue({ supported: false, registered: false }),
   };
-  return { status, config, models: modelSnapshot };
+  return { status, config, models: modelSnapshot, authLogout };
 }
 
 function providerDom() {
@@ -77,6 +79,78 @@ describe('openSettingsModal R1 reconciliation', () => {
     expect((window.api.aiProvidersStatus as ReturnType<typeof vi.fn>)).toHaveBeenCalledOnce();
     expect((window.api.localAiGetConfig as ReturnType<typeof vi.fn>)).toHaveBeenCalledOnce();
     expect((window.api.aiModels as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(true);
+  });
+  it('records emptyPanelFrames=0 at the synchronous first paint', () => {
+    installApi();
+    let emptyPanelFrames = 0;
+
+    openSettingsModal({ onSetCustomModel: vi.fn() });
+    if (document.querySelectorAll('#settings-providers [data-prov-row]').length === 0) emptyPanelFrames += 1;
+
+    expect(emptyPanelFrames).toBe(0);
+    expect(document.querySelectorAll('#settings-providers [data-prov-row]')).toHaveLength(6);
+  });
+
+  it('records awaitedModelsBeforePaint=false while aiModels remains pending', () => {
+    installApi(); // Its models promise deliberately never resolves.
+    let awaitedModelsBeforePaint = true;
+
+    openSettingsModal({ onSetCustomModel: vi.fn() });
+    if (document.querySelectorAll('#settings-providers [data-prov-row]').length === 6) {
+      awaitedModelsBeforePaint = false;
+    }
+
+    expect(awaitedModelsBeforePaint).toBe(false);
+    expect(document.querySelectorAll('#settings-providers [data-prov-row][aria-busy="true"]')).toHaveLength(6);
+  });
+
+  it('records fullRemountCountPerAction=0 while an auth action preserves panel and row identities', async () => {
+    const api = installApi();
+    openSettingsModal({ onSetCustomModel: vi.fn() });
+    api.status.resolve(statuses);
+    await flush();
+
+    const panelRoot = document.querySelector<HTMLElement>('#settings-providers .prov-root')!;
+    const rows = [...document.querySelectorAll<HTMLElement>('#settings-providers [data-prov-row]')];
+    let fullRemountCountPerAction = 0;
+    const observer = new MutationObserver((records) => {
+      for (const record of records) {
+        for (const node of record.removedNodes) {
+          if (node === panelRoot) fullRemountCountPerAction += 1;
+        }
+      }
+    });
+    observer.observe(document.querySelector('#settings-providers')!, { childList: true });
+
+    document.querySelector<HTMLButtonElement>('[data-prov-action="signout"]')!.click();
+    await flush();
+    observer.disconnect();
+
+    expect(api.authLogout).toHaveBeenCalledOnce();
+    expect(document.querySelector('#settings-providers .prov-root')).toBe(panelRoot);
+    expect([...document.querySelectorAll<HTMLElement>('#settings-providers [data-prov-row]')]).toEqual(rows);
+    expect(fullRemountCountPerAction).toBe(0);
+  });
+
+  it('records stalePaintAfterClose=0 for late IPC resolutions', async () => {
+    const api = installApi();
+    openSettingsModal({ onSetCustomModel: vi.fn() });
+    await closeModal();
+
+    let stalePaintAfterClose = 0;
+    const observer = new MutationObserver((records) => {
+      stalePaintAfterClose += records.reduce((count, record) => count + record.addedNodes.length + record.removedNodes.length, 0);
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    api.status.resolve(statuses);
+    api.config.resolve({ ollama: 'http://late', lmstudio: 'http://late' });
+    api.models.resolve(models);
+    await flush();
+    observer.disconnect();
+
+    expect(stalePaintAfterClose).toBe(0);
+    expect(document.querySelector('.settings-modal-root')).toBeNull();
   });
 
   it('buffers config/models until status, then patches only changed slots while retaining focus and row identity', async () => {

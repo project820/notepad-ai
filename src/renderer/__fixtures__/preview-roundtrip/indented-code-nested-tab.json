@@ -1,1 +1,1 @@
-{"source":"> \t\ta","runId":0,"replacement":["a!"],"expected":"> \t\ta!"}
+{"source":"> \t\ta","edit":{"runId":0,"segments":["a!"]},"expected":"> \t\ta!"}

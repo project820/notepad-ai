@@ -1,5 +1,5 @@
 import { buildConvertedHtmlFrame } from './sanitize-html';
-import { classifyGapDisposition, type NormalizedEdit } from './source-journal';
+import { classifyGapDisposition, type MapId, type NormalizedEdit, type SourceOnlySlice } from './source-journal';
 
 
 import type { AppContext } from './app-context';
@@ -14,10 +14,109 @@ type PreviewEditingDeps = {
   recordPreviewInput: () => boolean;
 };
 
+export type PreviewEditSnapshot = {
+  inputType: string;
+  ownerIds: MapId[];
+  selectedIds: MapId[];
+  blockCount: number;
+  range: NormalizedEdit['range'];
+};
+
+function ownerFor(node: Node | null): HTMLElement | null {
+  const element = node?.nodeType === Node.ELEMENT_NODE ? node as Element : node?.parentElement;
+  return element?.closest<HTMLElement>('[data-run-id]') ?? null;
+}
+
+function ownerIdsInRange(root: HTMLElement, range: Range | StaticRange | null): MapId[] {
+  if (!range) return [];
+  const owners = Array.from(root.querySelectorAll<HTMLElement>('[data-run-id]'));
+  return owners
+    .filter((owner) => {
+      const ownerRange = document.createRange();
+      ownerRange.selectNodeContents(owner);
+      return (range as Range).intersectsNode(owner) || range.toString() === ownerRange.toString();
+    })
+    .map((owner) => Number(owner.dataset.runId))
+    .filter(Number.isInteger);
+}
+
+function selectionRange(event: InputEvent): Range | StaticRange | null {
+  const targetRanges = event.getTargetRanges?.() ?? [];
+  if (targetRanges.length > 0) return targetRanges[0];
+  const selection = window.getSelection();
+  return selection?.rangeCount ? selection.getRangeAt(0) : null;
+}
+
+function normalizedRange(root: HTMLElement, range: Range | StaticRange | null): NormalizedEdit['range'] {
+  if (!range) return { kind: 'collapsed', edge: 'interior' };
+  if (!range.collapsed) {
+    const selected = ownerIdsInRange(root, range);
+    const startOwner = ownerFor(range.startContainer);
+    const endOwner = ownerFor(range.endContainer);
+    const whole = selected.length > 0 && selected.every((id) => {
+      const owner = root.querySelector<HTMLElement>(`[data-run-id="${id}"]`);
+      return owner != null && range.toString().includes(owner.textContent ?? '');
+    });
+    return { kind: 'selection', coverage: whole && startOwner && endOwner ? 'whole' : 'partial' };
+  }
+  const owner = ownerFor(range.startContainer);
+  const text = owner?.textContent ?? '';
+  const offset = range.startOffset;
+  if (offset === 0) return { kind: 'collapsed', edge: 'blockStart' };
+  if (range.startContainer.nodeType === Node.TEXT_NODE && offset >= text.length) return { kind: 'collapsed', edge: 'blockEnd' };
+  return { kind: 'collapsed', edge: 'interior' };
+}
+
+function previewBlockCount(root: HTMLElement): number {
+  return root.querySelectorAll('p,h1,h2,h3,h4,h5,h6,li,blockquote,pre,td,th,dd').length;
+}
+
+export function capturePreviewEditSnapshot(root: HTMLElement, event: InputEvent): PreviewEditSnapshot {
+  const range = selectionRange(event);
+  const ownerIds = Array.from(root.querySelectorAll<HTMLElement>('[data-run-id]'))
+    .map((owner) => Number(owner.dataset.runId))
+    .filter(Number.isInteger);
+  const selectedIds = ownerIdsInRange(root, range);
+  return { inputType: event.inputType, ownerIds, selectedIds, blockCount: previewBlockCount(root), range: normalizedRange(root, range) };
+}
+
+export function normalizePreviewEdit(
+  root: HTMLElement,
+  event: InputEvent,
+  before: PreviewEditSnapshot,
+  sourceGaps: NormalizedEdit['boundaryGaps'] = [],
+): NormalizedEdit {
+  const allAfter = Array.from(root.querySelectorAll<HTMLElement>('[data-run-id]'))
+    .map((owner) => Number(owner.dataset.runId))
+    .filter(Number.isInteger);
+  const beforeIds = before.selectedIds.length > 0 ? before.selectedIds : before.ownerIds;
+  let afterIds = allAfter.filter((id) => beforeIds.includes(id));
+  const afterBlocks = previewBlockCount(root);
+  if (event.inputType === 'insertParagraph' && afterBlocks > before.blockCount && afterIds.length === beforeIds.length) {
+    afterIds = [...afterIds, -afterBlocks];
+  }
+  const removed = beforeIds.filter((id) => !afterIds.includes(id));
+  const added = afterIds.filter((id) => !beforeIds.includes(id));
+  const delta = added.length === 0 ? (removed.length === 0 ? 'none' : 'remove') : (removed.length === 0 ? 'add' : 'replace');
+  const ordered = before.ownerIds;
+  const first = Math.min(...beforeIds.map((id) => ordered.indexOf(id)).filter((index) => index >= 0), Infinity);
+  const last = Math.max(...beforeIds.map((id) => ordered.indexOf(id)));
+  const boundary = first === 0 && last === ordered.length - 1 ? 'all' : first === 0 ? 'leading' : last === ordered.length - 1 ? 'trailing' : 'middle';
+  return {
+    inputType: event.inputType,
+    replacementKind: event.inputType === 'insertFromPaste' ? 'paste' : event.inputType.startsWith('delete') ? 'none' : 'text',
+    boundary,
+    boundaryGaps: sourceGaps,
+    range: before.range,
+    affected: { beforeIds, afterIds, delta },
+  };
+}
+
 export function initPreviewEditing(ctx: AppContext, deps: PreviewEditingDeps) {
   let previewSyncTimer: ReturnType<typeof setTimeout> | null = null;
   let previewEditPending = false;
   let pendingEdit: NormalizedEdit | null = null;
+  let beforeEdit: PreviewEditSnapshot | null = null;
   const pendingRunIds = new Set<number>();
 
   function runIdFor(target: EventTarget | null): number | null {
@@ -27,16 +126,23 @@ export function initPreviewEditing(ctx: AppContext, deps: PreviewEditingDeps) {
     return Number.isInteger(id) ? id : null;
   }
 
+  function sourceGaps(): NormalizedEdit['boundaryGaps'] {
+    const table = ctx.preview.getRunTable?.();
+    if (!table) return [];
+    const first = table.runs[0]?.sourceSlices[0]?.[0] ?? 0;
+    const last = table.runs.at(-1)?.sourceSlices.at(-1)?.[1] ?? 0;
+    return table.intervals
+      .filter((interval): interval is SourceOnlySlice => interval.kind !== 'content')
+      .map((interval, gapId) => ({
+        gapId,
+        sourceInterval: interval.span,
+        role: interval.span[1] <= first ? 'before' : interval.span[0] >= last ? 'after' : 'between',
+      }));
+  }
+
   function captureEdit(event: InputEvent): void {
-    const id = runIdFor(event.target);
-    pendingEdit = {
-      inputType: event.inputType,
-      replacementKind: event.inputType === 'insertFromPaste' ? 'paste' : event.inputType.startsWith('delete') ? 'none' : 'text',
-      boundary: 'middle',
-      boundaryGaps: [],
-      range: { kind: 'collapsed', edge: 'interior' },
-      affected: { beforeIds: id == null ? [] : [id], afterIds: id == null ? [] : [id], delta: 'none' },
-    };
+    pendingEdit = null;
+    beforeEdit = capturePreviewEditSnapshot(ctx.preview.el, event);
   }
 
   function captureCheckboxEdit(target: EventTarget | null): void {
@@ -45,7 +151,7 @@ export function initPreviewEditing(ctx: AppContext, deps: PreviewEditingDeps) {
       inputType: 'insertReplacementText',
       replacementKind: 'text',
       boundary: 'middle',
-      boundaryGaps: [],
+      boundaryGaps: sourceGaps(),
       range: { kind: 'collapsed', edge: 'interior' },
       affected: { beforeIds: id == null ? [] : [id], afterIds: id == null ? [] : [id], delta: 'none' },
     };
@@ -55,6 +161,7 @@ export function initPreviewEditing(ctx: AppContext, deps: PreviewEditingDeps) {
     previewSyncTimer = null;
     previewEditPending = false;
     pendingEdit = null;
+    beforeEdit = null;
     pendingRunIds.clear();
     ctx.editingInPreview = false;
     ctx.preview.setDoc(ctx.editor.getDoc());
@@ -119,8 +226,17 @@ export function initPreviewEditing(ctx: AppContext, deps: PreviewEditingDeps) {
       restorePreviewFromSource();
       return;
     }
+    const input = event as InputEvent | undefined;
+    if (!pendingEdit && beforeEdit) pendingEdit = normalizePreviewEdit(
+      ctx.preview.el,
+      input?.inputType ? input : { inputType: beforeEdit.inputType } as InputEvent,
+      beforeEdit,
+      sourceGaps(),
+    );
+    beforeEdit = null;
     const id = runIdFor(event?.target ?? null);
     if (id != null) pendingRunIds.add(id);
+    if (pendingEdit?.affected.delta === 'none' && pendingEdit.affected.beforeIds.length === 1) pendingRunIds.add(pendingEdit.affected.beforeIds[0]);
     ctx.editingInPreview = true;
     previewEditPending = true;
     syncPreviewToSource();

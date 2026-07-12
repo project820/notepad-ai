@@ -1,1 +1,1 @@
-{"source":"1. first\n\n2. second\n","runId":1,"replacement":["second!"],"expected":"1. first\n\n2. second!\n"}
+{"source":"1. first\n\n2. second\n","edit":{"runId":1,"segments":["second!"]},"expected":"1. first\n\n2. second!\n"}
