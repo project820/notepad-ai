@@ -69,9 +69,20 @@ export function createQuiesceTransaction({
     async prepare(targets, context) {
       const prepared = await Promise.all(targets.map(async (target) => {
         if (context.quiescedTargets.has(target.windowId)) return true;
-        const accepted = await awaitWithinDeadline(prepare(target, context), context.forwardDeadline, false);
-        if (accepted) context.quiescedTargets.add(target.windowId);
-        return accepted;
+        const operation = prepare(target, context);
+        const accepted = await awaitWithinDeadline(operation, context.forwardDeadline, false);
+        if (accepted) {
+          context.quiescedTargets.add(target.windowId);
+          return true;
+        }
+        // The RPC may ACK after our deadline. It then owns a renderer fence, so
+        // compensate with the same transaction target instead of orphaning it.
+        void operation.then((latePrepared) => {
+          if (!latePrepared) return;
+          context.quiescedTargets.add(target.windowId);
+          return rollback(target, context);
+        }).catch(() => {});
+        return false;
       }));
       return prepared.every(Boolean);
     },

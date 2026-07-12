@@ -117,6 +117,7 @@ export function createAppWindows({
   const quiesceReady = new Set<number>();
   const pendingQuiesce = new Map<string, { webContentsId: number; resolve: (value: boolean) => void }>();
   const activeQuiesce = new Map<number, { id: string; heartbeat: ReturnType<typeof setInterval> }>();
+  const lateQuiesceRollbacks = new Map<string, number>();
 
   const requestId = (kind: string, win: BrowserWindow) => `${kind}:${win.id}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
   const waitForState = (
@@ -212,7 +213,13 @@ export function createAppWindows({
     const value = raw as Record<string, unknown>;
     const id = typeof value?.requestId === 'string' ? value.requestId : '';
     const pending = pendingQuiesce.get(id);
-    if (!pending || pending.webContentsId !== event.sender.id) return;
+    if (!pending || pending.webContentsId !== event.sender.id) {
+      if (value.prepared === true && lateQuiesceRollbacks.get(id) === event.sender.id) {
+        lateQuiesceRollbacks.delete(id);
+        event.sender.send('close:quiesce-rollback', { requestId: id });
+      }
+      return;
+    }
     pendingQuiesce.delete(id);
     pending.resolve(value.prepared === true || value.rolledBack === true);
   });
@@ -307,7 +314,7 @@ export function createAppWindows({
     });
   };
 
-  const beginFenceRendererDiscard = (win: BrowserWindow | null, leaseId: string | undefined) => {
+  const beginFenceRendererDiscard = (win: BrowserWindow | null, leaseId: string | undefined, timeoutMs = 5_000) => {
     if (!win || !activeLease(win, leaseId)) {
       return { result: Promise.resolve(false), cancel: () => {} };
     }
@@ -329,7 +336,7 @@ export function createAppWindows({
       };
       pendingDiscardPrepare.set(id, { webContentsId: win.webContents.id, leaseId: leaseId!, resolve: settle });
       win.once('closed', onDestroyed);
-      timer = setTimeout(() => settle(false), 5_000);
+      timer = setTimeout(() => settle(false), timeoutMs);
       win.webContents.send('close:discard', { requestId: id, leaseId });
     });
     return { result, cancel: () => settle(false) };
@@ -360,6 +367,12 @@ export function createAppWindows({
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         pendingQuiesce.delete(id);
+        // A late prepare ACK can still have installed a renderer fence. Keep an
+        // ownership record so its ACK triggers a same-id rollback.
+        if (channel === 'close:quiesce-prepare' && !win.isDestroyed()) {
+          lateQuiesceRollbacks.set(id, win.webContents.id);
+          setTimeout(() => lateQuiesceRollbacks.delete(id), 3_000);
+        }
         resolve(false);
       }, timeoutMs);
       pendingQuiesce.set(id, {
@@ -449,7 +462,7 @@ export function createAppWindows({
   const targetsFor = (records: readonly WindowRecord[]): CloseTarget[] => records.map((rec) => ({ windowId: rec.windowId, windowKey: rec.windowKey }));
 
   const commitCloseTransaction = async (
-    transaction: { intent: 'close' | 'quit' | 'relaunch'; targets: readonly CloseTarget[]; discards: readonly CloseTarget[] },
+    transaction: { intent: 'close' | 'quit' | 'relaunch'; targets: readonly CloseTarget[]; discards: readonly CloseTarget[]; context: CloseAttemptContext },
   ): Promise<CloseCommitResult> => {
     // A discard request fences autosave before its active save drains. Track it
     // before waiting so every partial prepare is explicitly rolled back.
@@ -466,7 +479,11 @@ export function createAppWindows({
     };
     const prepares = requestedDiscards.map((target) => ({
       target,
-      ...beginFenceRendererDiscard(BrowserWindow.fromId(target.windowId), leaseIdFor(target.windowId)),
+      ...beginFenceRendererDiscard(
+        BrowserWindow.fromId(target.windowId),
+        leaseIdFor(target.windowId),
+        Math.max(0, transaction.context.forwardDeadline - Date.now()),
+      ),
     }));
     let failedPrepare = false;
     let failPrepare: () => void = () => {};

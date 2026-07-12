@@ -31,6 +31,15 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
   let quiescePreview: { pause: () => boolean; resume: (wasPending: boolean) => void } | null = null;
   let previewSyncFailed = false;
   let discardFenced = false;
+  function hasMutationFence(): boolean {
+    return previewSyncFailed || discardFenced || !!quiesce || closeLease?.consumed === true;
+  }
+
+  function reconcileMutationFence(): void {
+    const fenced = hasMutationFence();
+    ctx.editor.setMutationFence(fenced);
+    ctx.preview.el.contentEditable = fenced ? 'false' : 'true';
+  }
 
   function invalidateCloseLease(): void {
     if (!closeLease || closeLease.invalidated || closeLease.consumed) return;
@@ -295,12 +304,14 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
     // A new query replaces an uncommitted/old transaction. Fencing begins only
     // at consume or discard preparation; querying must leave editing available.
     if (closeLease?.consumed) {
+      // A new query supersedes a completed close attempt; its old discard/consume
+      // fence cannot constrain the new lease.
       savesFenced = false;
-      ctx.editor.setMutationFence(false);
-      ctx.preview.el.contentEditable = 'true';
+      discardFenced = false;
       if (ctx.dirty && ctx.currentPath) scheduleAutosave();
     }
     closeLease = { id, revision: ctx.docRevision, invalidated: false, consumed: false };
+    reconcileMutationFence();
   }
 
   function authorizeCloseLease(id: string): boolean {
@@ -309,9 +320,8 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
 
   function consumeCloseLease(id: string): boolean {
     if (!authorizeCloseLease(id)) return false;
-    ctx.editor.setMutationFence(true);
-    ctx.preview.el.contentEditable = 'false';
     closeLease!.consumed = true;
+    reconcileMutationFence();
     // An approved consume is the quiesce commit. Keep the mutation fence shut
     // for teardown, but cancel crash-recovery expiry so it cannot reopen an
     // already-approved window.
@@ -328,8 +338,7 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
     discardFenced = true;
     await saveTail;
     if (!authorizeCloseLease(id)) return false;
-    ctx.editor.setMutationFence(true);
-    ctx.preview.el.contentEditable = 'false';
+    reconcileMutationFence();
     return true;
   }
 
@@ -349,9 +358,8 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
     }
     savesFenced = false;
     discardFenced = false;
-    ctx.editor.setMutationFence(false);
-    ctx.preview.el.contentEditable = 'true';
     closeLease = null;
+    reconcileMutationFence();
     if (ctx.dirty && ctx.currentPath) scheduleAutosave();
     return true;
   }
@@ -366,11 +374,13 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
   function markPreviewSyncFailed(): void {
     previewSyncFailed = true;
     savesFenced = true;
+    reconcileMutationFence();
   }
 
   function markPreviewSyncRecovered(): void {
     previewSyncFailed = false;
     if (!discardFenced && !quiesce) savesFenced = false;
+    reconcileMutationFence();
   }
 
 
@@ -391,9 +401,8 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
     autosaveTimer = null;
     const previewPending = quiescePreview?.pause() ?? false;
     savesFenced = true;
-    ctx.editor.setMutationFence(true);
-    ctx.preview.el.contentEditable = 'false';
     quiesce = { id, expiry: null, autosavePending, previewPending };
+    reconcileMutationFence();
     armQuiesceExpiry(id, ttlMs);
     return true;
   }
@@ -420,8 +429,7 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
     quiesce = null;
     if (closeLease && !closeLease.consumed) invalidateCloseLease();
     if (!discardFenced && !previewSyncFailed) savesFenced = false;
-    ctx.editor.setMutationFence(false);
-    ctx.preview.el.contentEditable = 'true';
+    reconcileMutationFence();
     quiescePreview?.resume(current.previewPending);
     if ((current.autosavePending || ctx.dirty) && ctx.currentPath) scheduleAutosave();
     return true;
@@ -431,6 +439,7 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
     if (!quiesce || quiesce.id !== id) return false;
     if (quiesce.expiry) clearTimeout(quiesce.expiry);
     quiesce = null;
+    reconcileMutationFence();
     return true;
   }
 

@@ -108,14 +108,7 @@ describe('CloseCoordinator', () => {
     let release!: () => void;
     const late = new Promise<boolean>((resolve) => { release = () => resolve(true); });
     const rollback = vi.fn(async () => {});
-    let expired = false;
-    const bounded = async (operation: Promise<boolean>) => {
-      if (expired) {
-        void operation.then((prepared) => { if (prepared) void rollback(first, {} as CloseAttemptContext); });
-        return false;
-      }
-      return operation;
-    };
+    const bounded = async (_operation: Promise<boolean>) => false;
     const tx = createQuiesceTransaction({
       prepare: async () => late,
       rollback,
@@ -129,7 +122,6 @@ describe('CloseCoordinator', () => {
       quiescedTargets: new Set(),
     };
 
-    expired = true;
     await expect(tx.prepare([first], context)).resolves.toBe(false);
     release();
     await new Promise((resolve) => setTimeout(resolve, 0));

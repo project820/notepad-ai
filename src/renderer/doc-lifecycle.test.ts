@@ -259,7 +259,7 @@ describe('document close lease and replacement lifecycle', () => {
   it('keeps discard fencing active when quiesce TTL expires and invalidates the lease', async () => {
     vi.useFakeTimers();
     try {
-      const { ctx, lifecycle, sendCloseLeaseInvalidated } = setup();
+      const { ctx, lifecycle, sendCloseLeaseInvalidated, mutationFenced } = setup();
       ctx.currentPath = '/tmp/draft.md';
       lifecycle.beginCloseLease('lease');
       await lifecycle.prepareCloseQuiesce('tx', 20);
@@ -268,8 +268,11 @@ describe('document close lease and replacement lifecycle', () => {
       await vi.advanceTimersByTimeAsync(20);
 
       expect(lifecycle.isSaveFenced()).toBe(true);
+      expect(mutationFenced()).toBe(true);
       expect(sendCloseLeaseInvalidated).toHaveBeenCalledWith('lease', 0);
       expect(lifecycle.authorizeCloseLease('lease')).toBe(false);
+      expect(lifecycle.rollbackDiscardFence('lease')).toBe(true);
+      expect(mutationFenced()).toBe(false);
     } finally {
       vi.useRealTimers();
     }
