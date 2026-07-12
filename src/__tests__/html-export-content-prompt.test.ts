@@ -4,6 +4,7 @@ import {
   HTML_EXPORT_CONTENT_INSTRUCTIONS,
 } from '../renderer/html-export-content-prompt';
 import type { HtmlExportRequest } from '../renderer/html-export-model';
+import { HTML_EXPORT_DESIGN_KNOWLEDGE } from '../renderer/html-export-design-knowledge';
 
 const base: HtmlExportRequest = {
   orientation: 'horizontal',
@@ -45,6 +46,24 @@ describe('buildHtmlExportContentPrompt — forbids HTML output (AC b)', () => {
     expect(prompt).toContain('Output ONLY the JSON object');
     expect(prompt).toMatch(/No HTML, CSS, JS/);
     expect(prompt).toContain('OUTPUT SCHEMA:');
+  });
+});
+describe('HTML export design knowledge', () => {
+  it('injects compact, content-only layout guidance without changing source truncation', () => {
+    const { prompt, truncated } = buildHtmlExportContentPrompt(
+      { ...base, markdown: 'x'.repeat(2000) },
+      { maxSourceChars: 1000 },
+    );
+
+    expect(prompt).toContain('=== CONTENT DESIGN KNOWLEDGE ===');
+    expect(prompt).toContain(HTML_EXPORT_DESIGN_KNOWLEDGE);
+    expect(HTML_EXPORT_DESIGN_KNOWLEDGE).toContain('Classify the screen');
+    expect(HTML_EXPORT_DESIGN_KNOWLEDGE).toContain('one top-to-bottom document');
+    expect(HTML_EXPORT_DESIGN_KNOWLEDGE).toContain('available container');
+    expect(HTML_EXPORT_DESIGN_KNOWLEDGE).toMatch(/never encode CSS, HTML/);
+    expect(new TextEncoder().encode(HTML_EXPORT_DESIGN_KNOWLEDGE).byteLength).toBeLessThanOrEqual(2048);
+    expect(truncated).toBe(true);
+    expect(prompt).toContain('source truncated here');
   });
 });
 
