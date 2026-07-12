@@ -86,7 +86,7 @@ async function verifyCliVersion(command: string): Promise<void> {
 }
 
 /** Read an executable by descriptor so the checked bytes are exactly the staged bytes. */
-export async function readVerifiedCliFile(inputPath: string, requireCmuxBundle = false): Promise<{ identity: CliIdentity; bytes: Buffer }> {
+async function readVerifiedCliFile(inputPath: string, requireCmuxBundle = false): Promise<{ identity: CliIdentity; bytes: Buffer }> {
   const realpath = await fs.realpath(inputPath);
   if (requireCmuxBundle && !isInside(realpath, CMUX_BUNDLE_ROOT)) throw new Error('CLI is outside the canonical cmux bundle.');
   await assertSafeParents(realpath);

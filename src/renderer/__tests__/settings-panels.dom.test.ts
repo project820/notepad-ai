@@ -443,7 +443,10 @@ describe('openSettingsModal — accessibility', () => {
       } satisfies ProviderAuthStatus]),
     );
     try {
-      openSettingsModal({ onSetCustomModel: vi.fn() });
+      openSettingsModal({
+        onSetCustomModel: vi.fn(),
+        currentSelections: [{ provider: 'openrouter', id: 'vendor/legacy-model' }],
+      });
       await flushSettingsRender();
 
       expect(document.querySelector('.prov-error')?.textContent).toBe('We could not determine this provider’s status. Try again.');

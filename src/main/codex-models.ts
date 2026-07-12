@@ -2,20 +2,19 @@ import { app } from 'electron';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { getAccessToken } from './codex-auth';
+import { applyModelDisplayPolicy } from './ai/model-display-policy';
+import type { ModelRef } from './ai/types';
 
 const CODEX_BASE_URL = 'https://chatgpt.com/backend-api/codex';
 const CACHE_PATH = () => path.join(app.getPath('userData'), 'codex-models-cache.json');
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 
 const FALLBACK_MODELS = [
-  'gpt-5.4-mini',          // default — cheap, fast, good enough
+  'gpt-5.6',
+  'gpt-5.6-sol',
+  'gpt-5.6-terra',
+  'gpt-5.6-luna',
   'gpt-5.5',
-  'gpt-5.4',
-  'gpt-5.3-codex',
-  'gpt-5.3-codex-spark',
-  'gpt-5.2-codex',
-  'gpt-5.1-codex-max',
-  'gpt-5.1-codex-mini',
 ];
 
 
@@ -73,6 +72,21 @@ function parseModels(payload: any): ModelInfo[] {
     .map((m: any) => (typeof m === 'string' ? { id: m } : { id: m?.id, label: m?.display_name ?? m?.label }))
     .filter((m: ModelInfo) => typeof m.id === 'string' && m.id);
 }
+function applyChatGptDisplayPolicy(models: ModelInfo[]): ModelInfo[] {
+  const allowedIds = new Set(
+    applyModelDisplayPolicy(
+      models.map((model) => ({
+        provider: 'chatgpt' as const,
+        id: model.id,
+        label: model.label,
+        humanizeEngineId: 'openai',
+        requiresAuth: true,
+      } satisfies ModelRef)),
+    ).map((model) => model.id),
+  );
+  return models.filter((model) => allowedIds.has(model.id));
+}
+
 
 async function fetchLiveModels(token: string): Promise<ModelInfo[]> {
   const r = await fetch(`${CODEX_BASE_URL}/models?client_version=1.0.0`, {
@@ -80,8 +94,8 @@ async function fetchLiveModels(token: string): Promise<ModelInfo[]> {
     headers: cloudflareHeaders(token),
   });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  const models = parseModels(await r.json());
-  if (models.length === 0) throw new Error('empty model list');
+  const models = applyChatGptDisplayPolicy(parseModels(await r.json()));
+  if (models.length === 0) throw new Error('empty allowed model list');
   return models;
 }
 
@@ -98,11 +112,9 @@ export async function getAccountModels(): Promise<ModelInfo[]> {
 
 
 export async function getModels(forceRefresh = false): Promise<ModelInfo[]> {
-  if (!forceRefresh) {
-    const cache = await readCache();
-    if (cache && Date.now() - cache.fetchedAt < CACHE_TTL_MS && cache.models.length > 0) {
-      return cache.models;
-    }
+  const cache = await readCache();
+  if (!forceRefresh && cache && Date.now() - cache.fetchedAt < CACHE_TTL_MS && cache.models.length > 0) {
+    return applyChatGptDisplayPolicy(cache.models);
   }
   const token = await getAccessToken();
   if (!token) return FALLBACK_MODELS.map((id) => ({ id }));
@@ -112,6 +124,7 @@ export async function getModels(forceRefresh = false): Promise<ModelInfo[]> {
     await writeCache({ fetchedAt: Date.now(), models });
     return models;
   } catch {
+    if (cache?.models.length) return applyChatGptDisplayPolicy(cache.models);
     return FALLBACK_MODELS.map((id) => ({ id }));
   }
 }

@@ -36,6 +36,7 @@ function mount() {
       { id: 'gpt-5.4-mini', label: 'GPT-5.4 mini', provider: 'chatgpt', contextWindow: 400_000 },
       { id: 'llama3:latest', label: 'llama3:latest', provider: 'ollama', contextWindow: 32_000 },
       { id: 'grok-4.5', label: 'Grok 4.5', provider: 'grok', contextWindow: 256_000 },
+      { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', provider: 'claude', contextWindow: 200_000 },
     ],
     getQuality: () => 'college',
   });
@@ -62,6 +63,7 @@ describe('block-ai model menu (G003 local providers)', () => {
     const grok = items.find((i) => i.getAttribute('data-value') === 'grok:grok-4.5');
     expect(grok).toBeTruthy();
     expect(grok!.textContent).toContain('Grok');
+    expect(items.find((i) => i.getAttribute('data-value') === 'claude:claude-sonnet-4-6')).toBeUndefined();
 
     (llama as HTMLButtonElement).click();
     expect(onBlockModelChange).toHaveBeenCalledWith('ollama:llama3:latest');

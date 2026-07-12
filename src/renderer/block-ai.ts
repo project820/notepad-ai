@@ -6,9 +6,10 @@ import { type Quality } from './quality';
 import { openMenu } from './dropdown';
 import { buildBlockAiInstructions } from './block-ai-prompt-handler';
 import { styleDirective, detectLanguage, type Naturalness } from './humanize-engine';
-import { isAiProviderId, type AiProviderId } from '../main/ai/types';
-import { modelKey } from './model-key';
+import { isAiProviderId, type AiProviderId, type ModelRef } from '../main/ai/types';
+import { modelKey, parseModelKey } from './model-key';
 import { formatContextWindow, modelContextWindowTokens } from '../main/ai/output-budget';
+import { applyModelDisplayPolicy } from '../main/ai/model-display-policy';
 import { triggerCliOnboarding } from './settings-modal';
 
 /** Provider labels for the Block AI model menu. */
@@ -275,7 +276,9 @@ export function installBlockAi(deps: BlockAiDeps) {
           : curRaw
             ? modelKey(curRaw)
             : 'chatgpt:gpt-5.4-mini';
-      const items = models.map((m) => {
+      const items = applyModelDisplayPolicy(models as ModelRef[], {
+        currentSelection: parseModelKey(curKey),
+      }).map((m) => {
         const provider = m.provider ?? 'chatgpt';
         const key = modelKey({ provider, id: m.id });
         const badge = isAiProviderId(provider)

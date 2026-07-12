@@ -17,6 +17,7 @@ import { ComposedClaudeProvider } from './claude-composed';
 import { ComposedGrokProvider } from './grok-composed';
 import { nodeCliSpawn } from './cli-runner';
 import { OpenRouterProvider } from './openrouter-provider';
+import { applyModelDisplayPolicy } from './model-display-policy';
 import { getCuratedModels } from './model-catalog';
 import { LmStudioProvider } from './lmstudio-provider';
 import { OllamaProvider } from './ollama-provider';
@@ -143,14 +144,14 @@ export class ProviderRegistry {
    */
   async getAvailableModels(force = false): Promise<ModelRef[]> {
     if (force) this.bumpReasoningSnapshot();
-    const curated = getCuratedModels();
+    const curated = applyModelDisplayPolicy(getCuratedModels());
     const cloudProviders = Object.values(this.providers).filter(
       (provider): provider is AiProvider => provider != null && provider.authKind !== 'local',
     );
     const live = (
       await Promise.all(cloudProviders.map(async (provider) => {
         try {
-          return await provider.listModels();
+          return applyModelDisplayPolicy(await provider.listModels());
         } catch {
           return [] as ModelRef[];
         }
@@ -161,7 +162,7 @@ export class ProviderRegistry {
       // Fire-and-forget: must not block the cloud model list.
       void this.localCache.refreshInBackground(locals);
     }
-    const localModels = this.localCache.snapshot();
+    const localModels = applyModelDisplayPolicy(this.localCache.snapshot());
     const seen = new Set<string>();
     const merged: ModelRef[] = [];
     for (const model of [...curated, ...live, ...localModels]) {

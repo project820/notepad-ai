@@ -54,6 +54,8 @@ export type SettingsModalDeps = {
   onAfterAuthChange?: () => void;
   /** Persist a chosen provider+model selection. */
   onSetCustomModel: (provider: AiProviderId, modelId: string) => void;
+  /** Existing selections keep legacy providers manageable without exposing them to new users. */
+  currentSelections?: Array<{ provider: AiProviderId; id: string } | undefined>;
 };
 let cliOnboardingPrompted = false;
 
@@ -178,12 +180,21 @@ export function openSettingsModal(deps: SettingsModalDeps): void {
   let generation = 0;
   const snapshots = new Map<number, ProviderSnapshot>();
 
+  const hasOpenRouterManagement = (snapshot: ProviderSnapshot): boolean =>
+    snapshot.statuses?.some((status) => status.provider === 'openrouter' && status.connected) === true
+    || deps.currentSelections?.some((selection) => selection?.provider === 'openrouter') === true;
+
+  const visibleRows = (snapshot: ProviderSnapshot): readonly ProviderStatusView[] =>
+    KNOWN_PROVIDER_ROWS.filter(
+      (row) => row.provider !== 'openrouter' || hasOpenRouterManagement(snapshot),
+    );
+
   const viewsFor = (snapshot: ProviderSnapshot): ProviderStatusView[] => {
     if (!snapshot.statuses && !snapshot.statusLoadFailed) {
-      return KNOWN_PROVIDER_ROWS.map((row) => ({ ...row, loading: true }));
+      return visibleRows(snapshot).map((row) => ({ ...row, loading: true }));
     }
     if (snapshot.statusLoadFailed) {
-      return KNOWN_PROVIDER_ROWS.map((row) => ({ ...row, loading: true }));
+      return visibleRows(snapshot).map((row) => ({ ...row, loading: true }));
     }
     const local: LocalViewContext = {
       config: snapshot.config ?? {
@@ -194,7 +205,7 @@ export function openSettingsModal(deps: SettingsModalDeps): void {
     };
     const statusesByProvider = new Map(snapshot.statuses!.map((status) => [status.provider, status]));
     const statusResultWasEmpty = snapshot.statuses!.length === 0;
-    return KNOWN_PROVIDER_ROWS.map((row) => {
+    return visibleRows(snapshot).map((row) => {
       const status = statusesByProvider.get(row.provider);
       if (!status) return { ...row, loading: !statusResultWasEmpty };
       return toView(status, local, snapshot.cliOverrides) ?? { ...row, loading: true };
@@ -277,7 +288,7 @@ export function openSettingsModal(deps: SettingsModalDeps): void {
   });
 
   provHandle = mountProviderSettingsPanel(provHost, {
-    statuses: KNOWN_PROVIDER_ROWS.map((row) => ({ ...row, loading: true })),
+    statuses: visibleRows({}).map((row) => ({ ...row, loading: true })),
     onRetryStatus: () => void loadProviders(),
     onChatgptSignIn: () =>
       openLoginModal({

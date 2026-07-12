@@ -373,6 +373,10 @@ export function mountProviderSettingsPanel(
     const saved = captureFocus(parent);
     const root = parent.querySelector<HTMLElement>('.prov-root');
     if (!root) return;
+    const desiredProviders = new Set(current.statuses.map((view) => view.provider));
+    root.querySelectorAll<HTMLElement>('[data-prov-row]').forEach((row) => {
+      if (!desiredProviders.has(row.dataset.provRow as AiProviderId)) row.remove();
+    });
     const notice = renderPanelNotice(current);
     if (notice !== renderedNotice) {
       root.querySelector('.prov-load-error, .prov-zero-auth')?.remove();

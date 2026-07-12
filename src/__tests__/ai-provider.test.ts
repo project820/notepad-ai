@@ -250,7 +250,7 @@ describe('model catalog', () => {
   });
   it('resolveModelRef falls back to a custom ref for unknown ids (no lockout)', () => {
     const catalog = getCuratedModels();
-    expect(isKnownModel(catalog, 'claude', 'claude-sonnet-4-6')).toBe(true);
+    expect(isKnownModel(catalog, 'claude', 'claude-sonnet-4-6')).toBe(false);
     const resolved = resolveModelRef(catalog, 'claude', 'claude-future-99');
     expect(resolved.custom).toBe(true);
     expect(resolved.id).toBe('claude-future-99');
@@ -360,8 +360,8 @@ describe('ProviderRegistry routing', () => {
 
   it('getAvailableModels merges curated with live chatgpt models, deduped', async () => {
     const live: ModelRef[] = [
-      { provider: 'chatgpt', id: 'gpt-5.4-mini', label: 'dup', humanizeEngineId: 'openai', requiresAuth: true },
-      { provider: 'chatgpt', id: 'gpt-live-new', label: 'new', humanizeEngineId: 'openai', requiresAuth: true },
+      { provider: 'chatgpt', id: 'gpt-5.6', label: 'dup', humanizeEngineId: 'openai', requiresAuth: true },
+      { provider: 'chatgpt', id: 'gpt-5.6-sol', label: 'new', humanizeEngineId: 'openai', requiresAuth: true },
     ];
     const reg = new ProviderRegistry(fakeKeyStore(), {
       chatgpt: fakeProvider('chatgpt', true, () => {}, live),
@@ -370,8 +370,8 @@ describe('ProviderRegistry routing', () => {
     });
     const models = await reg.getAvailableModels();
     const chatgptIds = models.filter((m) => m.provider === 'chatgpt').map((m) => m.id);
-    expect(chatgptIds).toContain('gpt-live-new');
-    expect(chatgptIds.filter((id) => id === 'gpt-5.4-mini')).toHaveLength(1); // deduped
+    expect(chatgptIds).toContain('gpt-5.6-sol');
+    expect(chatgptIds.filter((id) => id === 'gpt-5.6')).toHaveLength(1); // deduped
   });
 });
 
@@ -407,29 +407,22 @@ describe('BYO-key listModels derives from the curated catalog', () => {
     // Derived, not a hand-maintained dup: ids/labels/order match the catalog.
     expect(models.map((m) => m.id)).toEqual(curated.map((m) => m.id));
     expect(models.map((m) => m.label)).toEqual(curated.map((m) => m.label));
-    // Current Claude ids, smoke-verified via `claude -p --model <id>` (opus-4-8 /
-    // sonnet-4-6 accepted directly; the prior opus-4-1 is a legacy alias the CLI
-    // auto-remaps to opus-4-8). See the PR body for the recorded smoke transcript.
     expect(models.map((m) => m.id)).toEqual([
       'claude-opus-4-8',
       'claude-sonnet-5',
-      'claude-sonnet-4-6',
       'claude-haiku-4-5',
     ]);
     expect(models.every((m) => m.provider === 'claude' && m.requiresAuth === true)).toBe(true);
     expect(models.every((m) => m.humanizeEngineId === 'claude')).toBe(true);
   });
 
-  it('OpenRouterProvider.listModels mirrors the curated openrouter rows exactly', async () => {
+  it('OpenRouterProvider.listModels has no curated entries; custom routing remains supported', async () => {
     const provider = new OpenRouterProvider(fakeKeyStore());
     const models = await provider.listModels();
-    const curated = getCuratedModels().filter((m) => m.provider === 'openrouter');
-    expect(models.map((m) => m.id)).toEqual(curated.map((m) => m.id));
-    expect(models.map((m) => m.label)).toEqual(curated.map((m) => m.label));
-    // The OpenRouter Claude slug is kept UNCHANGED (no live smoke → no migration).
-    expect(models.map((m) => m.id)).toContain('anthropic/claude-sonnet-4.5');
-    expect(models.every((m) => m.provider === 'openrouter' && m.requiresAuth === true)).toBe(true);
-    expect(models.every((m) => m.humanizeEngineId === 'openrouter')).toBe(true);
+    expect(getCuratedModels().filter((m) => m.provider === 'openrouter')).toEqual([]);
+    expect(models).toEqual([]);
+    const custom = makeCustomModel('openrouter', 'vendor/new-model');
+    expect(custom).toMatchObject({ provider: 'openrouter', id: 'vendor/new-model', custom: true });
   });
 });
 
@@ -695,7 +688,7 @@ describe('ProviderRegistry local discovery is non-blocking', () => {
     // Cloud catalog is present immediately…
     expect(models.some((m) => m.provider === 'claude')).toBe(true);
     expect(models.some((m) => m.provider === 'chatgpt')).toBe(true);
-    expect(models.some((m) => m.provider === 'openrouter')).toBe(true);
+    expect(models.some((m) => m.provider === 'openrouter')).toBe(false);
     // …and local models are simply absent (cache snapshot still empty), not awaited.
     expect(models.some((m) => m.provider === 'ollama')).toBe(false);
     expect(models.some((m) => m.provider === 'lmstudio')).toBe(false);

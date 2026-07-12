@@ -86,7 +86,7 @@ describe('ProviderRegistry model aggregation', () => {
     const grok = provider('grok', 'api_key', false);
     grok.listModels = async () => [{
       provider: 'grok',
-      id: 'grok-live-verified',
+      id: 'grok-4.5',
       label: 'Grok live',
       humanizeEngineId: 'openai',
       requiresAuth: true,
@@ -94,7 +94,7 @@ describe('ProviderRegistry model aggregation', () => {
     const registry = new ProviderRegistry(noKeys, { grok }, cacheWith([]));
 
     await expect(registry.getAvailableModels()).resolves.toEqual(expect.arrayContaining([
-      expect.objectContaining({ provider: 'grok', id: 'grok-live-verified' }),
+      expect.objectContaining({ provider: 'grok', id: 'grok-4.5' }),
     ]));
   });
 });

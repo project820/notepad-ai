@@ -1,7 +1,13 @@
-# Claude model-id verification (Bug B / PR #2)
+# Model ID verification
+## Displayed cloud catalog (B4)
 
-This PR moves the curated Claude ids from the legacy `claude-sonnet-4-5` / `claude-opus-4-1`
-to the current `claude-sonnet-4-6` / `claude-opus-4-8` (and keeps `claude-haiku-4-5`).
+- **ChatGPT:** `gpt-5.6`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, and `gpt-5.5` are verified against OpenAI's latest-model documentation. `gpt-5.3-codex-spark` is displayable only when it appears in the authenticated `/models` response; it is intentionally absent from the fallback catalog.
+- **Claude:** `claude-opus-4-8`, `claude-sonnet-5`, and `claude-haiku-4-5` are CLI-smoke-verified below. `claude-sonnet-4-6` remains accepted as a legacy selection but is not curated.
+- **Grok:** `grok-4.5` and `grok-composer-2.5-fast` are the verified xAI catalog IDs used by the Grok provider.
+
+## Claude CLI verification
+
+This record preserves the earlier verification of legacy Claude aliases and canonical CLI IDs.
 
 Because the app is **CLI-first** (`claude -p`, subscription — see `claude-composed.ts`), these
 ids are exercised through the local `claude` CLI on the normal path; the Anthropic Messages
