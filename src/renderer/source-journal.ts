@@ -1,7 +1,7 @@
 import type MarkdownIt from 'markdown-it';
 
-export type ByteInterval = readonly [start: number, end: number];
-export type SourceOnlyKind =
+type ByteInterval = readonly [start: number, end: number];
+type SourceOnlyKind =
   | 'prefix'
   | 'gap'
   | 'fence-delim'
@@ -20,7 +20,7 @@ export type ContentRunKind =
   | 'table-cell'
   | 'fence-body'
   | 'deflist-item';
-export type DomContentRun = {
+type DomContentRun = {
   kind: 'content';
   subtype: ContentRunKind;
   runId: number;
@@ -29,8 +29,8 @@ export type DomContentRun = {
   tokenIndex?: number;
   syntheticIndentPrefixes?: readonly string[];
 };
-export type JournalInterval = SourceOnlySlice | DomContentRun;
-export type MapId = number;
+type JournalInterval = SourceOnlySlice | DomContentRun;
+type MapId = number;
 
 export type NormalizedEdit = {
   inputType: string;

@@ -1,6 +1,6 @@
 import type { AiChatRequest } from './types';
 
-export type ReasoningEffort = 'none' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+type ReasoningEffort = 'none' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 export type ReasoningCapabilityContext = {
   featureEnabled: boolean;

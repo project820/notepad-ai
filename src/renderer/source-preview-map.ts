@@ -300,26 +300,6 @@ function tagBlockChildren(domEl: Element, node: BlockToken, ancestor: { startLin
   }
 }
 
-/**
- * Tag line-bearing *nested* preview elements — list items, table rows, and
- * paragraphs inside multi-paragraph containers — with `data-src-start/end` so
- * selection sync can highlight exactly the selected sub-blocks instead of the
- * whole top-level block.
- *
- * Top-level blocks keep their `data-map-id` from {@link tagPreviewBlocks}; nested
- * elements carry source spans only. Mirrors that function's positional contract:
- * the leading top-level children correspond 1:1 to the mapped top-level tokens
- * (the footnote section, appended last with no map, is skipped). Structural
- * containers (ul/ol/table/thead/tbody) are recursed through but never tagged, and
- * a lone paragraph is left to its enclosing unit (single `<p>` ⇒ one layer).
- *
- * Display-only: `data-*` never leaks into the saved markdown (Turndown ignores
- * it), so calling this after {@link tagPreviewBlocks} keeps the source pristine.
- */
-export function tagNestedPreviewBlocks(root: Element, md: MarkdownIt, markdown: string): void {
-  tagNestedPreviewBlocksFromTokens(root, md.parse(markdown, {}));
-}
-
 /** Token-array variant used by preview's single-pass render pipeline. */
 export function tagNestedPreviewBlocksFromTokens(root: Element, tokens: readonly MdToken[]): void {
   const top = buildBlockTokenTree(tokens).filter((n) => n.hasMap);

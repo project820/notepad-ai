@@ -43,7 +43,7 @@ type AiChatRequest = {
   reasoningEffort?: ReasoningEffort;
 };
 
-export type ReasoningCapabilitiesSnapshot = {
+type ReasoningCapabilitiesSnapshot = {
   featureEnabled: boolean;
   snapshotGeneration: number;
   models: Array<{ modelId: string; efforts: ReasoningEffort[] }>;

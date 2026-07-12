@@ -11,7 +11,7 @@ import {
 import { assembleSource, type RunTable } from './source-journal';
 import { serializeChangedRun } from './fragment-serialize';
 
-export type RenderSettled = { ok: boolean };
+type RenderSettled = { ok: boolean };
 export type PreviewHandle = {
   el: HTMLDivElement;
   setDoc: (md: string) => void;
