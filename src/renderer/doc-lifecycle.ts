@@ -286,6 +286,12 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
   }
 
   function beginCloseLease(id: string): void {
+    if (savesFenced || closeLease?.consumed) {
+      savesFenced = false;
+      ctx.editor.setMutationFence(false);
+      ctx.preview.el.contentEditable = 'true';
+      if (ctx.dirty && ctx.currentPath) scheduleAutosave();
+    }
     closeLease = { id, revision: ctx.docRevision, invalidated: false, consumed: false };
   }
 
@@ -310,12 +316,14 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
     return authorizeCloseLease(id);
   }
 
-  function rollbackDiscardFence(): void {
+  function rollbackDiscardFence(id: string): boolean {
+    if (closeLease?.id !== id) return false;
     savesFenced = false;
     ctx.editor.setMutationFence(false);
     ctx.preview.el.contentEditable = 'true';
     closeLease = null;
     if (ctx.dirty && ctx.currentPath) scheduleAutosave();
+    return true;
   }
 
   return {

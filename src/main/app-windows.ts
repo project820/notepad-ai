@@ -107,7 +107,7 @@ export function createAppWindows({
   const windowLocales = new Map<number, CloseGuardState['locale']>();
   const pendingAuthorize = new Map<string, { webContentsId: number; resolve: (valid: boolean) => void }>();
   const pendingDiscardPrepare = new Map<string, { webContentsId: number; leaseId: string; resolve: (fenced: boolean) => void }>();
-  const pendingDiscardRollback = new Map<string, { webContentsId: number; resolve: () => void }>();
+  const pendingDiscardRollback = new Map<string, { webContentsId: number; resolve: (rolledBack: boolean) => void }>();
   const pendingConsume = new Map<string, { webContentsId: number; resolve: (consumed: boolean) => void }>();
   const closeLeases = new Map<number, { id: string; invalidated: boolean }>();
 
@@ -195,7 +195,7 @@ export function createAppWindows({
       return;
     }
     const pendingRollback = pendingDiscardRollback.get(id);
-    if (pendingRollback && pendingRollback.webContentsId === event.sender.id) pendingRollback.resolve();
+    if (pendingRollback && pendingRollback.webContentsId === event.sender.id) pendingRollback.resolve(true);
   });
   onTrusted('close:lease-invalidated', (event, raw: unknown) => {
     const value = raw as Record<string, unknown>;
@@ -311,22 +311,24 @@ export function createAppWindows({
     });
     return { result, cancel: () => settle(false) };
   };
-  const rollbackRendererDiscardFence = async (win: BrowserWindow | null, leaseId: string | undefined): Promise<void> => {
-    if (!leaseId || !win || win.isDestroyed()) return;
+  const rollbackRendererDiscardFence = async (win: BrowserWindow | null, leaseId: string | undefined): Promise<boolean> => {
+    if (!leaseId || !win || win.isDestroyed()) return false;
     const id = requestId('discard-rollback', win);
-    await new Promise<void>((resolve) => {
+    return new Promise<boolean>((resolve) => {
       let settled = false;
-      let settle: () => void = () => {};
-      const onDestroyed = () => settle();
-      settle = () => {
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      const onDestroyed = () => settle(false);
+      const settle = (rolledBack: boolean) => {
         if (settled) return;
         settled = true;
+        if (timer) clearTimeout(timer);
         win.removeListener('closed', onDestroyed);
         pendingDiscardRollback.delete(id);
-        resolve();
+        resolve(rolledBack);
       };
       pendingDiscardRollback.set(id, { webContentsId: win.webContents.id, resolve: settle });
       win.once('closed', onDestroyed);
+      timer = setTimeout(() => settle(false), 400);
       win.webContents.send('close:discard-rollback', { requestId: id, leaseId });
     });
   };
@@ -364,8 +366,9 @@ export function createAppWindows({
     const rollback = async (targets: readonly CloseTarget[]) => {
       await Promise.all(targets.map(async (target) => {
         const win = BrowserWindow.fromId(target.windowId);
-        await rollbackRendererDiscardFence(win, leaseIdFor(target.windowId));
-        closeLeases.delete(target.windowId);
+        const leaseId = leaseIdFor(target.windowId);
+        await rollbackRendererDiscardFence(win, leaseId);
+        if (leaseId && leaseIdFor(target.windowId) === leaseId) closeLeases.delete(target.windowId);
       }));
     };
     const prepares = requestedDiscards.map((target) => ({

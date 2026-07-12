@@ -245,8 +245,8 @@ window.api.onCloseDiscard(({ requestId, leaseId }) => {
     () => window.api.sendCloseDiscardResult(requestId, false),
   );
 });
-window.api.onCloseDiscardRollback(({ requestId }) => {
-  docLifecycle.rollbackDiscardFence();
+window.api.onCloseDiscardRollback(({ requestId, leaseId }) => {
+  docLifecycle.rollbackDiscardFence(leaseId);
   window.api.sendCloseDiscardResult(requestId, true);
 });
 window.api.windowReady();

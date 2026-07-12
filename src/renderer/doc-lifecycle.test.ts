@@ -124,7 +124,7 @@ describe('document close lease and replacement lifecycle', () => {
     lifecycle.beginCloseLease('lease-1');
 
     await lifecycle.fenceDiscard('lease-1');
-    lifecycle.rollbackDiscardFence();
+    lifecycle.rollbackDiscardFence('lease-1');
     await vi.advanceTimersByTimeAsync(3_000);
 
     expect(saveFile).toHaveBeenCalledOnce();
@@ -147,10 +147,33 @@ describe('document close lease and replacement lifecycle', () => {
     expect(ctx.currentPath).toBe('/tmp/draft.md');
     expect(ctx.docRevision).toBe(0);
     expect(ctx.dirty).toBe(true);
-    lifecycle.rollbackDiscardFence();
+    lifecycle.rollbackDiscardFence('lease-1');
     expect(mutationFenced()).toBe(false);
     expect((ctx.preview.el as HTMLElement).contentEditable).toBe('true');
     expect(lifecycle.authorizeCloseLease('lease-1')).toBe(false);
+  });
+  it('ignores an old rollback after a new lease starts, then restores only the matching lease', async () => {
+    const { ctx, lifecycle, mutationFenced } = setup();
+    ctx.currentPath = '/tmp/draft.md';
+    ctx.dirty = false;
+    lifecycle.beginCloseLease('lease-1');
+    await expect(lifecycle.fenceDiscard('lease-1')).resolves.toBe(true);
+    expect(lifecycle.consumeCloseLease('lease-1')).toBe(true);
+
+    lifecycle.beginCloseLease('lease-2');
+    expect(mutationFenced()).toBe(false);
+    expect((ctx.preview.el as HTMLElement).contentEditable).toBe('true');
+    await expect(lifecycle.save()).resolves.toBe(0);
+
+    await expect(lifecycle.fenceDiscard('lease-2')).resolves.toBe(true);
+    expect(lifecycle.consumeCloseLease('lease-2')).toBe(true);
+    expect(lifecycle.rollbackDiscardFence('lease-1')).toBe(false);
+    expect(mutationFenced()).toBe(true);
+    expect((ctx.preview.el as HTMLElement).contentEditable).toBe('false');
+
+    expect(lifecycle.rollbackDiscardFence('lease-2')).toBe(true);
+    expect(mutationFenced()).toBe(false);
+    expect((ctx.preview.el as HTMLElement).contentEditable).toBe('true');
   });
 
   it('routes programmatic replacement through one revision and dirty-state authority', () => {

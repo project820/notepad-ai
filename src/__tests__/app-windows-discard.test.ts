@@ -322,6 +322,44 @@ describe('discard close IPC waiters', () => {
       vi.useRealTimers();
     }
   });
+  it('times out a missing rollback ACK, releases the session fence, and denies teardown', async () => {
+    vi.useFakeTimers();
+    try {
+      let rollbackRequests = 0;
+      let dialogs = 0;
+      const commitQuitSession = vi.fn(async () => { throw new Error('disk full'); });
+      const { appWindows } = await setup((win, channel, payload) => {
+        if (channel === 'close:discard') {
+          electron.emitIpc('close:discard-result', win, { requestId: payload.requestId, fenced: true });
+        }
+        if (channel === 'close:consume') {
+          electron.emitIpc('close:consume-result', win, { requestId: payload.requestId, consumed: true });
+        }
+        if (channel === 'close:discard-rollback') rollbackRequests += 1;
+      }, async () => (++dialogs === 1 ? 'discard' : 'cancel'), 1, () => true, commitQuitSession);
+
+      let settled = false;
+      const approval = appWindows.approveAllForQuit('quit').then((approved) => {
+        settled = true;
+        return approved;
+      });
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(rollbackRequests).toBe(1);
+      expect(appWindows.isSessionWriteFenced('window-1')).toBe(true);
+      expect(settled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(399);
+      expect(settled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(approval).resolves.toBe(false);
+      expect(appWindows.isSessionWriteFenced('window-1')).toBe(false);
+      expect(commitQuitSession).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it('keeps a temporary discard fence through rollback, then restores writes after a failed commit', async () => {
     let rejectCommit!: (error: Error) => void;
     let signalCommitStarted!: () => void;
