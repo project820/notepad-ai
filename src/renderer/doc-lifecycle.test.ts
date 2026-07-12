@@ -39,7 +39,7 @@ function setup(saveFile = vi.fn(async () => ({ saved: true, filePath: '/tmp/draf
     scheduleSessionSnapshot: () => {},
     syncWorkspaceRootToCurrent: () => {},
     updateHtmlViewToggle: () => {},
-    createRafThrottle: (() => (callback: () => void) => callback()) as never,
+    createRafThrottle: (() => ({ schedule: (callback: () => void) => callback(), cancel: () => {} })) as never,
   });
   return { ctx, lifecycle, saveFile, sendCloseLeaseInvalidated, getDoc: () => doc, mutationFenced: () => mutationFenced };
 }

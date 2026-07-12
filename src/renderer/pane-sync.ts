@@ -35,10 +35,10 @@ export function initPaneSync(ctx: AppContext, deps: PaneSyncDeps) {
   });
 
   const editorToPreviewSync = deps.createRafThrottle();
-  ctx.editor.onSelectionChange((span) => editorToPreviewSync(() => selectionSync.syncEditorToPreview(span)));
+  ctx.editor.onSelectionChange((span) => editorToPreviewSync.schedule(() => selectionSync.syncEditorToPreview(span)));
 
   const previewToEditorSync = deps.createRafThrottle();
-  document.addEventListener('selectionchange', () => previewToEditorSync(() => selectionSync.syncPreviewToEditor()));
+  document.addEventListener('selectionchange', () => previewToEditorSync.schedule(() => selectionSync.syncPreviewToEditor()));
   ctx.preview.onAfterRender(() => selectionSync.clearAll());
   deps.editorHost.addEventListener('focusout', () => {
     requestAnimationFrame(() => {
@@ -124,9 +124,48 @@ export function initPaneSync(ctx: AppContext, deps: PaneSyncDeps) {
   }
 
   const lineAlignThrottle = deps.createRafThrottle();
-  function scheduleLineAlign(): void {
-    lineAlignThrottle(applyLineAlign);
+  let renderGeneration = 0;
+  let reveal: { generation: number; done: boolean } | null = null;
+
+  function settleReveal(generation: number): void {
+    if (!reveal || reveal.generation !== generation || reveal.done) return;
+    reveal.done = true;
+    ctx.preview.el.style.visibility = '';
+    ctx.preview.el.removeAttribute('data-preview-align-pending');
   }
+
+  function cancelRenderAlignment(): void {
+    lineAlignThrottle.cancel();
+    if (reveal) settleReveal(reveal.generation);
+  }
+
+  function scheduleLineAlign(): void {
+    if (!lineAlignActive() && reveal) cancelRenderAlignment();
+    lineAlignThrottle.schedule(applyLineAlign);
+  }
+
+  // Pane-sync is the only reveal coordinator. Failed renders invoke the returned
+  // rollback synchronously; successful renders transfer the lease to the rAF job.
+  ctx.preview.onBeforeRender(() => {
+    cancelRenderAlignment();
+    const generation = ++renderGeneration;
+    if (!lineAlignActive()) return;
+    reveal = { generation, done: false };
+    ctx.preview.el.style.visibility = 'hidden';
+    ctx.preview.el.setAttribute('data-preview-align-pending', String(generation));
+    return () => settleReveal(generation);
+  });
+  ctx.preview.onRenderSettled(({ ok }) => {
+    if (!ok || !reveal || reveal.done) return;
+    const generation = reveal.generation;
+    lineAlignThrottle.schedule(() => {
+      try {
+        if (generation === renderGeneration && lineAlignActive()) applyLineAlign();
+      } finally {
+        settleReveal(generation);
+      }
+    });
+  });
 
   let scrollAnchors: ScrollAnchor[] = [];
   let anchorsDirty = true;
@@ -181,10 +220,10 @@ export function initPaneSync(ctx: AppContext, deps: PaneSyncDeps) {
 
   ctx.preview.onAfterRender(() => {
     invalidateScrollAnchors();
-    scheduleLineAlign();
   });
   window.addEventListener('resize', () => {
     invalidateScrollAnchors();
+    cancelRenderAlignment();
     scheduleLineAlign();
   });
   ctx.editor.view.scrollDOM.addEventListener('scroll', () => syncScroll('ed'), { passive: true });

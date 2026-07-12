@@ -1,3 +1,5 @@
+import { buildRunTable, injectRunIds, type RunTable } from './source-journal';
+
 import type MarkdownIt from 'markdown-it';
 
 /**
@@ -39,6 +41,24 @@ export type SourceLineRange = {
 export const SRC_START_ATTR = 'data-src-start';
 const SRC_END_ATTR = 'data-src-end';
 const MAP_ID_ATTR = 'data-map-id';
+export { buildRunTable, injectRunIds };
+export type { RunTable };
+
+/** Validates the rendered run owners before the preview is exposed. */
+export function validateDom(root: Element, runTable: RunTable): void {
+  const owners = Array.from(root.querySelectorAll<HTMLElement>('[data-run-id]'));
+  if (owners.length !== runTable.runs.length) {
+    throw new Error(`preview run cardinality mismatch: expected ${runTable.runs.length}, got ${owners.length}`);
+  }
+  const seen = new Set<number>();
+  for (const owner of owners) {
+    const id = Number(owner.dataset.runId);
+    if (!Number.isInteger(id) || seen.has(id) || !runTable.runs.some((run) => run.runId === id)) {
+      throw new Error('preview run ownership mismatch');
+    }
+    seen.add(id);
+  }
+}
 
 /** Minimal element shape the readers depend on — keeps the pure helpers
  *  testable without a DOM (a plain stub satisfies it). */
@@ -58,7 +78,11 @@ type AttrReader = { getAttribute(name: string): string | null };
  * Pure: depends only on `md` + `markdown`, no DOM.
  */
 export function buildTokenLineRanges(md: MarkdownIt, markdown: string): SourceLineRange[] {
-  const tokens = md.parse(markdown, {});
+  return buildTokenLineRangesFromTokens(md.parse(markdown, {}));
+}
+
+/** Token-array variant used by preview's single-pass render pipeline. */
+export function buildTokenLineRangesFromTokens(tokens: ReturnType<MarkdownIt['parse']>): SourceLineRange[] {
   const ranges: SourceLineRange[] = [];
   let nextId = 0;
   for (const token of tokens) {
@@ -215,8 +239,7 @@ type BlockToken = {
  * exactly the set {@link buildTokenLineRanges} keeps, in the same document order,
  * so they line up 1:1 with the tagged top-level preview children.
  */
-function buildBlockTokenTree(md: MarkdownIt, markdown: string): BlockToken[] {
-  const tokens = md.parse(markdown, {});
+function buildBlockTokenTree(tokens: readonly MdToken[]): BlockToken[] {
   const root: BlockToken = { tag: '', startLine: 0, endLine: 0, hasMap: false, children: [] };
   const stack: BlockToken[] = [root];
   const make = (t: MdToken): BlockToken => ({
@@ -294,7 +317,12 @@ function tagBlockChildren(domEl: Element, node: BlockToken, ancestor: { startLin
  * it), so calling this after {@link tagPreviewBlocks} keeps the source pristine.
  */
 export function tagNestedPreviewBlocks(root: Element, md: MarkdownIt, markdown: string): void {
-  const top = buildBlockTokenTree(md, markdown).filter((n) => n.hasMap);
+  tagNestedPreviewBlocksFromTokens(root, md.parse(markdown, {}));
+}
+
+/** Token-array variant used by preview's single-pass render pipeline. */
+export function tagNestedPreviewBlocksFromTokens(root: Element, tokens: readonly MdToken[]): void {
+  const top = buildBlockTokenTree(tokens).filter((n) => n.hasMap);
   const domKids = Array.from(root.children);
   for (let i = 0; i < top.length && i < domKids.length; i++) {
     const node = top[i];

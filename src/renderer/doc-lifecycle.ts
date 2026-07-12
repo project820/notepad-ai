@@ -120,7 +120,7 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
     // Avoid clobbering the preview while the user is typing there (re-checked in
     // the throttled callback in case focus moves into the preview within the frame).
     if (!ctx.editingInPreview) {
-      previewRenderThrottle(() => {
+      previewRenderThrottle.schedule(() => {
         if (!ctx.editingInPreview) ctx.preview.setDoc(doc);
       });
     }
