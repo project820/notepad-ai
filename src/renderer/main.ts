@@ -168,6 +168,7 @@ const { flushPendingPreviewToSource, flushPreviewToSource, syncPreviewToSource }
   t,
   onSuppressedEditorChange: docLifecycle.onSuppressedEditorChange,
   tryMutateDocument: docLifecycle.tryMutateDocument,
+  recordPreviewInput: docLifecycle.recordPreviewInput,
 });
 updateHtmlViewToggle = createHtmlViewToggle(ctx, { selectionSync, scheduleLineAlign });
 

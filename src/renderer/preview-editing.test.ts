@@ -9,12 +9,22 @@ function setupPreviewEditing(initialDoc = 'original') {
   document.body.appendChild(previewEl);
 
   let doc = initialDoc;
+  let mayMutate = true;
   const setDoc = vi.fn((next: string) => {
     doc = next;
   });
-  const lifecycle = vi.fn((next: string) => {
+  const setPreviewDoc = vi.fn((next: string) => {
+    previewEl.textContent = next;
+  });
+  const lifecycle = vi.fn((_next: string, _syncPreview = false, mutationAlreadyRecorded = false) => {
+    ctx.dirty = true;
+    if (!mutationAlreadyRecorded) ctx.docRevision += 1;
+  });
+  const recordPreviewInput = vi.fn(() => {
+    if (!mayMutate) return false;
     ctx.dirty = true;
     ctx.docRevision += 1;
+    return true;
   });
   const ctx = {
     dirty: false,
@@ -23,7 +33,7 @@ function setupPreviewEditing(initialDoc = 'original') {
     suppressEditorChange: false,
     preview: {
       el: previewEl,
-      setDoc: vi.fn(),
+      setDoc: setPreviewDoc,
     },
     editor: {
       getDoc: () => doc,
@@ -35,15 +45,28 @@ function setupPreviewEditing(initialDoc = 'original') {
     htmlToMarkdown: htmlToMarkdown as never,
     t: vi.fn() as never,
     onSuppressedEditorChange: lifecycle,
-    tryMutateDocument: () => true,
+    tryMutateDocument: () => mayMutate,
+    recordPreviewInput,
   });
 
-  return { ctx, doc: () => doc, editing, htmlToMarkdown, lifecycle, previewEl, setDoc };
+  return {
+    ctx,
+    doc: () => doc,
+    editing,
+    htmlToMarkdown,
+    lifecycle,
+    previewEl,
+    recordPreviewInput,
+    setDoc,
+    setMayMutate: (allowed: boolean) => { mayMutate = allowed; },
+    setPreviewDoc,
+  };
 }
 
 afterEach(() => {
   document.body.replaceChildren();
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 describe('initPreviewEditing close flush', () => {
@@ -57,9 +80,54 @@ describe('initPreviewEditing close flush', () => {
 
     expect(closeState).toEqual({ dirty: true, revision: 1, doc: 'edited before close' });
     expect(setDoc).toHaveBeenCalledWith('edited before close');
-    expect(lifecycle).toHaveBeenCalledWith('edited before close');
+    expect(lifecycle).toHaveBeenCalledWith('edited before close', false, true);
     expect(editing.flushPendingPreviewToSource()).toBe(false);
     expect(htmlToMarkdown).toHaveBeenCalledTimes(1);
+  });
+  it('invalidates the lifecycle immediately on preview input before debounced source synchronization', () => {
+    vi.useFakeTimers();
+    const { ctx, doc, lifecycle, previewEl, recordPreviewInput, setDoc } = setupPreviewEditing();
+    previewEl.innerHTML = '<p>edited after close query</p>';
+
+    previewEl.dispatchEvent(new Event('input'));
+
+    expect(recordPreviewInput).toHaveBeenCalledOnce();
+    expect(ctx.docRevision).toBe(1);
+    expect(doc()).toBe('original');
+    expect(setDoc).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(350);
+
+    expect(doc()).toBe('edited after close query');
+    expect(lifecycle).toHaveBeenCalledWith('edited after close query', false, true);
+  });
+
+  it('restores canonical preview content when a late input arrives after the close lease is consumed', () => {
+    const { ctx, doc, previewEl, recordPreviewInput, setMayMutate, setPreviewDoc } = setupPreviewEditing();
+    setMayMutate(false);
+    previewEl.innerHTML = '<p>late native edit</p>';
+
+    previewEl.dispatchEvent(new Event('input'));
+
+    expect(recordPreviewInput).not.toHaveBeenCalled();
+    expect(doc()).toBe('original');
+    expect(previewEl.textContent).toBe('original');
+    expect(setPreviewDoc).toHaveBeenCalledWith('original');
+    expect(ctx.editingInPreview).toBe(false);
+  });
+
+  it('accepts preview input again after a close rollback restores mutation permission', () => {
+    const { ctx, previewEl, recordPreviewInput, setMayMutate } = setupPreviewEditing();
+    setMayMutate(false);
+    previewEl.innerHTML = '<p>blocked edit</p>';
+    previewEl.dispatchEvent(new Event('input'));
+
+    setMayMutate(true);
+    previewEl.innerHTML = '<p>editable again</p>';
+    previewEl.dispatchEvent(new Event('input'));
+
+    expect(recordPreviewInput).toHaveBeenCalledOnce();
+    expect(ctx.editingInPreview).toBe(true);
   });
 
   it('does not convert a rendered preview with no pending edit', () => {

@@ -7,16 +7,29 @@ import type { t } from './i18n';
 type PreviewEditingDeps = {
   htmlToMarkdown: typeof htmlToMarkdown;
   t: typeof t;
-  onSuppressedEditorChange: (doc: string) => void;
+  onSuppressedEditorChange: (doc: string, syncPreview?: boolean, mutationAlreadyRecorded?: boolean) => void;
   tryMutateDocument: () => boolean;
+  recordPreviewInput: () => boolean;
 };
 
 export function initPreviewEditing(ctx: AppContext, deps: PreviewEditingDeps) {
   let previewSyncTimer: ReturnType<typeof setTimeout> | null = null;
   let previewEditPending = false;
 
+  function restorePreviewFromSource(): void {
+    if (previewSyncTimer) clearTimeout(previewSyncTimer);
+    previewSyncTimer = null;
+    previewEditPending = false;
+    ctx.editingInPreview = false;
+    ctx.preview.setDoc(ctx.editor.getDoc());
+  }
+
   function flushPreviewToSource(): boolean {
-    if (!previewEditPending || !deps.tryMutateDocument()) return false;
+    if (!previewEditPending) return false;
+    if (!deps.tryMutateDocument()) {
+      restorePreviewFromSource();
+      return false;
+    }
     ctx.preview.el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach((el) => {
       el.toggleAttribute('checked', el.checked);
     });
@@ -26,7 +39,7 @@ export function initPreviewEditing(ctx: AppContext, deps: PreviewEditingDeps) {
     ctx.suppressEditorChange = true;
     ctx.editor.setDoc(md);
     ctx.suppressEditorChange = false;
-    deps.onSuppressedEditorChange(md);
+    deps.onSuppressedEditorChange(md, false, true);
     return true;
   }
 
@@ -46,18 +59,25 @@ export function initPreviewEditing(ctx: AppContext, deps: PreviewEditingDeps) {
     }, 350);
   }
 
-  ctx.preview.el.addEventListener('input', () => {
+  function beginPreviewInput(): void {
+    if (!deps.tryMutateDocument() || (!previewEditPending && !deps.recordPreviewInput())) {
+      restorePreviewFromSource();
+      return;
+    }
     ctx.editingInPreview = true;
     previewEditPending = true;
     syncPreviewToSource();
-  });
+  }
+
+  ctx.preview.el.addEventListener('beforeinput', (e) => {
+    if (deps.tryMutateDocument()) return;
+    e.preventDefault();
+    restorePreviewFromSource();
+  }, true);
+  ctx.preview.el.addEventListener('input', beginPreviewInput);
   ctx.preview.el.addEventListener('change', (e) => {
     const target = e.target as HTMLInputElement | null;
-    if (target && target.type === 'checkbox') {
-      ctx.editingInPreview = true;
-      previewEditPending = true;
-      syncPreviewToSource();
-    }
+    if (target && target.type === 'checkbox') beginPreviewInput();
   });
   ctx.preview.el.addEventListener('focusin', () => {
     ctx.activeSurface = 'preview';

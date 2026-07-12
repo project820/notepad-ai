@@ -58,6 +58,19 @@ describe('document close lease and replacement lifecycle', () => {
     expect(lifecycle.authorizeCloseLease('lease-1')).toBe(false);
   });
 
+  it('records a preview input through the lifecycle and invalidates its close lease', () => {
+    const { ctx, lifecycle, sendCloseLeaseInvalidated } = setup();
+    ctx.dirty = false;
+    lifecycle.beginCloseLease('lease-1');
+
+    expect(lifecycle.recordPreviewInput()).toBe(true);
+
+    expect(ctx.docRevision).toBe(1);
+    expect(ctx.dirty).toBe(true);
+    expect(sendCloseLeaseInvalidated).toHaveBeenCalledWith('lease-1', 1);
+    expect(lifecycle.authorizeCloseLease('lease-1')).toBe(false);
+  });
+
   it('cancels an armed autosave and fences future document saves on discard', async () => {
     vi.useFakeTimers();
     const { ctx, lifecycle, saveFile } = setup();
@@ -96,6 +109,7 @@ describe('document close lease and replacement lifecycle', () => {
 
     expect(lifecycle.consumeCloseLease('lease-1')).toBe(true);
     expect(mutationFenced()).toBe(true);
+    expect((ctx.preview.el as HTMLElement).contentEditable).toBe('false');
     expect(lifecycle.replaceDocument({ doc: 'edited', currentPath: '/tmp/other.md', pendingTitle: 'other.md', dirty: false })).toBe(false);
     lifecycle.onDocChange('edited');
 
@@ -105,6 +119,7 @@ describe('document close lease and replacement lifecycle', () => {
     expect(ctx.dirty).toBe(true);
     lifecycle.rollbackDiscardFence();
     expect(mutationFenced()).toBe(false);
+    expect((ctx.preview.el as HTMLElement).contentEditable).toBe('true');
     expect(lifecycle.authorizeCloseLease('lease-1')).toBe(false);
   });
 

@@ -43,6 +43,17 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
     return true;
   }
 
+  function recordPreviewInput(): boolean {
+    if (!recordDocumentMutation()) return false;
+    if (!ctx.dirty) {
+      ctx.dirty = true;
+      setTitle();
+    }
+    scheduleAutosave();
+    deps.scheduleSessionSnapshot();
+    return true;
+  }
+
   function displayTitle(): string {
     if (ctx.currentPath) return ctx.currentPath.split('/').pop() ?? 'Untitled';
     return ctx.pendingTitle ?? 'Untitled';
@@ -118,8 +129,8 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
     deps.scheduleSessionSnapshot();
   }
 
-  function onSuppressedEditorChange(doc: string, syncPreview = false): void {
-    if (!recordDocumentMutation()) return;
+  function onSuppressedEditorChange(doc: string, syncPreview = false, mutationAlreadyRecorded = false): void {
+    if (!mutationAlreadyRecorded && !recordDocumentMutation()) return;
     handleSuppressedDocumentChange(doc, {
       isDirty: () => ctx.dirty,
       markDirty: () => {
@@ -285,6 +296,7 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
   function consumeCloseLease(id: string): boolean {
     if (!authorizeCloseLease(id)) return false;
     ctx.editor.setMutationFence(true);
+    ctx.preview.el.contentEditable = 'false';
     closeLease!.consumed = true;
     return true;
   }
@@ -301,12 +313,14 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
   function rollbackDiscardFence(): void {
     savesFenced = false;
     ctx.editor.setMutationFence(false);
+    ctx.preview.el.contentEditable = 'true';
     closeLease = null;
     if (ctx.dirty && ctx.currentPath) scheduleAutosave();
   }
 
   return {
     tryMutateDocument,
+    recordPreviewInput,
     onDocChange,
     onSuppressedEditorChange,
     replaceDocument,
