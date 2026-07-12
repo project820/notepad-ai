@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import structuralFixtures from './__fixtures__/preview-roundtrip/structural.json';
 
 import { serializeChangedRun } from './fragment-serialize';
-import { applyStructuralEdit, classifyGapDisposition, assembleSource, buildRunTable, type NormalizedEdit, type SerializedRun } from './source-journal';
+import { applyStructuralEdit, classifyGapDisposition, assembleSource, buildRunTable, structuralJournalSupport, type NormalizedEdit, type SerializedRun } from './source-journal';
 import { createMarkdownIt } from './markdown-it';
 
 function table(source: string) {
@@ -51,7 +51,8 @@ describe('R5 fixture metrics', () => {
   });
 });
 describe('structural source journal golden assembly', () => {
-  it.each(structuralFixtures as Array<{ name: string; source: string; edit: NormalizedEdit; changed: SerializedRun[]; expected: string }>)(
+  it.each((structuralFixtures as Array<{ name: string; source: string; edit: NormalizedEdit; changed: SerializedRun[]; expected: string; unsupported?: boolean }>)
+    .filter((fixture) => !fixture.unsupported))(
     '$name preserves untouched gaps byte-for-byte',
     ({ source, edit, changed, expected }) => {
       const disposition = classifyGapDisposition(edit);
@@ -60,6 +61,31 @@ describe('structural source journal golden assembly', () => {
       expect(applyStructuralEdit(table(source), edit, disposition as never, changed)).toBe(expected);
     },
   );
+  it.each((structuralFixtures as Array<{ name: string; source: string; edit: NormalizedEdit; unsupported?: boolean }>)
+    .filter((fixture) => fixture.unsupported))(
+    '$name is explicit B6 and produces no structural output',
+    ({ source, edit }) => {
+      const disposition = classifyGapDisposition(edit);
+      expect(structuralJournalSupport(table(source), edit, disposition as never)).toMatchObject({
+        ok: false,
+        reason: 'structural-unsupported-subtype',
+      });
+    },
+  );
+});
+describe('structural safety boundary', () => {
+  it.each([
+    ['list split', '- first\n- second\n', { inputType: 'insertParagraph', replacementKind: 'text', boundary: 'middle', boundaryGaps: [], range: { kind: 'collapsed', edge: 'interior' }, affected: { beforeIds: [0], afterIds: [0, 9], delta: 'add' } }],
+    ['heading delete', '# heading\n\nbody\n', { inputType: 'deleteContentBackward', replacementKind: 'none', boundary: 'leading', boundaryGaps: [], range: { kind: 'selection', coverage: 'whole' }, affected: { beforeIds: [0], afterIds: [], delta: 'remove' } }],
+  ] as const)('%s is explicit B6, never a structural byte assembly', (_name, source, rawEdit) => {
+    const edit = rawEdit as unknown as NormalizedEdit;
+    const disposition = classifyGapDisposition(edit);
+    expect(disposition.kind).not.toBe('rerender');
+    expect(structuralJournalSupport(table(source), edit, disposition as never)).toMatchObject({
+      ok: false,
+      reason: 'structural-unsupported-subtype',
+    });
+  });
 });
 
 describe('gap classifier', () => {

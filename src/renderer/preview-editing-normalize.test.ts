@@ -72,4 +72,21 @@ describe('preview beforeinput normalization', () => {
     selection.addRange(range);
     expect(capturePreviewEditSnapshot(el, input('deleteContentForward')).selectedIds).toEqual([1, 2]);
   });
+  it.each([
+    ['blockStart', 0, 'blockStart'],
+    ['blockEnd', 4, 'blockEnd'],
+    ['interior', 2, 'interior'],
+  ] as const)('uses owner Range boundaries for inline %s', (_name, offset, edge) => {
+    const el = document.createElement('div');
+    el.innerHTML = '<p data-run-id="1"><strong>bold</strong></p>';
+    document.body.append(el);
+    const text = el.querySelector('strong')!.firstChild!;
+    const range = document.createRange();
+    range.setStart(text, offset);
+    range.collapse(true);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    expect(capturePreviewEditSnapshot(el, input('deleteContentForward')).range).toEqual({ kind: 'collapsed', edge });
+  });
 });

@@ -255,10 +255,57 @@ function replaceRuns(runTable: RunTable, changed: readonly SerializedRun[]): str
   return output + runTable.source.slice(jsAtByte(runTable.source, cursor));
 }
 
+export type StructuralJournalSupport =
+  | { ok: true }
+  | { ok: false; reason: 'structural-unsupported-subtype' | 'structural-unsupported-gap' | 'structural-unsupported-shape' };
+
 /**
- * Applies the B1–B4 source-journal dispositions without normalizing untouched
- * source. `replacement` is produced from the edited DOM's changed fragments;
- * every byte outside the affected run span remains canonical source.
+ * Structural journal edits are intentionally narrow. Paragraphs separated only
+ * by whitespace gaps have no hidden structural prefix to regenerate; every
+ * other block type must take the explicit B6 path rather than synthesize bytes.
+ */
+export function structuralJournalSupport(
+  runTable: RunTable,
+  edit: NormalizedEdit,
+  disposition: Exclude<ClassifyResult, { kind: 'single-block' | 'rerender' }>,
+): StructuralJournalSupport {
+  const runs = edit.affected.beforeIds
+    .map((id) => runTable.runs.find((run) => run.runId === id))
+    .filter((run): run is DomContentRun => run != null)
+    .sort((a, b) => a.sourceSlices[0][0] - b.sourceSlices[0][0]);
+  if (runs.length === 0) return { ok: false, reason: 'structural-unsupported-shape' };
+  if (!runs.every((run) => run.subtype === 'paragraph')) return { ok: false, reason: 'structural-unsupported-subtype' };
+  if ((disposition.kind === 'split' && runs.length !== 1) || (disposition.kind === 'merge' && runs.length !== 2)) {
+    return { ok: false, reason: 'structural-unsupported-shape' };
+  }
+  const first = runs[0].sourceSlices[0][0];
+  const last = runs.at(-1)!.sourceSlices.at(-1)![1];
+  for (const interval of runTable.intervals) {
+    if (interval.kind === 'content' || interval.span[1] <= first || interval.span[0] >= last) continue;
+    const source = runTable.source.slice(jsAtByte(runTable.source, interval.span[0]), jsAtByte(runTable.source, interval.span[1]));
+    if (!/^\s*$/.test(source)) return { ok: false, reason: 'structural-unsupported-gap' };
+  }
+  return { ok: true };
+}
+
+function intervalText(runTable: RunTable, interval: JournalInterval): string {
+  return interval.kind === 'content'
+    ? sourceForRun(runTable, interval)
+    : runTable.source.slice(jsAtByte(runTable.source, interval.span[0]), jsAtByte(runTable.source, interval.span[1]));
+}
+
+function intervalStart(interval: JournalInterval): number {
+  return interval.kind === 'content' ? interval.sourceSlices[0][0] : interval.span[0];
+}
+
+function intervalEnd(interval: JournalInterval): number {
+  return interval.kind === 'content' ? interval.sourceSlices.at(-1)![1] : interval.span[1];
+}
+
+/**
+ * Assemble B1–B4 by walking every journal interval. This intentionally never
+ * splices source coordinates: unchanged content and source-only gaps are copied
+ * from their own interval, while selected paragraph intervals are replaced.
  */
 export function applyStructuralEdit(
   runTable: RunTable,
@@ -267,45 +314,46 @@ export function applyStructuralEdit(
   changed: readonly SerializedRun[],
   replacement?: string,
 ): string {
+  const support = structuralJournalSupport(runTable, edit, disposition);
+  if (!support.ok) throw new Error(support.reason);
   const changedById = new Map(changed.map((entry) => [entry.runId, entry.segments.join('')]));
-  const ids = edit.affected.beforeIds
+  const selected = edit.affected.beforeIds
     .map((id) => runTable.runs.find((run) => run.runId === id))
     .filter((run): run is DomContentRun => run != null)
     .sort((a, b) => a.sourceSlices[0][0] - b.sourceSlices[0][0]);
-  if (ids.length === 0) return runTable.source;
-
-  const first = ids[0];
-  const last = ids.at(-1)!;
-  const start = first.sourceSlices[0][0];
-  const end = last.sourceSlices.at(-1)![1];
-  const prefix = runTable.source.slice(0, jsAtByte(runTable.source, start));
-  const suffix = runTable.source.slice(jsAtByte(runTable.source, end));
+  const first = selected[0];
+  const last = selected.at(-1)!;
+  const selectedIds = new Set(selected.map((run) => run.runId));
+  const firstStart = first.sourceSlices[0][0];
+  const lastEnd = last.sourceSlices.at(-1)![1];
   const rendered = replacement ?? changedById.get(first.runId) ?? [...changedById.values()][0] ?? sourceForRun(runTable, first);
+  const nextSurvivor = runTable.runs.find((run) => intervalStart(run) > lastEnd && !selectedIds.has(run.runId));
+  const deleteUntil = nextSurvivor ? intervalStart(nextSurvivor) : byteLength(runTable.source);
+  let output = '';
 
-  switch (disposition.kind) {
-    case 'split': {
-      const parts = rendered.split('\n\n');
-      const left = parts[0] ?? '';
-      const right = parts.slice(1).join('\n\n') || rendered.slice(left.length);
-      return prefix + left + '\n\n' + right + suffix;
+  for (const interval of runTable.intervals) {
+    if (interval.kind === 'content') {
+      if (!selectedIds.has(interval.runId)) {
+        output += intervalText(runTable, interval);
+      } else if (interval.runId === first.runId) {
+        if (disposition.kind !== 'whole-block-delete') output += rendered;
+      }
+      continue;
     }
-    case 'merge':
-      // The boundary gap is represented by the source between the two old runs;
-      // dropping it joins the one changed run to the retained outer source.
-      return prefix + rendered + suffix;
-    case 'whole-block-delete': {
-      if (disposition.boundary === 'all') return '';
-      if (disposition.boundary === 'trailing') return prefix.replace(/\n*$/, '') + '\n';
-      // For leading/middle, removal includes the following gap. The previous
-      // source gap is deliberately outside `start` and therefore preserved.
-      const next = runTable.runs.find((run) => run.sourceSlices[0][0] > end);
-      const after = next ? next.sourceSlices[0][0] : byteLength(runTable.source);
-      return prefix + runTable.source.slice(jsAtByte(runTable.source, after));
+
+    const start = intervalStart(interval);
+    const end = intervalEnd(interval);
+    if (disposition.kind === 'whole-block-delete') {
+      if (disposition.boundary !== 'trailing' && start >= firstStart && end <= deleteUntil) continue;
+    } else if ((disposition.kind === 'merge' || disposition.kind === 'multi-selection-replace') && start >= firstStart && end <= lastEnd) {
+      continue;
     }
-    case 'multi-selection-replace':
-      // Internal gaps are replaced only by the new fragment; outer gaps remain.
-      return prefix + rendered + suffix;
+    output += intervalText(runTable, interval);
   }
+
+  if (disposition.kind === 'whole-block-delete' && disposition.boundary === 'all') return '';
+  if (disposition.kind === 'whole-block-delete' && disposition.boundary === 'trailing') return output.replace(/\n*$/, '') + '\n';
+  return output;
 }
 
 export function assembleSource(runTable: RunTable, changed: readonly SerializedRun[]): string {

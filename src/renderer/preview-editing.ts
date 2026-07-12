@@ -54,21 +54,28 @@ function selectionRange(event: InputEvent): Range | StaticRange | null {
   return selection?.rangeCount ? selection.getRangeAt(0) : null;
 }
 
-function normalizedRange(root: HTMLElement, value: Range | StaticRange | null): NormalizedEdit['range'] {
+function normalizedRange(_root: HTMLElement, value: Range | StaticRange | null): NormalizedEdit['range'] {
   const range = toRange(value);
   if (!range) return { kind: 'collapsed', edge: 'interior' };
   if (!range.collapsed) {
-    const selected = ownerIdsInRange(root, range);
+    const selected = ownerIdsInRange(_root, range);
     const startOwner = ownerFor(range.startContainer);
     const endOwner = ownerFor(range.endContainer);
     const whole = selected.length === 1 && startOwner === endOwner && range.toString() === (startOwner?.textContent ?? '');
     return { kind: 'selection', coverage: whole ? 'whole' : 'partial' };
   }
   const owner = ownerFor(range.startContainer);
-  const text = owner?.textContent ?? '';
-  const offset = range.startOffset;
-  if (offset === 0) return { kind: 'collapsed', edge: 'blockStart' };
-  if (range.startContainer.nodeType === Node.TEXT_NODE && offset >= text.length) return { kind: 'collapsed', edge: 'blockEnd' };
+  if (!owner) return { kind: 'collapsed', edge: 'interior' };
+  const contents = document.createRange();
+  contents.selectNodeContents(owner);
+  const point = contents.comparePoint(range.startContainer, range.startOffset);
+  if (point !== 0) return { kind: 'collapsed', edge: 'interior' };
+  const before = contents.cloneRange();
+  before.setEnd(range.startContainer, range.startOffset);
+  if (before.toString() === '') return { kind: 'collapsed', edge: 'blockStart' };
+  const after = contents.cloneRange();
+  after.setStart(range.startContainer, range.startOffset);
+  if (after.toString() === '') return { kind: 'collapsed', edge: 'blockEnd' };
   return { kind: 'collapsed', edge: 'interior' };
 }
 
@@ -101,8 +108,26 @@ export function normalizePreviewEdit(
   const allAfter = Array.from(root.querySelectorAll<HTMLElement>('[data-run-id]'))
     .map((owner) => Number(owner.dataset.runId))
     .filter(Number.isInteger);
-  const beforeIds = before.selectedIds.length > 0 ? before.selectedIds : before.ownerIds;
-  let afterIds = allAfter.filter((id) => beforeIds.includes(id));
+  const beforeIds = before.selectedIds.length > 0 ? [...new Set(before.selectedIds)] : before.ownerIds;
+  let afterIds: MapId[];
+  if (before.range.kind === 'selection' && beforeIds.length > 0) {
+    const first = before.ownerIds.indexOf(beforeIds[0]);
+    const last = before.ownerIds.indexOf(beforeIds.at(-1)!);
+    const leftId = first > 0 ? before.ownerIds[first - 1] : null;
+    const rightId = last >= 0 && last + 1 < before.ownerIds.length ? before.ownerIds[last + 1] : null;
+    const leftAfter = leftId == null ? -1 : allAfter.indexOf(leftId);
+    const rightAfter = rightId == null ? allAfter.length : allAfter.indexOf(rightId);
+    if (rightAfter < 0 || (leftId != null && leftAfter < 0)) {
+      return {
+        inputType: event.inputType, replacementKind: event.inputType === 'insertFromPaste' ? 'paste' : event.inputType.startsWith('delete') ? 'none' : 'text',
+        boundary: 'middle', boundaryGaps: sourceGaps, range: before.range,
+        affected: { beforeIds, afterIds: [], delta: 'replace' },
+      };
+    }
+    afterIds = allAfter.slice(leftAfter + 1, rightAfter);
+  } else {
+    afterIds = allAfter.filter((id) => beforeIds.includes(id));
+  }
   const afterBlocks = previewBlockCount(root);
   if (event.inputType === 'insertParagraph' && afterBlocks > before.blockCount && afterIds.length === beforeIds.length) {
     afterIds = [...afterIds, -afterBlocks];
@@ -192,7 +217,7 @@ export function initPreviewEditing(ctx: AppContext, deps: PreviewEditingDeps) {
 
     const disposition = pendingEdit ? classifyGapDisposition(pendingEdit) : { kind: 'rerender' as const, reason: 'missing-normalized-edit' };
     const journal = (ctx.preview as unknown as {
-      commitSourcePatch?: (source: string, ids: readonly number[], structural?: unknown) => { ok: boolean; markdown: string };
+      commitSourcePatch?: (source: string, ids: readonly number[], structural?: unknown) => { ok: boolean; markdown: string; reason?: string };
     }).commitSourcePatch;
     let md: string | null = null;
     const structural = disposition.kind === 'split' || disposition.kind === 'merge' ||
@@ -206,6 +231,12 @@ export function initPreviewEditing(ctx: AppContext, deps: PreviewEditingDeps) {
         metrics.journalPatchCount += 1;
         deps.onCommitPath?.('journal');
         md = result.markdown;
+      } else if (structural && result.reason?.startsWith('structural-unsupported-')) {
+        // Explicit B6: unsupported structural prefixes are converted as a whole
+        // document rather than silently assembling incorrect source bytes.
+        metrics.fullSerializeCount += 1;
+        deps.onCommitPath?.('full');
+        md = deps.htmlToMarkdown(ctx.preview.el.innerHTML);
       } else {
         previewEditPending = false;
         pendingEdit = null;

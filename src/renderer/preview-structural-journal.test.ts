@@ -42,4 +42,17 @@ describe('preview structural journal commit', () => {
       ok: true, markdown: 'first\n\nlast\n',
     });
   });
+  it('rejects list structural assembly with an explicit B6 reason', () => {
+    const source = '- first\n- second\n';
+    const preview = createPreview(document.createElement('div'));
+    preview.setDoc(source);
+    const edit: NormalizedEdit = {
+      inputType: 'insertParagraph', replacementKind: 'text', boundary: 'middle', boundaryGaps: [],
+      range: { kind: 'collapsed', edge: 'interior' },
+      affected: { beforeIds: [0], afterIds: [0, 9], delta: 'add' },
+    };
+    expect(preview.commitSourcePatch(source, [0], structural(edit))).toMatchObject({
+      ok: false, markdown: source, reason: 'structural-unsupported-subtype',
+    });
+  });
 });

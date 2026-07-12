@@ -8,7 +8,7 @@ import {
   validateDom,
   type SourceLineRange,
 } from './source-preview-map';
-import { applyStructuralEdit, assembleSource, type ClassifyResult, type NormalizedEdit, type RunTable } from './source-journal';
+import { applyStructuralEdit, assembleSource, structuralJournalSupport, type ClassifyResult, type NormalizedEdit, type RunTable } from './source-journal';
 import { serializeChangedRun } from './fragment-serialize';
 
 type RenderSettled = { ok: boolean };
@@ -152,6 +152,8 @@ export function createPreview(parent: HTMLElement): PreviewHandle {
 
       let markdown: string;
       if (structural) {
+        const support = structuralJournalSupport(runTable, structural.edit, structural.disposition);
+        if (!support.ok) return { ok: false, markdown: source, reason: support.reason };
         const firstOwner = el.querySelector<HTMLElement>(`[data-run-id="${structural.edit.affected.beforeIds[0]}"]`);
         const nextUntyped = firstOwner?.nextElementSibling as HTMLElement | null;
         const replacement = structural.disposition.kind === 'split' && nextUntyped && !nextUntyped.hasAttribute('data-run-id')
