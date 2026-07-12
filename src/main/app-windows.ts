@@ -100,6 +100,7 @@ export function createAppWindows({
   let preserveSessionOnClose = false;
   const approvedCloseWindowIds = new Set<number>();
   const discardedWindowKeys = new Set<string>();
+  const pendingDiscardedWindowKeys = new Set<string>();
   const coordinator = new CloseCoordinator();
   const pendingState = new Map<string, { webContentsId: number; resolve: (state: CloseGuardState | null) => void }>();
   const pendingSave = new Map<string, { webContentsId: number; resolve: (result: { saved: boolean; committedRevision: number | null }) => void }>();
@@ -421,8 +422,11 @@ export function createAppWindows({
       return { retry: transaction.targets };
     }
 
+    const discardedKeys = requestedDiscards.map((target) => target.windowKey);
+    if (discardedKeys.length > 0) {
+      for (const windowKey of discardedKeys) pendingDiscardedWindowKeys.add(windowKey);
+    }
     try {
-      const discardedKeys = requestedDiscards.map((target) => target.windowKey);
       if (transaction.intent === 'quit') {
         await commitQuitSession(discardedKeys);
       } else if (discardedKeys.length > 0) {
@@ -431,10 +435,14 @@ export function createAppWindows({
     } catch (error) {
       console.error('[session] failed to commit close transaction:', error);
       await rollback(transaction.targets);
+      for (const windowKey of discardedKeys) pendingDiscardedWindowKeys.delete(windowKey);
       return false;
     }
 
-    for (const target of requestedDiscards) discardedWindowKeys.add(target.windowKey);
+    for (const windowKey of discardedKeys) {
+      pendingDiscardedWindowKeys.delete(windowKey);
+      discardedWindowKeys.add(windowKey);
+    }
     preserveSessionOnClose = transaction.intent === 'relaunch';
     for (const target of transaction.targets) {
       approvedCloseWindowIds.add(target.windowId);
@@ -698,6 +706,6 @@ export function createAppWindows({
     approveClose,
     approveAllForQuit,
     clearCloseApprovals: () => approvedCloseWindowIds.clear(),
-    isSessionWriteFenced: (windowKey) => discardedWindowKeys.has(windowKey),
+    isSessionWriteFenced: (windowKey) => pendingDiscardedWindowKeys.has(windowKey) || discardedWindowKeys.has(windowKey),
   };
 }

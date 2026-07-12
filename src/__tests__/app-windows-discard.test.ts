@@ -112,6 +112,7 @@ async function setup(
   showCloseDialog: () => Promise<'discard' | 'cancel'>,
   count = 2,
   authorize: () => boolean = () => true,
+  commitQuitSession: () => Promise<void> = async () => {},
 ) {
   electron.reset();
   vi.resetModules();
@@ -135,7 +136,7 @@ async function setup(
     hasSingleInstanceLock: true,
     removeSessionWindow: async () => {},
     removeSessionWindows: async () => {},
-    commitQuitSession: async () => {},
+    commitQuitSession,
     showCloseDialog: async () => showCloseDialog(),
   });
   electron.setOnSend((win, channel, payload) => {
@@ -252,5 +253,44 @@ describe('discard close IPC waiters', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+  it('keeps a temporary discard fence through rollback, then restores writes after a failed commit', async () => {
+    let rejectCommit!: (error: Error) => void;
+    let signalCommitStarted!: () => void;
+    let signalRollbackStarted!: () => void;
+    let rollbackReply!: { win: FakeWindow; payload: { requestId: string } };
+    const commitStarted = new Promise<void>((resolve) => { signalCommitStarted = resolve; });
+    const rollbackStarted = new Promise<void>((resolve) => { signalRollbackStarted = resolve; });
+    const commitQuitSession = vi.fn(() => new Promise<void>((_resolve, reject) => {
+      rejectCommit = reject;
+      signalCommitStarted();
+    }));
+    const rollbackTargets: number[] = [];
+    const { appWindows } = await setup((win, channel, payload) => {
+      if (channel === 'close:discard') {
+        electron.emitIpc('close:discard-result', win, { requestId: payload.requestId, fenced: true });
+      }
+      if (channel === 'close:consume') {
+        electron.emitIpc('close:consume-result', win, { requestId: payload.requestId, consumed: true });
+      }
+      if (channel === 'close:discard-rollback') {
+        rollbackTargets.push(win.id);
+        rollbackReply = { win, payload };
+        signalRollbackStarted();
+      }
+    }, async () => 'discard', 1, () => true, commitQuitSession);
+
+    const approval = appWindows.approveAllForQuit('quit');
+    await commitStarted;
+    expect(appWindows.isSessionWriteFenced('window-1')).toBe(true);
+
+    rejectCommit(new Error('disk full'));
+    await rollbackStarted;
+    expect(appWindows.isSessionWriteFenced('window-1')).toBe(true);
+    electron.emitIpc('close:discard-result', rollbackReply.win, { requestId: rollbackReply.payload.requestId });
+    await expect(approval).resolves.toBe(false);
+
+    expect(rollbackTargets).toEqual([1]);
+    expect(appWindows.isSessionWriteFenced('window-1')).toBe(false);
   });
 });

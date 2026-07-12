@@ -26,9 +26,16 @@ export function registerSessionIpc({ registry, sinkFor, isSessionWriteFenced = (
   handleTrusted('session:write', async (event, snap: unknown) => {
     const rec = registry.getByWebContents(event.sender.id); if (!rec) return;
     if (isSessionWriteFenced(rec.windowKey)) return;
-    const win = toWindowSnapshot(rec.windowKey, snap); rec.lastSnapshot = win; registry.syncSnapshotPath(rec.windowId, win);
-    const next = await mutateSessionAggregate((cur) => ({ ...upsertWindowSnapshot(cur, win), cleanExit: false }));
-    console.log(`[session] write key=${rec.windowKey} windows=${next.windows.length}`);
+    const win = toWindowSnapshot(rec.windowKey, snap);
+    let written = false;
+    const next = await mutateSessionAggregate((cur) => {
+      if (isSessionWriteFenced(rec.windowKey)) return cur;
+      rec.lastSnapshot = win;
+      registry.syncSnapshotPath(rec.windowId, win);
+      written = true;
+      return { ...upsertWindowSnapshot(cur, win), cleanExit: false };
+    });
+    if (written) console.log(`[session] write key=${rec.windowKey} windows=${next.windows.length}`);
   });
   handleTrusted('session:clear', async (event) => {
     const rec = registry.getByWebContents(event.sender.id); if (!rec) return;
