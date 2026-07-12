@@ -71,4 +71,39 @@ describe('preview structural journal commit', () => {
     if (result.ok) expect(result.markdown).toBe('**bold**\n\ntext\n\nlast\n');
     else expect(result).toMatchObject({ markdown: source, reason: expect.stringMatching(/^structural-split-/) });
   });
+  it('B1 mark edge whitespace preserves inline shape or takes B6', () => {
+    const source = 'first\n\nlast\n';
+    const preview = createPreview(document.createElement('div'));
+    preview.setDoc(source);
+    const owner = preview.el.querySelector<HTMLElement>('[data-run-id="0"]')!;
+    owner.innerHTML = '<mark> x </mark>';
+    owner.insertAdjacentHTML('afterend', '<p>right</p>');
+    const edit: NormalizedEdit = {
+      inputType: 'insertParagraph', replacementKind: 'text', boundary: 'leading', boundaryGaps: [],
+      range: { kind: 'collapsed', edge: 'interior' },
+      affected: { beforeIds: [0], afterIds: [0, 9], delta: 'add' },
+    };
+    const result = preview.commitSourcePatch(source, [0], structural(edit));
+    if (result.ok) {
+      expect(result.markdown).toBe(' ==x== \n\nright\n\nlast\n');
+      expect(preview.el.querySelector('mark')?.textContent).toBe('x');
+    } else {
+      expect(result).toMatchObject({ markdown: source, reason: 'inline-shape-mismatch' });
+    }
+  });
+
+  it('B4 mark edge whitespace is explicit B6 rather than an unverified structural swap', () => {
+    const source = 'first\n\nsecond\n\nlast\n';
+    const preview = createPreview(document.createElement('div'));
+    preview.setDoc(source);
+    preview.el.querySelector<HTMLElement>('[data-run-id="0"]')!.innerHTML = '<mark> x </mark>';
+    const edit: NormalizedEdit = {
+      inputType: 'insertFromPaste', replacementKind: 'paste', boundary: 'leading', boundaryGaps: [],
+      range: { kind: 'selection', coverage: 'partial' },
+      affected: { beforeIds: [0, 1], afterIds: [9], delta: 'replace' },
+    };
+    expect(preview.commitSourcePatch(source, [0, 1], structural(edit))).toMatchObject({
+      ok: false, markdown: source, reason: 'inline-shape-mismatch',
+    });
+  });
 });

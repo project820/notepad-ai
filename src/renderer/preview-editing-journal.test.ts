@@ -78,4 +78,28 @@ describe('preview editing journal route', () => {
     );
     expect(editing.getMetrics()).toEqual({ journalPatchCount: 1, fullSerializeCount: 0 });
   });
+  it('falls back after a serializer failure so an all-space code edit reaches canonical source', () => {
+    const el = document.createElement('div');
+    el.innerHTML = '<p data-run-id="7"><code> </code></p>';
+    const htmlToMarkdown = vi.fn(() => '` `\n');
+    const commitSourcePatch = vi.fn(() => ({ ok: false, markdown: 'original\n', reason: 'unknown-inline-node' }));
+    let source = 'original\n';
+    const ctx = {
+      editingInPreview: false, suppressEditorChange: false, showingConvertedHtml: false,
+      preview: { el, setDoc: vi.fn(), commitSourcePatch },
+      editor: { getDoc: () => source, setDoc: (value: string) => { source = value; } },
+    } as any;
+    const editing = initPreviewEditing(ctx, {
+      htmlToMarkdown, t: () => '', tryMutateDocument: () => true,
+      recordPreviewInput: () => true, onSuppressedEditorChange: () => {},
+    });
+    const code = el.querySelector('code')!;
+    code.dispatchEvent(new InputEvent('beforeinput', { inputType: 'insertText', bubbles: true }));
+    code.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(editing.flushPendingPreviewToSource()).toBe(true);
+
+    expect(htmlToMarkdown).toHaveBeenCalledWith(el.innerHTML);
+    expect(source).toBe('` `\n');
+    expect(editing.getMetrics()).toEqual({ journalPatchCount: 0, fullSerializeCount: 1 });
+  });
 });

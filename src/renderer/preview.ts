@@ -135,6 +135,37 @@ export function createPreview(parent: HTMLElement): PreviewHandle {
     }
     return true;
   }
+  function structuralInlineMatches(
+    markdown: string,
+    structural: { edit: NormalizedEdit; disposition: Exclude<ClassifyResult, { kind: 'single-block' | 'rerender' }> },
+  ): boolean {
+    // Deleted blocks have no surviving inline fragment to compare. Merge and
+    // replacement owners are browser-dependent, so they intentionally take B6
+    // until they have a stable owner mapping.
+    if (structural.disposition.kind === 'whole-block-delete') return true;
+    if (structural.disposition.kind !== 'split' || !runTable) return false;
+
+    const originalId = structural.edit.affected.beforeIds[0];
+    const actualLeft = el.querySelector<HTMLElement>(`[data-run-id="${originalId}"]`);
+    const actualRight = actualLeft?.nextElementSibling as HTMLElement | null;
+    if (!actualLeft || !actualRight || actualRight.hasAttribute('data-run-id')) return false;
+
+    const tokens = md.parse(markdown, {});
+    const rebuilt = buildRunTable(tokens, markdown).runTable;
+    injectRunIds(tokens, rebuilt);
+    const detached = document.createElement('div');
+    detached.innerHTML = md.renderer.render(tokens, md.options, {});
+    const expectedLeft = detached.querySelector<HTMLElement>(`[data-run-id="${originalId}"]`);
+    const expectedRight = detached.querySelector<HTMLElement>(`[data-run-id="${originalId + 1}"]`);
+    if (!expectedLeft || !expectedRight) return false;
+
+    for (const [actual, expected] of [[actualLeft, expectedLeft], [actualRight, expectedRight]] as const) {
+      const before = inlineSignature(actual);
+      const after = inlineSignature(expected);
+      if (before.text !== after.text || before.tags.join('|') !== after.tags.join('|')) return false;
+    }
+    return true;
+  }
 
   function render(source: string): void {
     const rollback = beforeCallbacks.map((cb) => cb()).filter((release): release is () => void => typeof release === 'function');
@@ -232,7 +263,8 @@ export function createPreview(parent: HTMLElement): PreviewHandle {
       if (!journalShapeMatches(markdown, structural)) {
         return { ok: false, markdown: source, reason: 'journal-reparse-mismatch' };
       }
-      if (!structural && !changedInlineMatches(markdown, changedRunIds)) {
+      if ((!structural && !changedInlineMatches(markdown, changedRunIds)) ||
+        (structural && !structuralInlineMatches(markdown, structural))) {
         return { ok: false, markdown: source, reason: 'inline-shape-mismatch' };
       }
       const savedBookmark = bookmark(el);

@@ -64,8 +64,8 @@ function inline(node: Node): string | null {
     const padded = text.startsWith('`') || text.endsWith('`') || text.startsWith(' ') || text.endsWith(' ') ? ` ${text} ` : text;
     return `${delimiter}${padded}${delimiter}`;
   }
-  if (tag === 'mark') return `==${text}==`;
-  if (tag === 'sup') return `^${text}^`;
+  if (tag === 'mark') return wrapDelimited(text, '==');
+  if (tag === 'sup') return wrapDelimited(text, '^');
   if (tag === 'a') return `[${text}](${el.getAttribute('href') ?? ''})`;
   if (['span', 'label', 'p', 'li', 'td', 'th', 'dd'].includes(tag)) return text;
   return null;

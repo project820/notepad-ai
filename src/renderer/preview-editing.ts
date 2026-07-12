@@ -235,17 +235,13 @@ export function initPreviewEditing(ctx: AppContext, deps: PreviewEditingDeps) {
         metrics.journalPatchCount += 1;
         deps.onCommitPath?.('journal');
         md = result.markdown;
-      } else if (result.reason === 'journal-reparse-mismatch' || result.reason === 'inline-shape-mismatch' || (structural && (result.reason?.startsWith('structural-unsupported-') || result.reason?.startsWith('structural-split-')))) {
-        // Explicit B6: unsupported structural prefixes are converted as a whole
-        // document rather than silently assembling incorrect source bytes.
+      } else {
+        // Every serializer/commit rejection is an explicit B6 conversion. Leaving
+        // the contenteditable DOM ahead of canonical source would lose the edit
+        // on the next render.
         metrics.fullSerializeCount += 1;
         deps.onCommitPath?.('full');
         md = deps.htmlToMarkdown(ctx.preview.el.innerHTML);
-      } else {
-        previewEditPending = false;
-        pendingEdit = null;
-        pendingRunIds.clear();
-        return false;
       }
     } else {
       // Converted HTML and B6 are deliberately kept on the old whole-document path.
