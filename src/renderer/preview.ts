@@ -8,7 +8,7 @@ import {
   validateDom,
   type SourceLineRange,
 } from './source-preview-map';
-import { assembleSource, type RunTable } from './source-journal';
+import { applyStructuralEdit, assembleSource, type ClassifyResult, type NormalizedEdit, type RunTable } from './source-journal';
 import { serializeChangedRun } from './fragment-serialize';
 
 type RenderSettled = { ok: boolean };
@@ -16,7 +16,11 @@ export type PreviewHandle = {
   el: HTMLDivElement;
   setDoc: (md: string) => void;
   /** Atomically serializes changed runs, reparses, retags and swaps the preview. */
-  commitSourcePatch: (source: string, changedRunIds: readonly number[]) => { ok: boolean; markdown: string; reason?: string };
+  commitSourcePatch: (
+    source: string,
+    changedRunIds: readonly number[],
+    structural?: { edit: NormalizedEdit; disposition: Exclude<ClassifyResult, { kind: 'single-block' | 'rerender' }> },
+  ) => { ok: boolean; markdown: string; reason?: string };
   onBeforeRender: (cb: () => (() => void) | void) => void;
   onAfterRender: (cb: () => void) => void;
   onRenderSettled: (cb: (result: RenderSettled) => void) => void;
@@ -133,29 +137,34 @@ export function createPreview(parent: HTMLElement): PreviewHandle {
   return {
     el,
     setDoc: render,
-    commitSourcePatch: (source, changedRunIds) => {
+    commitSourcePatch: (source, changedRunIds, structural) => {
       if (!runTable || runTable.source !== source) return { ok: false, markdown: source, reason: 'stale-source-journal' };
       const changed = [] as Array<{ runId: number; segments: readonly string[] }>;
       for (const id of changedRunIds) {
         const run = runTable.runs.find((entry) => entry.runId === id);
         const node = el.querySelector<HTMLElement>(`[data-run-id="${id}"]`);
-        if (!run || !node) return { ok: false, markdown: source, reason: 'missing-run-owner' };
+        if (!run || !node) continue; // deleted B2/B3 owners are expected to be absent.
         const serialized = serializeChangedRun(run.subtype, node);
         if (serialized.kind === 'rerender') return { ok: false, markdown: source, reason: serialized.reason };
         changed.push({ runId: id, segments: serialized.kind === 'verbatim' ? [serialized.text] : serialized.segments });
       }
-      const markdown = assembleSource(runTable, changed);
-      const savedBookmark = bookmark(el);
-      try {
-        render(markdown);
-        restoreBookmark(el, savedBookmark);
-        return { ok: true, markdown };
-      } catch {
-        // Controlled rerender always restores canonical source rather than
-        // leaving a partially edited DOM visible.
-        try { render(source); } catch { /* render() already notified the coordinator */ }
-        return { ok: false, markdown: source, reason: 'controlled-rerender' };
+      if (!structural && changed.length !== changedRunIds.length) return { ok: false, markdown: source, reason: 'missing-run-owner' };
+
+      let markdown: string;
+      if (structural) {
+        const firstOwner = el.querySelector<HTMLElement>(`[data-run-id="${structural.edit.affected.beforeIds[0]}"]`);
+        const nextUntyped = firstOwner?.nextElementSibling as HTMLElement | null;
+        const replacement = structural.disposition.kind === 'split' && nextUntyped && !nextUntyped.hasAttribute('data-run-id')
+          ? `${firstOwner?.textContent ?? ''}\n\n${nextUntyped.textContent ?? ''}`
+          : undefined;
+        markdown = applyStructuralEdit(runTable, structural.edit, structural.disposition, changed, replacement);
+      } else {
+        markdown = assembleSource(runTable, changed);
       }
+      const savedBookmark = bookmark(el);
+      render(markdown);
+      restoreBookmark(el, savedBookmark);
+      return { ok: true, markdown };
     },
     onBeforeRender: (cb) => { beforeCallbacks.push(cb); },
     onAfterRender: (cb) => { afterCallbacks.push(cb); },

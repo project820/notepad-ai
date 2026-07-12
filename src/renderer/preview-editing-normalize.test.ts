@@ -53,4 +53,23 @@ describe('preview beforeinput normalization', () => {
     el.innerHTML = '<p data-run-id="3">replacement</p>';
     expect(classifyGapDisposition(normalizePreviewEdit(el, input('insertFromPaste'), before))).toEqual({ kind: 'multi-selection-replace' });
   });
+  it('accepts a method-free StaticRange from getTargetRanges without DOM Range methods', () => {
+    const el = root([1, 2]);
+    const text = el.querySelector('[data-run-id="2"]')!.firstChild!;
+    const staticRange = { startContainer: text, startOffset: 0, endContainer: text, endOffset: 0 };
+    const event = { inputType: 'deleteContentBackward', getTargetRanges: () => [staticRange] } as unknown as InputEvent;
+    expect(() => capturePreviewEditSnapshot(el, event)).not.toThrow();
+  });
+
+  it('includes adjacent owners for a forward block-end merge candidate', () => {
+    const el = root([1, 2]);
+    const text = el.querySelector('[data-run-id="1"]')!.firstChild!;
+    const range = document.createRange();
+    range.setStart(text, text.textContent!.length);
+    range.collapse(true);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    expect(capturePreviewEditSnapshot(el, input('deleteContentForward')).selectedIds).toEqual([1, 2]);
+  });
 });

@@ -234,7 +234,12 @@ export function injectRunIds(tokens: ReturnType<MarkdownIt['parse']>, runTable: 
 }
 
 export type SerializedRun = { runId: number; segments: readonly string[] };
-export function assembleSource(runTable: RunTable, changed: readonly SerializedRun[]): string {
+
+function sourceForRun(runTable: RunTable, run: DomContentRun): string {
+  return run.sourceSlices.map(([start, end]) => runTable.source.slice(jsAtByte(runTable.source, start), jsAtByte(runTable.source, end))).join('');
+}
+
+function replaceRuns(runTable: RunTable, changed: readonly SerializedRun[]): string {
   const byId = new Map(changed.map((entry) => [entry.runId, entry.segments]));
   let output = '';
   let cursor = 0;
@@ -243,10 +248,66 @@ export function assembleSource(runTable: RunTable, changed: readonly SerializedR
     for (let i = 0; i < run.sourceSlices.length; i++) {
       const [start, end] = run.sourceSlices[i];
       output += runTable.source.slice(jsAtByte(runTable.source, cursor), jsAtByte(runTable.source, start));
-      output += replacement ? replacement[i] : runTable.source.slice(jsAtByte(runTable.source, start), jsAtByte(runTable.source, end));
+      output += replacement ? replacement[i] ?? '' : runTable.source.slice(jsAtByte(runTable.source, start), jsAtByte(runTable.source, end));
       cursor = end;
     }
   }
-  output += runTable.source.slice(jsAtByte(runTable.source, cursor));
-  return output;
+  return output + runTable.source.slice(jsAtByte(runTable.source, cursor));
+}
+
+/**
+ * Applies the B1–B4 source-journal dispositions without normalizing untouched
+ * source. `replacement` is produced from the edited DOM's changed fragments;
+ * every byte outside the affected run span remains canonical source.
+ */
+export function applyStructuralEdit(
+  runTable: RunTable,
+  edit: NormalizedEdit,
+  disposition: Exclude<ClassifyResult, { kind: 'single-block' | 'rerender' }>,
+  changed: readonly SerializedRun[],
+  replacement?: string,
+): string {
+  const changedById = new Map(changed.map((entry) => [entry.runId, entry.segments.join('')]));
+  const ids = edit.affected.beforeIds
+    .map((id) => runTable.runs.find((run) => run.runId === id))
+    .filter((run): run is DomContentRun => run != null)
+    .sort((a, b) => a.sourceSlices[0][0] - b.sourceSlices[0][0]);
+  if (ids.length === 0) return runTable.source;
+
+  const first = ids[0];
+  const last = ids.at(-1)!;
+  const start = first.sourceSlices[0][0];
+  const end = last.sourceSlices.at(-1)![1];
+  const prefix = runTable.source.slice(0, jsAtByte(runTable.source, start));
+  const suffix = runTable.source.slice(jsAtByte(runTable.source, end));
+  const rendered = replacement ?? changedById.get(first.runId) ?? [...changedById.values()][0] ?? sourceForRun(runTable, first);
+
+  switch (disposition.kind) {
+    case 'split': {
+      const parts = rendered.split('\n\n');
+      const left = parts[0] ?? '';
+      const right = parts.slice(1).join('\n\n') || rendered.slice(left.length);
+      return prefix + left + '\n\n' + right + suffix;
+    }
+    case 'merge':
+      // The boundary gap is represented by the source between the two old runs;
+      // dropping it joins the one changed run to the retained outer source.
+      return prefix + rendered + suffix;
+    case 'whole-block-delete': {
+      if (disposition.boundary === 'all') return '';
+      if (disposition.boundary === 'trailing') return prefix.replace(/\n*$/, '') + '\n';
+      // For leading/middle, removal includes the following gap. The previous
+      // source gap is deliberately outside `start` and therefore preserved.
+      const next = runTable.runs.find((run) => run.sourceSlices[0][0] > end);
+      const after = next ? next.sourceSlices[0][0] : byteLength(runTable.source);
+      return prefix + runTable.source.slice(jsAtByte(runTable.source, after));
+    }
+    case 'multi-selection-replace':
+      // Internal gaps are replaced only by the new fragment; outer gaps remain.
+      return prefix + rendered + suffix;
+  }
+}
+
+export function assembleSource(runTable: RunTable, changed: readonly SerializedRun[]): string {
+  return replaceRuns(runTable, changed);
 }

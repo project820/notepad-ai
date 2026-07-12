@@ -25,5 +25,57 @@ describe('preview editing journal route', () => {
     expect(commitSourcePatch).toHaveBeenCalledWith('original\n', [7]);
     expect(htmlToMarkdown).not.toHaveBeenCalled();
     expect(source).toBe('edited\n');
+    expect(editing.getMetrics()).toEqual({ journalPatchCount: 1, fullSerializeCount: 0 });
+  });
+  it('counts converted HTML as the measured whole-document fallback path', () => {
+    const el = document.createElement('div');
+    el.innerHTML = '<p>converted</p>';
+    const htmlToMarkdown = vi.fn(() => 'converted\n');
+    const ctx = {
+      editingInPreview: false, suppressEditorChange: false, showingConvertedHtml: true,
+      preview: { el, setDoc: vi.fn() },
+      editor: { getDoc: () => 'original\n', setDoc: vi.fn() },
+    } as any;
+    const editing = initPreviewEditing(ctx, {
+      htmlToMarkdown, t: () => '', tryMutateDocument: () => true,
+      recordPreviewInput: () => true, onSuppressedEditorChange: () => {},
+    });
+    el.dispatchEvent(new InputEvent('beforeinput', { inputType: 'insertText', bubbles: true }));
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    editing.flushPreviewToSource();
+    expect(editing.getMetrics()).toEqual({ journalPatchCount: 0, fullSerializeCount: 1 });
+    expect(htmlToMarkdown).toHaveBeenCalledOnce();
+  });
+  it('routes B1 structural edits through the journal commit with disposition data', () => {
+    const el = document.createElement('div');
+    el.innerHTML = '<p data-run-id="1">left</p>';
+    const commitSourcePatch = vi.fn(() => ({ ok: true, markdown: 'left\n\nright\n' }));
+    const ctx = {
+      editingInPreview: false, suppressEditorChange: false, showingConvertedHtml: false,
+      preview: { el, setDoc: vi.fn(), commitSourcePatch },
+      editor: { getDoc: () => 'left\n', setDoc: vi.fn() },
+    } as any;
+    const editing = initPreviewEditing(ctx, {
+      htmlToMarkdown: vi.fn(), t: () => '', tryMutateDocument: () => true,
+      recordPreviewInput: () => true, onSuppressedEditorChange: () => {},
+    });
+    const text = el.firstChild!.firstChild!;
+    const range = document.createRange();
+    range.setStart(text, 2);
+    range.collapse(true);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    el.firstChild!.dispatchEvent(new InputEvent('beforeinput', { inputType: 'insertParagraph', bubbles: true }));
+    el.insertAdjacentHTML('beforeend', '<p>right</p>');
+    el.firstChild!.dispatchEvent(new Event('input', { bubbles: true }));
+    editing.flushPreviewToSource();
+
+    expect(commitSourcePatch).toHaveBeenCalledWith(
+      'left\n',
+      [1],
+      expect.objectContaining({ disposition: { kind: 'split' } }),
+    );
+    expect(editing.getMetrics()).toEqual({ journalPatchCount: 1, fullSerializeCount: 0 });
   });
 });

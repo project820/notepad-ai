@@ -6,12 +6,14 @@ import type { AppContext } from './app-context';
 import type { htmlToMarkdown } from './html-to-md';
 import type { t } from './i18n';
 
+type PreviewEditingMetrics = { journalPatchCount: number; fullSerializeCount: number };
 type PreviewEditingDeps = {
   htmlToMarkdown: typeof htmlToMarkdown;
   t: typeof t;
   onSuppressedEditorChange: (doc: string, syncPreview?: boolean, mutationAlreadyRecorded?: boolean) => void;
   tryMutateDocument: () => boolean;
   recordPreviewInput: () => boolean;
+  onCommitPath?: (path: 'journal' | 'full') => void;
 };
 
 export type PreviewEditSnapshot = {
@@ -27,15 +29,20 @@ function ownerFor(node: Node | null): HTMLElement | null {
   return element?.closest<HTMLElement>('[data-run-id]') ?? null;
 }
 
-function ownerIdsInRange(root: HTMLElement, range: Range | StaticRange | null): MapId[] {
+function toRange(value: Range | StaticRange | null): Range | null {
+  if (!value) return null;
+  if (typeof (value as Range).intersectsNode === 'function') return value as Range;
+  const copy = document.createRange();
+  copy.setStart(value.startContainer, value.startOffset);
+  copy.setEnd(value.endContainer, value.endOffset);
+  return copy;
+}
+
+function ownerIdsInRange(root: HTMLElement, value: Range | StaticRange | null): MapId[] {
+  const range = toRange(value);
   if (!range) return [];
-  const owners = Array.from(root.querySelectorAll<HTMLElement>('[data-run-id]'));
-  return owners
-    .filter((owner) => {
-      const ownerRange = document.createRange();
-      ownerRange.selectNodeContents(owner);
-      return (range as Range).intersectsNode(owner) || range.toString() === ownerRange.toString();
-    })
+  return Array.from(root.querySelectorAll<HTMLElement>('[data-run-id]'))
+    .filter((owner) => range.intersectsNode(owner))
     .map((owner) => Number(owner.dataset.runId))
     .filter(Number.isInteger);
 }
@@ -47,17 +54,15 @@ function selectionRange(event: InputEvent): Range | StaticRange | null {
   return selection?.rangeCount ? selection.getRangeAt(0) : null;
 }
 
-function normalizedRange(root: HTMLElement, range: Range | StaticRange | null): NormalizedEdit['range'] {
+function normalizedRange(root: HTMLElement, value: Range | StaticRange | null): NormalizedEdit['range'] {
+  const range = toRange(value);
   if (!range) return { kind: 'collapsed', edge: 'interior' };
   if (!range.collapsed) {
     const selected = ownerIdsInRange(root, range);
     const startOwner = ownerFor(range.startContainer);
     const endOwner = ownerFor(range.endContainer);
-    const whole = selected.length > 0 && selected.every((id) => {
-      const owner = root.querySelector<HTMLElement>(`[data-run-id="${id}"]`);
-      return owner != null && range.toString().includes(owner.textContent ?? '');
-    });
-    return { kind: 'selection', coverage: whole && startOwner && endOwner ? 'whole' : 'partial' };
+    const whole = selected.length === 1 && startOwner === endOwner && range.toString() === (startOwner?.textContent ?? '');
+    return { kind: 'selection', coverage: whole ? 'whole' : 'partial' };
   }
   const owner = ownerFor(range.startContainer);
   const text = owner?.textContent ?? '';
@@ -77,7 +82,14 @@ export function capturePreviewEditSnapshot(root: HTMLElement, event: InputEvent)
     .map((owner) => Number(owner.dataset.runId))
     .filter(Number.isInteger);
   const selectedIds = ownerIdsInRange(root, range);
-  return { inputType: event.inputType, ownerIds, selectedIds, blockCount: previewBlockCount(root), range: normalizedRange(root, range) };
+  const normalized = normalizedRange(root, range);
+  const caret = ownerFor(toRange(range)?.startContainer ?? null);
+  if (normalized.kind === 'collapsed' && caret) {
+    const index = ownerIds.indexOf(Number(caret.dataset.runId));
+    if (normalized.edge === 'blockStart' && event.inputType === 'deleteContentBackward' && index > 0) selectedIds.unshift(ownerIds[index - 1]);
+    if (normalized.edge === 'blockEnd' && event.inputType === 'deleteContentForward' && index >= 0 && index + 1 < ownerIds.length) selectedIds.push(ownerIds[index + 1]);
+  }
+  return { inputType: event.inputType, ownerIds, selectedIds, blockCount: previewBlockCount(root), range: normalized };
 }
 
 export function normalizePreviewEdit(
@@ -113,6 +125,7 @@ export function normalizePreviewEdit(
 }
 
 export function initPreviewEditing(ctx: AppContext, deps: PreviewEditingDeps) {
+  const metrics: PreviewEditingMetrics = { journalPatchCount: 0, fullSerializeCount: 0 };
   let previewSyncTimer: ReturnType<typeof setTimeout> | null = null;
   let previewEditPending = false;
   let pendingEdit: NormalizedEdit | null = null;
@@ -178,20 +191,31 @@ export function initPreviewEditing(ctx: AppContext, deps: PreviewEditingDeps) {
     });
 
     const disposition = pendingEdit ? classifyGapDisposition(pendingEdit) : { kind: 'rerender' as const, reason: 'missing-normalized-edit' };
-    const journal = (ctx.preview as unknown as { commitSourcePatch?: (source: string, ids: readonly number[]) => { ok: boolean; markdown: string } }).commitSourcePatch;
+    const journal = (ctx.preview as unknown as {
+      commitSourcePatch?: (source: string, ids: readonly number[], structural?: unknown) => { ok: boolean; markdown: string };
+    }).commitSourcePatch;
     let md: string | null = null;
-    if (!ctx.showingConvertedHtml && disposition.kind === 'single-block' && journal && pendingRunIds.size === 1) {
-      const result = journal(ctx.editor.getDoc(), [...pendingRunIds]);
-      if (result.ok) md = result.markdown;
-      else {
+    const structural = disposition.kind === 'split' || disposition.kind === 'merge' ||
+      disposition.kind === 'whole-block-delete' || disposition.kind === 'multi-selection-replace';
+    if (!ctx.showingConvertedHtml && journal && (disposition.kind === 'single-block' || structural)) {
+      const ids = structural ? pendingEdit!.affected.beforeIds : [...pendingRunIds];
+      const result = structural
+        ? journal(ctx.editor.getDoc(), ids, { edit: pendingEdit!, disposition })
+        : journal(ctx.editor.getDoc(), ids);
+      if (result.ok) {
+        metrics.journalPatchCount += 1;
+        deps.onCommitPath?.('journal');
+        md = result.markdown;
+      } else {
         previewEditPending = false;
         pendingEdit = null;
         pendingRunIds.clear();
         return false;
       }
     } else {
-      // Converted HTML and B6 are deliberately kept on the old whole-document
-      // conversion path; journal assembly never receives its normalization.
+      // Converted HTML and B6 are deliberately kept on the old whole-document path.
+      metrics.fullSerializeCount += 1;
+      deps.onCommitPath?.('full');
       md = deps.htmlToMarkdown(ctx.preview.el.innerHTML);
     }
     previewEditPending = false;
@@ -275,7 +299,7 @@ export function initPreviewEditing(ctx: AppContext, deps: PreviewEditingDeps) {
     }, 100);
   });
 
-  return { flushPendingPreviewToSource, flushPreviewToSource, syncPreviewToSource };
+  return { flushPendingPreviewToSource, flushPreviewToSource, syncPreviewToSource, getMetrics: () => ({ ...metrics }) };
 }
 export function createHtmlViewToggle(
   ctx: AppContext,

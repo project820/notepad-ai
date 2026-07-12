@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from 'vitest';
+import structuralFixtures from './__fixtures__/preview-roundtrip/structural.json';
 
 import { serializeChangedRun } from './fragment-serialize';
-import { classifyGapDisposition, assembleSource, buildRunTable, type NormalizedEdit } from './source-journal';
+import { applyStructuralEdit, classifyGapDisposition, assembleSource, buildRunTable, type NormalizedEdit, type SerializedRun } from './source-journal';
 import { createMarkdownIt } from './markdown-it';
 
 function table(source: string) {
@@ -13,6 +14,7 @@ function table(source: string) {
 type Golden = { source: string; edit: { runId: number; segments: string[] }; expected: string };
 const goldenModules = import.meta.glob('./__fixtures__/preview-roundtrip/*.json', { eager: true }) as Record<string, { default: Golden }>;
 const fixtures = Object.keys(goldenModules)
+  .filter((path) => !path.endsWith('/structural.json'))
   .sort()
   .map((path) => ({ name: path.split('/').pop() as string, golden: goldenModules[path].default }));
 
@@ -47,6 +49,17 @@ describe('R5 fixture metrics', () => {
     expect(patchPathCount / fixtures.length).toBeGreaterThanOrEqual(0.99);
     expect(patchWork).toBeLessThanOrEqual(fullWork);
   });
+});
+describe('structural source journal golden assembly', () => {
+  it.each(structuralFixtures as Array<{ name: string; source: string; edit: NormalizedEdit; changed: SerializedRun[]; expected: string }>)(
+    '$name preserves untouched gaps byte-for-byte',
+    ({ source, edit, changed, expected }) => {
+      const disposition = classifyGapDisposition(edit);
+      expect(disposition.kind).not.toBe('rerender');
+      expect(disposition.kind).not.toBe('single-block');
+      expect(applyStructuralEdit(table(source), edit, disposition as never, changed)).toBe(expected);
+    },
+  );
 });
 
 describe('gap classifier', () => {

@@ -42,6 +42,7 @@ describe('sanitizeReasoning', () => {
     expect(sanitizeReasoning(request({ model: { provider: 'chatgpt', id: 'other' }, reasoningEffort: 'low' }), verifiedContext()).reasoningEffort).toBeUndefined();
     expect(sanitizeReasoning(request({ model: { provider: 'claude', id: 'gpt-5.6-sol' }, reasoningEffort: 'low' }), verifiedContext()).reasoningEffort).toBeUndefined();
     expect(sanitizeReasoning(request({ reasoningEffort: 'low' }), verifiedContext()).reasoningEffort).toBeUndefined();
+    expect(sanitizeReasoning(request({ surfaceMode: 'html', reasoningEffort: 'high' }), verifiedContext()).reasoningEffort).toBeUndefined();
     expect(sanitizeReasoning(request({ reasoningEffort: 'max' }), verifiedContext()).reasoningEffort).toBeUndefined();
   });
 });
@@ -154,7 +155,7 @@ describe('ChatGPT exact request body after sanitization', () => {
   });
 
   it('keeps HTML export at the server default even with a verified capability', async () => {
-    expect(await streamBody(request({ surfaceMode: 'html' }), verifiedContext()))
+    expect(await streamBody(request({ surfaceMode: 'html', reasoningEffort: 'high' }), verifiedContext()))
       .toEqual(expectedBody(undefined, 'html'));
   });
 
