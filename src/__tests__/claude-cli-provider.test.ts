@@ -146,4 +146,23 @@ describe('FallbackProvider', () => {
     expect(fbCalled).toBe(false);
     expect(events.some((e) => e.kind === 'error' && (e as { errorKind?: string }).errorKind === 'cancelled')).toBe(true);
   });
+  it('calls primary hooks once for every error and only the first commit', async () => {
+    const errors: string[] = [];
+    let commits = 0;
+    const primary = source((oe) => {
+      oe({ kind: 'error', message: 'held', errorKind: 'auth' });
+      oe({ kind: 'delta', text: 'P' });
+      oe({ kind: 'done', text: '' });
+      oe({ kind: 'error', message: 'forwarded', errorKind: 'network' });
+    });
+    const fallback = source(() => {});
+    const fp = new FallbackProvider(primary, fallback, {
+      shouldFallback: () => false,
+      onPrimaryError: (event) => errors.push(event.message),
+      onPrimaryCommit: () => { commits++; },
+    });
+    await fp.streamChat(req, () => {});
+    expect(errors).toEqual(['held', 'forwarded']);
+    expect(commits).toBe(1);
+  });
 });

@@ -27,6 +27,7 @@ class FakeChild implements CliProcess {
   }
   kill() { this.killed = true; }
   emitOut(s: string) { this.out.forEach((cb) => cb(s)); }
+  emitErr(s: string) { this.errCb.forEach((cb) => cb(s)); }
   doClose(code: number | null) { this.closeCbs.forEach((cb) => cb(code)); }
 }
 
@@ -53,7 +54,13 @@ describe('ComposedClaudeProvider (CLI-first + API fallback)', () => {
   function run(over: Partial<AiChatRequest> = {}) {
     let child: FakeChild | undefined;
     let spawnCalls = 0;
-    const spawn = () => { spawnCalls++; child = new FakeChild(); return child; };
+    const spawn = (_command: string, args: string[]) => {
+      spawnCalls++;
+      const next = new FakeChild();
+      if (args[0] === '--version') queueMicrotask(() => next.doClose(0));
+      else child = next;
+      return next;
+    };
     const provider = new ComposedClaudeProvider(noKeyStore, spawn);
     const events: AiChatEvent[] = [];
     const promise = provider.streamChat({ ...req, ...over }, (e) => events.push(e));
@@ -64,9 +71,9 @@ describe('ComposedClaudeProvider (CLI-first + API fallback)', () => {
       if (!child) throw new Error('CLI child was never spawned');
       return child;
     };
-    return { promise, getChild: () => child!, waitChild, events, getSpawnCalls: () => spawnCalls };
+    return { provider, promise, getChild: () => child!, waitChild, events, getSpawnCalls: () => spawnCalls };
   }
-  it('reports a CLI connection source without implying that an API key is set', async () => {
+  it('reports an unverified CLI transport without implying that an API key is set', async () => {
     const spawn = () => {
       const child = new FakeChild();
       queueMicrotask(() => child.doClose(0));
@@ -76,8 +83,12 @@ describe('ComposedClaudeProvider (CLI-first + API fallback)', () => {
     expect(status).toMatchObject({
       provider: 'claude',
       authKind: 'api_key',
-      connected: true,
-      connectionSource: 'cli',
+      connected: false,
+      cliStatus: {
+        installed: true,
+        authState: 'unknown',
+        errorCode: 'claude_cli_auth_unknown',
+      },
     });
     expect(status.keyLast4).toBeUndefined();
   });
@@ -92,15 +103,26 @@ describe('ComposedClaudeProvider (CLI-first + API fallback)', () => {
     expect(h.events.filter((e) => e.kind === 'delta').map((e) => (e as { text: string }).text)).toEqual(['hello']);
     expect(h.events.at(-1)?.kind).toBe('done');
     expect(h.events.some((e) => e.kind === 'error')).toBe(false); // API fallback NOT reached
+    expect(await h.provider.getAuthStatus()).toMatchObject({
+      connected: true,
+      connectionSource: 'cli',
+      cliStatus: { installed: true, authState: 'succeeded' },
+    });
   });
 
   it('falls back to the API path when the CLI fails before any output', async () => {
     const h = run();
     const child = await h.waitChild();
-    child.emitOut('{"type":"result","is_error":true,"result":"claude: not logged in"}\n');
+    child.emitErr('not logged in');
+    child.doClose(1);
     await h.promise;
     // Fallback reached the API provider, which (no key) emits an auth error.
     expect(h.events.some((e) => e.kind === 'error')).toBe(true);
+    expect((await h.provider.getAuthStatus()).cliStatus).toMatchObject({
+      installed: true,
+      authState: 'auth_failed',
+      errorCode: 'claude_cli_login_required',
+    });
   });
 
   it('routes image requests straight to the API path (CLI never spawned)', async () => {

@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { mountProviderSettingsPanel, type ProviderStatusView } from '../provider-settings-panel';
-import { openSettingsModal } from '../settings-modal';
+import { __resetCliOnboardingPromptForTests, openSettingsModal, triggerCliOnboarding } from '../settings-modal';
 import { mountStyleSettingPanel } from '../style-setting-panel';
 import { DEFAULT_STYLE } from '../humanize-engine';
 import { setLocale, type Locale } from '../i18n';
@@ -12,6 +12,8 @@ afterEach(() => {
   document.body.innerHTML = '';
   setLocale('en');
   vi.restoreAllMocks();
+  localStorage.clear();
+  __resetCliOnboardingPromptForTests();
 });
 
 const statuses: ProviderStatusView[] = [
@@ -504,5 +506,54 @@ describe('openSettingsModal — accessibility', () => {
       document.querySelector<HTMLButtonElement>('#settings-close')?.click();
       restoreApi();
     }
+  });
+  it('renders Claude API and CLI states independently, including auth failure', async () => {
+    const restoreApi = installProviderStatusApi(vi.fn().mockResolvedValue([{
+      provider: 'claude',
+      label: 'Claude',
+      authKind: 'api_key',
+      connected: true,
+      connectionSource: 'api_key',
+      keyLast4: '1234',
+      cliStatus: { installed: true, authState: 'auth_failed', errorCode: 'claude_cli_login_required' },
+    } satisfies ProviderAuthStatus]));
+    try {
+      openSettingsModal({ onSetCustomModel: vi.fn() });
+      await flushSettingsRender();
+      const row = document.querySelector('[data-prov-row="claude"]')!;
+      expect(row.textContent).toContain('••••1234');
+      expect(row.textContent).toContain('CLI login required');
+      expect(row.querySelector('[data-prov-cli-status="claude"]')).not.toBeNull();
+    } finally {
+      document.querySelector<HTMLButtonElement>('#settings-close')?.click();
+      restoreApi();
+    }
+  });
+
+  it('dismisses the inline CLI guide only by its button and keeps its accessibility contract', () => {
+    const { parent } = mountProviders({
+      statuses: [{
+        provider: 'claude',
+        label: 'Claude',
+        authKind: 'api_key',
+        connected: false,
+        cliStatus: { installed: true, authState: 'unknown' },
+      }],
+    });
+    const card = parent.querySelector<HTMLElement>('.prov-onboarding')!;
+    expect(card.getAttribute('role')).toBe('status');
+    expect(card.getAttribute('aria-live')).toBe('polite');
+    const dismiss = card.querySelector<HTMLButtonElement>('[data-prov-action="dismiss-cli-onboarding"]')!;
+    expect(dismiss.getAttribute('aria-label')).toBe('Dismiss CLI setup guide');
+    dismiss.click();
+    expect(parent.querySelector('.prov-onboarding')).toBeNull();
+    expect(JSON.parse(localStorage.getItem('notepad-ai:cli-onboarding-dismissed:v1') ?? '{}')).toEqual({ claude: 1 });
+  });
+
+  it('deduplicates no-auth onboarding triggers without affecting manual settings opens', () => {
+    const open = vi.fn();
+    triggerCliOnboarding(open);
+    triggerCliOnboarding(open);
+    expect(open).toHaveBeenCalledTimes(1);
   });
 });

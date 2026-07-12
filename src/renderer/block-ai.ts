@@ -9,6 +9,7 @@ import { styleDirective, detectLanguage, type Naturalness } from './humanize-eng
 import { isAiProviderId, type AiProviderId } from '../main/ai/types';
 import { modelKey } from './model-key';
 import { formatContextWindow, modelContextWindowTokens } from '../main/ai/output-budget';
+import { triggerCliOnboarding } from './settings-modal';
 
 /** Provider labels for the Block AI model menu. */
 const BLOCK_PROVIDER_LABELS: Record<string, string> = {
@@ -352,6 +353,16 @@ export function installBlockAi(deps: BlockAiDeps) {
     const instruction = instructionEl.value.trim() || 'Improve the writing while preserving meaning.';
     generateBtn.disabled = true;
     generateBtn.textContent = t('block.generating');
+    const hasAuth = await Promise.resolve()
+      .then(() => window.api.aiHasAnyAuth())
+      .catch(() => true);
+    if (!hasAuth) {
+      optionsEl.textContent = t('chat.noProvider');
+      generateBtn.disabled = false;
+      generateBtn.textContent = t('block.generate');
+      if (deps.openAiSettings) triggerCliOnboarding(deps.openAiSettings);
+      return;
+    }
     optionsEl.innerHTML = `
       <div class="ba-loading">
         <span class="dot"></span><span class="dot"></span><span class="dot"></span>

@@ -15,6 +15,8 @@ import { trapModalFocus } from './modal-a11y';
 
 const PROVIDER_STATUS_ERROR_KEYS: Record<ProviderAuthStatusCode, string> = {
   claude_cli_setup_required: 'settings.prov.error.claudeCliSetupRequired',
+  claude_cli_auth_unknown: 'settings.prov.cliBadge.unknown',
+  claude_cli_login_required: 'settings.prov.error.claudeCliLoginRequired',
   grok_cli_setup_required: 'settings.prov.error.grokCliSetupRequired',
   grok_cli_auth_unknown: 'settings.prov.error.grokCliAuthUnknown',
 };
@@ -52,8 +54,19 @@ export type SettingsModalDeps = {
   /** Persist a chosen provider+model selection. */
   onSetCustomModel: (provider: AiProviderId, modelId: string) => void;
 };
+let cliOnboardingPrompted = false;
 
-type LocalViewContext = {
+/** Opens settings at most once for no-auth AI calls; user-initiated settings remain unrestricted. */
+export function triggerCliOnboarding(open: () => void): void {
+  if (cliOnboardingPrompted) return;
+  cliOnboardingPrompted = true;
+  open();
+}
+export function __resetCliOnboardingPromptForTests(): void {
+  cliOnboardingPrompted = false;
+}
+
+export type LocalViewContext = {
   config: { ollama: string; lmstudio: string };
   modelCount: (provider: AiProviderId) => number;
 };
@@ -63,7 +76,7 @@ function localizedProviderStatusError(s: ProviderAuthStatus): string | undefined
   return s.error ? t('settings.prov.error.unknown') : undefined;
 }
 
-function toView(s: ProviderAuthStatus, local: LocalViewContext): ProviderStatusView | null {
+export function toView(s: ProviderAuthStatus, local: LocalViewContext): ProviderStatusView | null {
   if (s.authKind === 'local' && (s.provider === 'ollama' || s.provider === 'lmstudio')) {
     // Local servers are discovery, not auth: render a URL row + run-server hint.
     return {
@@ -73,6 +86,7 @@ function toView(s: ProviderAuthStatus, local: LocalViewContext): ProviderStatusV
       connected: s.connected,
       connectionSource: s.connectionSource,
       error: localizedProviderStatusError(s),
+      errorCode: s.errorCode,
       errorDetail: s.error,
       localUrl: s.provider === 'ollama' ? local.config.ollama : local.config.lmstudio,
       localUrlDefault: s.provider === 'ollama' ? DEFAULT_OLLAMA_BASE_URL : DEFAULT_LMSTUDIO_BASE_URL,
@@ -90,6 +104,7 @@ function toView(s: ProviderAuthStatus, local: LocalViewContext): ProviderStatusV
       authUnverified: s.authUnverified,
       installed: s.installed,
       error: localizedProviderStatusError(s),
+      errorCode: s.errorCode,
       errorDetail: s.error,
     };
   }
@@ -104,8 +119,10 @@ function toView(s: ProviderAuthStatus, local: LocalViewContext): ProviderStatusV
     accountLabel: s.accountLabel,
     keyLast4: s.keyLast4,
     error: localizedProviderStatusError(s),
+    errorCode: s.errorCode,
     errorDetail: s.error,
     // Claude uses the local `claude` CLI first (free); the API key is an optional fallback.
+    cliStatus: s.cliStatus,
     hint: s.provider === 'claude' && !s.errorCode ? t('settings.prov.claudeCliHint') : undefined,
   };
 }

@@ -7,7 +7,7 @@ import { styleDirective, detectLanguage, type Naturalness } from './humanize-eng
 import { t } from './i18n';
 import { modelContextWindowTokens } from '../main/ai/output-budget';
 import { isAiProviderId, type AiProviderId } from '../main/ai/types';
-import { openSettingsModal } from './settings-modal';
+import { openSettingsModal, triggerCliOnboarding } from './settings-modal';
 import { savePrefs, type Prefs } from './prefs';
 import { buildUnifiedChatInstructions } from './unified-chat-prompt-handler';
 import { threadToTurns, type UnifiedChatItem } from './unified-chat-history';
@@ -148,7 +148,7 @@ export function initUnifiedChatWiring(ctx: AppContext, deps: UnifiedChatWiringDe
       ctx.setStatus(t('status.connectProvider'));
       unifiedChat.failRequest();
       unifiedChat.setStreaming(false);
-      openSettings();
+      triggerCliOnboarding(openSettings);
       return;
     }
     const priorTurns = threadToTurns(unifiedChatHistory);
@@ -284,7 +284,7 @@ export function initUnifiedChatWiring(ctx: AppContext, deps: UnifiedChatWiringDe
       setUnifiedChatOpen(true);
       unifiedChat.addMessage('assistant', t('chat.noProvider'));
       ctx.setStatus(t('status.connectProvider'));
-      openSettings();
+      triggerCliOnboarding(openSettings);
       return;
     }
     if (!guard.isCurrent()) return;

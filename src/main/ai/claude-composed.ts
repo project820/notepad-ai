@@ -20,36 +20,59 @@ export class ComposedClaudeProvider implements AiProvider {
   private readonly api: ClaudeProvider;
   private readonly cli: ClaudeCliProvider;
   private readonly fallback: FallbackProvider;
+  private claudeAuthState: 'unknown' | 'succeeded' | 'auth_failed' = 'unknown';
 
   constructor(keys: ApiKeyStore, spawn: CliSpawn) {
     this.api = new ClaudeProvider(keys);
     this.cli = new ClaudeCliProvider({ spawn });
-    this.fallback = new FallbackProvider(this.cli, this.api);
+    this.fallback = new FallbackProvider(this.cli, this.api, {
+      onPrimaryError: (event) => {
+        if (event.errorKind === 'auth') this.claudeAuthState = 'auth_failed';
+      },
+      onPrimaryCommit: () => {
+        this.claudeAuthState = 'succeeded';
+      },
+    });
   }
 
   async getAuthStatus(): Promise<ProviderAuthStatus> {
-    const apiStatus = await this.api.getAuthStatus();
+    const [apiStatus, installed] = await Promise.all([
+      this.api.getAuthStatus(),
+      this.cli.isAvailable(),
+    ]);
+    const cliStatus = installed
+      ? this.claudeAuthState === 'auth_failed'
+        ? { installed: true, authState: 'auth_failed' as const, errorCode: 'claude_cli_login_required' as const }
+        : this.claudeAuthState === 'unknown'
+          ? { installed: true, authState: 'unknown' as const, errorCode: 'claude_cli_auth_unknown' as const }
+          : { installed: true, authState: 'succeeded' as const }
+      : { installed: false, authState: 'unknown' as const, errorCode: 'claude_cli_setup_required' as const };
+
     if (apiStatus.connected) {
-      // API key present — but the CLI is still preferred when available.
-      return { ...apiStatus, connectionSource: 'api_key', label: 'Claude (CLI-first · API key)' };
+      return {
+        ...apiStatus,
+        connectionSource: 'api_key',
+        label: 'Claude (CLI-first · API key)',
+        cliStatus,
+      };
     }
-    // No API key: still usable (cost-free) when the claude CLI is installed.
-    if (await this.cli.isAvailable()) {
+    if (installed && this.claudeAuthState === 'succeeded') {
       return {
         provider: 'claude',
         authKind: 'api_key',
         connected: true,
         connectionSource: 'cli',
         label: 'Claude (CLI)',
+        cliStatus,
       };
     }
-    // Neither path available — guide the (free) CLI login first, key as fallback.
     return {
       provider: 'claude',
       authKind: 'api_key',
       connected: false,
       label: 'Claude',
-      errorCode: 'claude_cli_setup_required',
+      ...(installed ? {} : { errorCode: 'claude_cli_setup_required' as const }),
+      cliStatus,
     };
   }
 

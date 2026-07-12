@@ -47,12 +47,10 @@ import {
   type ReasoningCapabilityContext,
 } from './reasoning-capabilities';
 
+import { isProviderAuthAttemptable } from '../../shared/provider-auth-status';
+
 export type ProviderMap = Partial<Record<AiProviderId, AiProvider>>;
 
-function isAttemptableStatus(status: ProviderAuthStatus): boolean {
-  return status.connected
-    || (status.authKind === 'cli' && status.installed === true && status.authUnverified === true);
-}
 
 export class ProviderRegistry {
   constructor(
@@ -129,7 +127,7 @@ export class ProviderRegistry {
   async hasAnyAuth(): Promise<boolean> {
     const statuses = await this.getAuthStatuses();
     // A cloud provider reporting connected or an installed CLI with unverified auth may be usable.
-    if (statuses.some((s) => s.authKind !== 'local' && isAttemptableStatus(s))) return true;
+    if (statuses.some((s) => s.authKind !== 'local' && isProviderAuthAttemptable(s))) return true;
     // Local providers always report `connected: true` (discovery, not auth), so
     // they must NOT alone satisfy "has auth" — only count them when the server is
     // actually up AND has discovered models (mirrors the renderer's zero-auth notice).
@@ -241,7 +239,7 @@ export class ProviderRegistry {
     // not as a misleading auth error.
     if (provider.authKind !== 'local') {
       const status = await provider.getAuthStatus();
-      if (!isAttemptableStatus(status)) {
+      if (!isProviderAuthAttemptable(status)) {
         onEvent({
           kind: 'error',
           // CLI providers carry actionable install/login guidance in status.error;

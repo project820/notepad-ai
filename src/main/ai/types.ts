@@ -36,6 +36,8 @@ export type ModelRef = {
 
 export type ProviderAuthStatusCode =
   | 'claude_cli_setup_required'
+  | 'claude_cli_auth_unknown'
+  | 'claude_cli_login_required'
   | 'grok_cli_setup_required'
   | 'grok_cli_auth_unknown';
 
@@ -64,6 +66,12 @@ export type ProviderAuthStatus = {
   installed?: boolean;
   /** True when authentication cannot be verified but the provider may be usable. */
   authUnverified?: boolean;
+  /** Claude's CLI transport status, independent from top-level API-key status. */
+  cliStatus?: {
+    installed: boolean;
+    authState: 'unknown' | 'succeeded' | 'auth_failed';
+    errorCode?: ProviderAuthStatusCode;
+  };
 };
 
 export type ChatTurn = { role: 'user' | 'assistant'; text: string };

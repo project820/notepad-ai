@@ -21,7 +21,8 @@
  */
 
 import { t } from './i18n';
-import type { AiProviderId, AuthKind, ProviderAuthStatus } from '../main/ai/types';
+import type { AiProviderId, AuthKind, ProviderAuthStatus, ProviderAuthStatusCode } from '../main/ai/types';
+import { isProviderAuthAttemptable } from '../shared/provider-auth-status';
 
 export type ProviderStatusView = {
   provider: AiProviderId;
@@ -40,6 +41,8 @@ export type ProviderStatusView = {
   accountLabel?: string;
   keyLast4?: string;
   error?: string;
+  /** Stable provider status code retained alongside localized display copy. */
+  errorCode?: ProviderAuthStatusCode;
   /** Escaped secondary diagnostic; never replaces localized primary status copy. */
   errorDetail?: string;
   /** Local providers only: current configured base URL. */
@@ -50,6 +53,8 @@ export type ProviderStatusView = {
   localModelCount?: number;
   /** Optional persistent guidance note shown under the row (e.g. CLI-first usage). */
   hint?: string;
+  /** Claude's CLI transport state, distinct from this row's API-key status. */
+  cliStatus?: ProviderAuthStatus['cliStatus'];
 };
 
 export type ProviderSettingsRenderOptions = {
@@ -88,12 +93,8 @@ function escapeHTML(raw: string): string {
     .replace(/'/g, '&#39;');
 }
 
-// Mirrors the registry's isAttemptableStatus(): usable means connected, or a
-// CLI whose executable is installed but whose auth cannot be verified. A
-// contradictory shape (unverified but not installed) is NOT usable and must
-// not suppress onboarding or render an unverified badge.
 function isAttemptableView(s: ProviderStatusView): boolean {
-  return s.connected || (s.authKind === 'cli' && s.installed === true && s.authUnverified === true);
+  return isProviderAuthAttemptable(s);
 }
 
 function statusLine(s: ProviderStatusView): string {
@@ -124,6 +125,59 @@ function statusLine(s: ProviderStatusView): string {
           ? `${escapeHTML(t('settings.prov.apiKeyLabel'))} ••••${escapeHTML(s.keyLast4)}`
           : escapeHTML(t('settings.prov.keySet'));
   return `<span class="prov-status prov-status-on">${t('settings.prov.connected').replace('{detail}', detail)}</span>`;
+}
+function cliStatusBadge(s: ProviderStatusView): string {
+  const cli = s.cliStatus;
+  if (!cli) return '';
+  if (!cli.installed) {
+    return `<span class="prov-status prov-status-off">${escapeHTML(t('settings.prov.error.claudeCliSetupRequired'))}</span>`;
+  }
+  const key = cli.authState === 'succeeded'
+    ? 'settings.prov.cliBadge.connected'
+    : cli.authState === 'auth_failed'
+      ? 'settings.prov.cliBadge.loginRequired'
+      : 'settings.prov.cliBadge.unknown';
+  const tone = cli.authState === 'succeeded' ? 'prov-status-on' : cli.authState === 'auth_failed' ? 'prov-status-off' : 'prov-status-unknown';
+  return `<span class="prov-status ${tone}" data-prov-cli-status="${s.provider}">${escapeHTML(t(key))}</span>`;
+}
+
+const CLI_ONBOARDING_DISMISSED_KEY = 'notepad-ai:cli-onboarding-dismissed:v1';
+const CLI_ONBOARDING_GUIDE_VERSION = 1;
+
+function isCliOnboardingDismissed(provider: AiProviderId): boolean {
+  try {
+    const raw = localStorage.getItem(CLI_ONBOARDING_DISMISSED_KEY);
+    const value = raw ? JSON.parse(raw) : {};
+    return value?.[provider] === CLI_ONBOARDING_GUIDE_VERSION;
+  } catch {
+    return false;
+  }
+}
+
+function cliOnboardingCard(s: ProviderStatusView): string {
+  const needsGuide = s.provider === 'grok'
+    ? s.authKind === 'cli' && !isAttemptableView(s)
+    : s.provider === 'claude' && !s.connected && s.cliStatus?.authState !== 'succeeded';
+  if (!needsGuide || isCliOnboardingDismissed(s.provider)) return '';
+  const guide = s.provider === 'grok' ? 'grok' : 'claude';
+  return `<div class="prov-onboarding" role="status" aria-live="polite">
+    <strong>${escapeHTML(t(`settings.onboarding.${guide}.title`))}</strong>
+    <p>${escapeHTML(t(`settings.onboarding.${guide}.steps`))}</p>
+    <p>${escapeHTML(t('settings.onboarding.commonNote'))}</p>
+    <button class="prov-btn" data-prov-action="dismiss-cli-onboarding" data-prov="${s.provider}" type="button" aria-label="${escapeHTML(t('settings.onboarding.a11y.dismissLabel'))}">${escapeHTML(t(`settings.onboarding.${guide}.dismiss`))}</button>
+  </div>`;
+}
+function dismissCliOnboarding(provider: AiProviderId): void {
+  try {
+    const raw = localStorage.getItem(CLI_ONBOARDING_DISMISSED_KEY);
+    const value = raw ? JSON.parse(raw) : {};
+    localStorage.setItem(CLI_ONBOARDING_DISMISSED_KEY, JSON.stringify({
+      ...(value && typeof value === 'object' ? value : {}),
+      [provider]: CLI_ONBOARDING_GUIDE_VERSION,
+    }));
+  } catch {
+    // Storage may be unavailable; keep the card visible rather than dismissing silently.
+  }
 }
 function providerControls(s: ProviderStatusView): string {
   if (s.loading) return '';
@@ -210,13 +264,15 @@ function renderProviderRowContent(s: ProviderStatusView): string {
   return `<div class="prov-row-head">
       <span class="prov-label">${escapeHTML(s.label)}</span>
       ${statusLine(s)}
+      ${cliStatusBadge(s)}
       ${s.busy ? '<span class="prov-row-spinner" role="status" aria-live="polite">…</span>' : ''}
     </div>
     ${s.error ? `<div class="prov-error" role="alert">${escapeHTML(s.error)}</div>` : ''}
     ${s.errorDetail ? `<div class="prov-error-detail">${escapeHTML(s.errorDetail)}</div>` : ''}
     <div class="prov-controls">${providerControls(s)}</div>
     ${s.hint ? `<div class="prov-local-note">${escapeHTML(s.hint)}</div>` : ''}
-    ${footer}`;
+    ${footer}
+    ${cliOnboardingCard(s)}`;
 }
 function renderProviderRow(s: ProviderStatusView): string {
   return `<section class="prov-row" data-prov-row="${s.provider}" aria-busy="${s.loading || s.busy ? 'true' : 'false'}">
@@ -332,6 +388,11 @@ export function mountProviderSettingsPanel(
     const action = btn.dataset.provAction;
     const prov = (btn.dataset.prov ?? btn.closest<HTMLElement>('[data-prov-row]')?.dataset.provRow) as AiProviderId | undefined;
     if (action === 'retry-status') return opts.onRetryStatus?.();
+    if (action === 'dismiss-cli-onboarding' && prov) {
+      dismissCliOnboarding(prov);
+      patchRows(new Set([prov]));
+      return;
+    }
     if (action === 'signin') return opts.onChatgptSignIn();
     if (action === 'signout' && prov === 'chatgpt') return runRowAction(prov, opts.onChatgptSignOut);
     if (action === 'save-key' && (prov === 'claude' || prov === 'openrouter')) {

@@ -23,6 +23,8 @@ export class FallbackProvider implements StreamSource {
     private opts: {
       shouldFallback?: (e: { errorKind?: AiChatEvent extends { errorKind?: infer K } ? K : string }) => boolean;
       onRoute?: (route: FallbackRoute) => void;
+      onPrimaryError?: (event: Extract<AiChatEvent, { kind: 'error' }>) => void;
+      onPrimaryCommit?: () => void;
     } = {},
   ) {}
 
@@ -34,11 +36,12 @@ export class FallbackProvider implements StreamSource {
 
     await this.primary.streamChat(req, (e) => {
       if (e.kind === 'delta' || e.kind === 'done') {
+        if (!committed) this.opts.onPrimaryCommit?.();
         committed = true;
         onEvent(e);
         return;
       }
-      // e.kind === 'error'
+      this.opts.onPrimaryError?.(e);
       if (!committed && shouldFallback({ errorKind: e.errorKind as never })) {
         pendingFallback = true; // hold the primary error; the fallback owns the stream
         return;
