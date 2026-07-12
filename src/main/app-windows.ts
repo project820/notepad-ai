@@ -292,12 +292,14 @@ export function createAppWindows({
     let settle: (fenced: boolean) => void = () => {};
     const result = new Promise<boolean>((resolve) => {
       let settled = false;
-      const timer = setTimeout(() => settle(false), 400);
+      // No wall-clock deadline: prepare deliberately awaits the renderer's
+      // active-save drain (atomic write + fsync latency has no valid upper
+      // bound). The waiter settles ONLY from the prepare ACK, an explicit
+      // peer-cancellation via cancel(), or window destruction.
       const onDestroyed = () => settle(false);
       settle = (fenced) => {
         if (settled) return;
         settled = true;
-        clearTimeout(timer);
         win.removeListener('closed', onDestroyed);
         pendingDiscardPrepare.delete(id);
         resolve(fenced && activeLease(win, leaseId));

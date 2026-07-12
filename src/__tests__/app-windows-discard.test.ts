@@ -224,19 +224,33 @@ describe('discard close IPC waiters', () => {
     expect(rollback.wins[0].destroyed).toBe(true);
   });
 
-  it('times out a never-ACKed prepare so it cannot wedge the close transaction', async () => {
+  it('waits for an active save drain beyond the control-plane timeout before committing discard', async () => {
     vi.useFakeTimers();
-    let dialogs = 0;
-    const { appWindows } = await setup((win, channel, payload) => {
-      if (channel === 'close:discard-rollback') {
-        electron.emitIpc('close:discard-result', win, { requestId: payload.requestId });
-      }
-    }, async () => (++dialogs > 1 ? 'cancel' : 'discard'), 1);
+    let settled = false;
+    try {
+      const { appWindows } = await setup((win, channel, payload) => {
+        if (channel === 'close:discard') {
+          setTimeout(() => {
+            electron.emitIpc('close:discard-result', win, { requestId: payload.requestId, fenced: true });
+          }, 450);
+        }
+        if (channel === 'close:consume') {
+          electron.emitIpc('close:consume-result', win, { requestId: payload.requestId, consumed: true });
+        }
+      }, async () => 'discard', 1);
 
-    const approval = appWindows.approveAllForQuit('quit');
-    await vi.advanceTimersByTimeAsync(400);
+      const approval = appWindows.approveAllForQuit('quit').then((approved) => {
+        settled = true;
+        return approved;
+      });
+      await vi.advanceTimersByTimeAsync(400);
 
-    await expect(approval).resolves.toBe(false);
-    vi.useRealTimers();
+      expect(settled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(50);
+      await expect(approval).resolves.toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
