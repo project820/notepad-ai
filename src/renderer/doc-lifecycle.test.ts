@@ -28,7 +28,6 @@ function setup(saveFile = vi.fn(async () => ({ saved: true, filePath: '/tmp/draf
     onAfterRender: () => {},
   });
   const sendCloseLeaseInvalidated = vi.fn();
-  const sendCloseLeaseInvalidated = vi.fn();
   const lifecycle = initDocLifecycle(ctx, {
     api: { saveFile, sendCloseLeaseInvalidated } as never,
     titleEl: { value: '', classList: { toggle: () => {} } } as never,
