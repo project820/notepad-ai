@@ -35,6 +35,12 @@ function codeDelimiter(text: string): string {
   return '`'.repeat(longest + 1);
 }
 
+function wrapDelimited(text: string, delimiter: string): string | null {
+  const match = /^(\s*)([\s\S]*?)(\s*)$/.exec(text);
+  if (!match || match[2] === '') return null;
+  return `${match[1]}${delimiter}${match[2]}${delimiter}${match[3]}`;
+}
+
 function inline(node: Node): string | null {
   if (node.nodeType === Node.TEXT_NODE) {
     const parent = node.parentElement;
@@ -48,9 +54,12 @@ function inline(node: Node): string | null {
   const content = Array.from(el.childNodes).map(inline);
   if (content.some((part) => part == null)) return null;
   const text = content.join('');
-  if (tag === 'strong' || tag === 'b') return `**${text}**`;
-  if (tag === 'em' || tag === 'i') return `_${text}_`;
+  if (tag === 'strong' || tag === 'b') return wrapDelimited(text, '**');
+  if (tag === 'em' || tag === 'i') return wrapDelimited(text, '_');
   if (tag === 'code') {
+    // Markdown cannot distinguish empty/all-space code from delimiter padding.
+    // Reject it so the caller takes the explicit B6 route rather than changing text.
+    if (text.trim() === '') return null;
     const delimiter = codeDelimiter(text);
     const padded = text.startsWith('`') || text.endsWith('`') || text.startsWith(' ') || text.endsWith(' ') ? ` ${text} ` : text;
     return `${delimiter}${padded}${delimiter}`;

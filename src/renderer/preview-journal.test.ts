@@ -47,5 +47,38 @@ describe('preview source patch', () => {
     expect(preview.el.querySelector('h1')).toBeNull();
     expect(preview.getRunTable()?.runs[0]?.subtype).toBe('paragraph');
   });
+  it('keeps whitespace-edge strong semantics or declines the patch safely', () => {
+    const source = 'original\n';
+    const preview = createPreview(document.createElement('div'));
+    preview.setDoc(source);
+    preview.el.querySelector<HTMLElement>('[data-run-id="0"]')!.innerHTML = '<strong> x </strong>';
+    const result = preview.commitSourcePatch(source, [0]);
+    if (result.ok) {
+      expect(result.markdown).toBe(' **x** \n');
+      expect(preview.el.querySelector('strong')?.textContent).toBe('x');
+      expect(preview.el.textContent).toBe(' x \n');
+    } else {
+      expect(result).toMatchObject({ markdown: source, reason: 'inline-shape-mismatch' });
+    }
+  });
+
+  it('rejects all-space inline code instead of changing its text', () => {
+    const source = 'original\n';
+    const preview = createPreview(document.createElement('div'));
+    preview.setDoc(source);
+    preview.el.querySelector<HTMLElement>('[data-run-id="0"]')!.innerHTML = '<code> </code>';
+    expect(preview.commitSourcePatch(source, [0])).toMatchObject({ ok: false, markdown: source });
+  });
+
+  it.each(['<strong>bold</strong>', '<em>em</em>', '<code>code</code>'])(
+    'keeps normal inline journal markup %s',
+    (html) => {
+      const source = 'original\n';
+      const preview = createPreview(document.createElement('div'));
+      preview.setDoc(source);
+      preview.el.querySelector<HTMLElement>('[data-run-id="0"]')!.innerHTML = html;
+      expect(preview.commitSourcePatch(source, [0])).toMatchObject({ ok: true });
+    },
+  );
 
 });

@@ -162,3 +162,22 @@ describe('fragment serializer', () => {
     p.textContent = '==x== ^x^';
     expect(serializeChangedRun('paragraph', p)).toEqual({ kind: 'segments', segments: ['\\=\\=x\\=\\= \\^x\\^'] });
   });
+  it('hoists whitespace outside emphasis markers and rejects all-space inline code', () => {
+    const strong = document.createElement('strong');
+    strong.textContent = ' x ';
+    const p = document.createElement('p');
+    p.append(strong);
+    expect(serializeChangedRun('paragraph', p)).toEqual({ kind: 'segments', segments: [' **x** '] });
+
+    const code = document.createElement('code');
+    code.textContent = ' ';
+    const codeParagraph = document.createElement('p');
+    codeParagraph.append(code);
+    expect(serializeChangedRun('paragraph', codeParagraph)).toEqual({ kind: 'rerender', reason: 'unknown-inline-node' });
+  });
+
+  it('keeps normal strong, emphasis, and inline code on the journal serializer path', () => {
+    const p = document.createElement('p');
+    p.innerHTML = '<strong>bold</strong><em>em</em><code>code</code>';
+    expect(serializeChangedRun('paragraph', p)).toEqual({ kind: 'segments', segments: ['**bold**_em_`code`'] });
+  });

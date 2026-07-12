@@ -103,6 +103,38 @@ export function createPreview(parent: HTMLElement): PreviewHandle {
     }
     return next.length === expected.length && next.every((run, index) => run.subtype === expected[index]);
   }
+  function inlineSignature(node: Element): { text: string; tags: string[] } {
+    const tags: string[] = [];
+    const walk = (current: Node): void => {
+      if (current.nodeType !== Node.ELEMENT_NODE) return;
+      const element = current as Element;
+      const tag = element.tagName.toLowerCase();
+      tags.push(tag === 'a' ? `${tag}:${element.getAttribute('href') ?? ''}` : tag);
+      element.childNodes.forEach(walk);
+    };
+    walk(node);
+    return { text: node.textContent ?? '', tags };
+  }
+
+  function changedInlineMatches(markdown: string, changedIds: readonly number[]): boolean {
+    if (!runTable) return false;
+    const tokens = md.parse(markdown, {});
+    const rebuilt = buildRunTable(tokens, markdown).runTable;
+    injectRunIds(tokens, rebuilt);
+    const detached = document.createElement('div');
+    detached.innerHTML = md.renderer.render(tokens, md.options, {});
+    for (const id of changedIds) {
+      const original = runTable.runs.find((run) => run.runId === id);
+      if (!original || original.subtype === 'fence-body') continue;
+      const actual = el.querySelector<HTMLElement>(`[data-run-id="${id}"]`);
+      const expected = detached.querySelector<HTMLElement>(`[data-run-id="${id}"]`);
+      if (!actual || !expected) return false;
+      const before = inlineSignature(actual);
+      const after = inlineSignature(expected);
+      if (before.text !== after.text || before.tags.join('|') !== after.tags.join('|')) return false;
+    }
+    return true;
+  }
 
   function render(source: string): void {
     const rollback = beforeCallbacks.map((cb) => cb()).filter((release): release is () => void => typeof release === 'function');
@@ -199,6 +231,9 @@ export function createPreview(parent: HTMLElement): PreviewHandle {
       }
       if (!journalShapeMatches(markdown, structural)) {
         return { ok: false, markdown: source, reason: 'journal-reparse-mismatch' };
+      }
+      if (!structural && !changedInlineMatches(markdown, changedRunIds)) {
+        return { ok: false, markdown: source, reason: 'inline-shape-mismatch' };
       }
       const savedBookmark = bookmark(el);
       render(markdown);
