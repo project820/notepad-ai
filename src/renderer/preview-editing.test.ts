@@ -39,7 +39,7 @@ function setupPreviewEditing(initialDoc = 'original') {
       getDoc: () => doc,
       setDoc,
     },
-  } as AppContext;
+  } as unknown as AppContext;
   const htmlToMarkdown = vi.fn((html: string) => html.replace(/<[^>]+>/g, ''));
   const editing = initPreviewEditing(ctx, {
     htmlToMarkdown: htmlToMarkdown as never,
