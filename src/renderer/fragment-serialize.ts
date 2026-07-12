@@ -7,6 +7,8 @@ const markdownEscapes: ReadonlyArray<readonly [RegExp, string]> = [
   [/\*/g, '\\*'],
   [/^-/g, '\\-'],
   [/^\+ /g, '\\+ '],
+  [/==/g, '\\=\\='],
+  [/\^/g, '\\^'],
   [/^(=+)/g, '\\$1'],
   [/^(#{1,6}) /g, '\\$1 '],
   [/`/g, '\\`'],
@@ -28,8 +30,16 @@ export type SerializeResult =
   | { kind: 'verbatim-segments'; segments: readonly string[] }
   | { kind: 'rerender'; reason: string };
 
+function codeDelimiter(text: string): string {
+  const longest = Math.max(0, ...Array.from(text.matchAll(/`+/g), (match) => match[0].length));
+  return '`'.repeat(longest + 1);
+}
+
 function inline(node: Node): string | null {
-  if (node.nodeType === Node.TEXT_NODE) return escapeMarkdownText(node.textContent ?? '');
+  if (node.nodeType === Node.TEXT_NODE) {
+    const parent = node.parentElement;
+    return parent?.closest('code, pre') ? node.textContent ?? '' : escapeMarkdownText(node.textContent ?? '');
+  }
   if (node.nodeType !== Node.ELEMENT_NODE) return '';
   const el = node as HTMLElement;
   const tag = el.tagName.toLowerCase();
@@ -40,7 +50,11 @@ function inline(node: Node): string | null {
   const text = content.join('');
   if (tag === 'strong' || tag === 'b') return `**${text}**`;
   if (tag === 'em' || tag === 'i') return `_${text}_`;
-  if (tag === 'code') return `\`${text}\``;
+  if (tag === 'code') {
+    const delimiter = codeDelimiter(text);
+    const padded = text.startsWith('`') || text.endsWith('`') || text.startsWith(' ') || text.endsWith(' ') ? ` ${text} ` : text;
+    return `${delimiter}${padded}${delimiter}`;
+  }
   if (tag === 'mark') return `==${text}==`;
   if (tag === 'sup') return `^${text}^`;
   if (tag === 'a') return `[${text}](${el.getAttribute('href') ?? ''})`;

@@ -87,7 +87,8 @@ export function createPreview(parent: HTMLElement): PreviewHandle {
     structural?: { edit: NormalizedEdit; disposition: Exclude<ClassifyResult, { kind: 'single-block' | 'rerender' }> },
   ): boolean {
     if (!runTable) return false;
-    const next = buildRunTable(md.parse(markdown, {}), markdown).runTable.runs;
+    const tokens = md.parse(markdown, {});
+    const next = buildRunTable(tokens, markdown).runTable.runs;
     let expected = [...runTable.runs.map((run) => run.subtype)];
     if (structural) {
       const selected = structural.edit.affected.beforeIds

@@ -36,6 +36,8 @@ describe('preview source patch', () => {
     ['# not a heading', '\\# not a heading'],
     ['\\# escaped', '\\\\# escaped'],
     ['*star* [link]', '\\*star\\* \\[link\\]'],
+    ['==x==', '\\=\\=x\\=\\='],
+    ['^x^', '\\^x\\^'],
   ] as const)('commits literal %j without changing paragraph structure', (literal, expected) => {
     const source = 'original\n';
     const preview = createPreview(document.createElement('div'));

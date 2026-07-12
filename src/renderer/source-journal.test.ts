@@ -142,3 +142,23 @@ describe('fragment serializer', () => {
     expect(serializeChangedRun('fence-body', pre)).toEqual({ kind: 'rerender', reason: 'synthetic-indent-prefix-mutated' });
   });
 });
+  it('keeps inline code verbatim and chooses a safe backtick delimiter', () => {
+    const cases = [
+      ['*', '`*`'],
+      ['#', '`#`'],
+      ['has ` tick', '``has ` tick``'],
+    ] as const;
+    for (const [text, expected] of cases) {
+      const p = document.createElement('p');
+      const code = document.createElement('code');
+      code.textContent = text;
+      p.append(code);
+      expect(serializeChangedRun('paragraph', p)).toEqual({ kind: 'segments', segments: [expected] });
+    }
+  });
+
+  it('escapes literal mark and superscript syntax without changing htmlToMarkdown extension output', () => {
+    const p = document.createElement('p');
+    p.textContent = '==x== ^x^';
+    expect(serializeChangedRun('paragraph', p)).toEqual({ kind: 'segments', segments: ['\\=\\=x\\=\\= \\^x\\^'] });
+  });
