@@ -37,7 +37,11 @@ describe('preview formatting close fence', () => {
       setDoc: () => {},
       setLineNumbers: () => {},
       getSourceMap: () => [],
+      getRunTable: () => null,
       onAfterRender: () => {},
+      onBeforeRender: () => {},
+      onRenderSettled: () => {},
+      commitSourcePatch: () => ({ ok: false, markdown: '', reason: 'stub' }),
     });
 
     let mayMutate = false;

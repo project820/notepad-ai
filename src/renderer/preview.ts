@@ -27,20 +27,26 @@ export type PreviewHandle = {
 
 function ownerSelector(subtype: RunTable['runs'][number]['subtype']): string {
   switch (subtype) {
+    // ATX and setext headings both render to h1–h6.
     case 'heading': return 'h1,h2,h3,h4,h5,h6';
+    // A list item's marker/prefix belongs to the journal, so its rendered li is
+    // the run owner even when markdown-it emits a visible paragraph inside it.
     case 'list-item-content': return 'li';
     case 'quote-paragraph': return 'blockquote p';
     case 'table-cell': return 'th,td';
-    case 'fence-body': return 'pre';
+    // Fenced and indented code each render as pre > code. The pre owns the
+    // run because it remains present for both render rules.
+    case 'fence-body': return 'pre,pre > code';
     case 'deflist-item': return 'dd';
-    default: return 'p';
+    case 'paragraph': return 'p';
   }
 }
 
 function bookmark(root: HTMLElement): { runId: string | null; offset: number } | null {
   const selection = window.getSelection();
-  if (!selection?.rangeCount || !root.contains(selection.anchorNode)) return null;
-  const owner = (selection.anchorNode.nodeType === Node.ELEMENT_NODE ? selection.anchorNode as Element : selection.anchorNode.parentElement)?.closest('[data-run-id]');
+  const anchor = selection?.rangeCount ? selection.anchorNode : null;
+  if (!selection || !anchor || !root.contains(anchor)) return null;
+  const owner = (anchor.nodeType === Node.ELEMENT_NODE ? anchor as Element : anchor.parentElement)?.closest('[data-run-id]');
   if (!owner) return null;
   return { runId: owner.getAttribute('data-run-id'), offset: selection.anchorOffset };
 }
@@ -81,28 +87,46 @@ export function createPreview(parent: HTMLElement): PreviewHandle {
       const built = buildRunTable(tokens, source);
       injectRunIds(tokens, built.runTable);
       el.innerHTML = md.renderer.render(tokens, md.options, env);
-      // Some markdown-it renderers (fence and hidden tight-list paragraphs) do
-      // not propagate token attrs. Attach their already allocated owner id once.
-      for (const run of built.runTable.runs) {
-        if (el.querySelector(`[data-run-id="${run.runId}"]`)) continue;
-        const candidate = Array.from(el.querySelectorAll<HTMLElement>(ownerSelector(run.subtype))).find((node) => !node.hasAttribute('data-run-id'));
-        if (!candidate) throw new Error(`preview run ${run.runId} has no DOM owner`);
-        candidate.dataset.runId = String(run.runId);
-        candidate.dataset.sourceSliceCount = String(run.sourceSlices.length);
-        if (run.syntheticIndentPrefixes) candidate.dataset.syntheticIndentPrefixes = JSON.stringify(run.syntheticIndentPrefixes);
-      }
-      validateDom(el, built.runTable);
       sourceMap = buildTokenLineRangesFromTokens(tokens);
       tagPreviewBlocks(el, sourceMap);
       tagNestedPreviewBlocksFromTokens(el, tokens);
-      runTable = built.runTable;
+
+      try {
+        // Some markdown-it renderers (fence and hidden tight-list paragraphs)
+        // do not propagate token attributes. Attach their owner id once, in
+        // document order, using the subtype's actual rendered owner.
+        for (const run of built.runTable.runs) {
+          let owner = el.querySelector<HTMLElement>(`[data-run-id="${run.runId}"]`);
+          if (!owner) {
+            owner = Array.from(el.querySelectorAll<HTMLElement>(ownerSelector(run.subtype)))
+              .find((node) => !node.hasAttribute('data-run-id')) ?? null;
+          }
+          if (!owner) throw new Error(`preview run ${run.runId} has no DOM owner`);
+          owner.dataset.runId = String(run.runId);
+          owner.dataset.sourceSliceCount = String(run.sourceSlices.length);
+          if (run.syntheticIndentPrefixes) owner.dataset.syntheticIndentPrefixes = JSON.stringify(run.syntheticIndentPrefixes);
+        }
+        validateDom(el, built.runTable);
+        runTable = built.runTable;
+      } catch (error) {
+        // Source journaling is an optional enhancement. A renderer/plugin shape
+        // we cannot map must preserve the established preview and line-span
+        // tagging behavior rather than making ordinary documents unrenderable.
+        console.warn('preview source journal unavailable; using line-span map only:', error);
+        el.querySelectorAll<HTMLElement>('[data-run-id]').forEach((owner) => {
+          owner.removeAttribute('data-run-id');
+          owner.removeAttribute('data-source-slice-count');
+          owner.removeAttribute('data-synthetic-indent-prefixes');
+        });
+        runTable = null;
+      }
       afterCallbacks.forEach((cb) => cb());
       settledCallbacks.forEach((cb) => cb({ ok: true }));
     } catch (error) {
       runTable = null;
       rollback.forEach((release) => release());
       settledCallbacks.forEach((cb) => cb({ ok: false }));
-      throw error;
+      console.warn('preview render failed:', error);
     }
   }
 

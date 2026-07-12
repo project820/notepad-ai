@@ -152,11 +152,11 @@ export function openSettingsModal(deps: SettingsModalDeps): void {
       modelCount: (provider) => (snapshot.models ?? []).filter((model) => model.provider === provider).length,
     };
     const statusesByProvider = new Map(snapshot.statuses!.map((status) => [status.provider, status]));
-    const emptyStatusResult = snapshot.statuses!.length === 0;
+    const statusResultWasEmpty = snapshot.statuses!.length === 0;
     return KNOWN_PROVIDER_ROWS.map((row) => {
       const status = statusesByProvider.get(row.provider);
-      if (!status) return { ...row, loading: !emptyStatusResult };
-      return toView(status, local) ?? { ...row };
+      if (!status) return { ...row, loading: !statusResultWasEmpty };
+      return toView(status, local) ?? { ...row, loading: true };
     });
   };
 

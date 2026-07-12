@@ -184,13 +184,16 @@ function renderPanelNotice(opts: ProviderSettingsRenderOptions): string {
   if (opts.loadError) {
     return `<div class="prov-load-error" role="alert">${escapeHTML(opts.loadError)} <button class="prov-btn" data-prov-action="retry-status" type="button">${escapeHTML(t('settings.prov.retry'))}</button></div>`;
   }
-  if (statuses.some((s) => s.loading)) return '';
+  const loadedStatuses = statuses.filter((status) => !status.loading);
+  // While skeleton rows are still loading, suppress the notice to avoid a
+  // zero-auth flash; an entirely empty status list keeps the legacy warning.
+  if (statuses.length > 0 && loadedStatuses.length === 0) return '';
   // The onboarding notice tracks usable cloud auth and discovered local models —
   // local providers report a static `connected: true`, so they alone must not
   // silence the cloud sign-in nudge, but a working local server (models found)
   // should.
-  const anyCloudUsable = statuses.some((s) => s.authKind !== 'local' && isAttemptableView(s));
-  const anyLocalModels = statuses.some((s) => s.authKind === 'local' && (s.localModelCount ?? 0) > 0);
+  const anyCloudUsable = loadedStatuses.some((s) => s.authKind !== 'local' && isAttemptableView(s));
+  const anyLocalModels = loadedStatuses.some((s) => s.authKind === 'local' && (s.localModelCount ?? 0) > 0);
   return anyCloudUsable || anyLocalModels
     ? ''
     : `<div class="prov-zero-auth" role="alert">${escapeHTML(t('settings.prov.zeroAuth'))}</div>`;
@@ -312,8 +315,14 @@ export function mountProviderSettingsPanel(
   };
   const runRowAction = (provider: AiProviderId, action: () => Promise<void> | void) => {
     setRowBusy(provider, true);
-    void Promise.resolve()
-      .then(action)
+    let result: Promise<void> | void;
+    try {
+      result = action();
+    } catch {
+      setRowBusy(provider, false);
+      return;
+    }
+    void Promise.resolve(result)
       .catch(() => undefined)
       .finally(() => setRowBusy(provider, false));
   };
@@ -321,7 +330,7 @@ export function mountProviderSettingsPanel(
     const btn = (e.target as HTMLElement).closest('button[data-prov-action]') as HTMLButtonElement | null;
     if (!btn || btn.disabled) return;
     const action = btn.dataset.provAction;
-    const prov = btn.dataset.prov as AiProviderId | undefined;
+    const prov = (btn.dataset.prov ?? btn.closest<HTMLElement>('[data-prov-row]')?.dataset.provRow) as AiProviderId | undefined;
     if (action === 'retry-status') return opts.onRetryStatus?.();
     if (action === 'signin') return opts.onChatgptSignIn();
     if (action === 'signout' && prov === 'chatgpt') return runRowAction(prov, opts.onChatgptSignOut);

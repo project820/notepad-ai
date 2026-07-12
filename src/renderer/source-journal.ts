@@ -116,16 +116,22 @@ function subtypeFor(tokens: ReturnType<MarkdownIt['parse']>, index: number): Con
   const token = tokens[index];
   if (token.type === 'fence' || token.type === 'code_block') return 'fence-body';
   if (token.type !== 'inline') return null;
-  for (let i = index - 1; i >= 0; i--) {
-    const previous = tokens[i];
-    if (previous.level > token.level) continue;
-    if (previous.type === 'heading_open') return 'heading';
-    if (previous.type === 'td_open' || previous.type === 'th_open') return 'table-cell';
-    if (previous.type === 'dd_open') return 'deflist-item';
-    if (previous.type === 'list_item_open') return 'list-item-content';
-    if (previous.type === 'blockquote_open') return 'quote-paragraph';
-    if (previous.type === 'paragraph_open') return 'paragraph';
+
+  const openers: ReturnType<MarkdownIt['parse']> = [];
+  for (let i = 0; i < index; i++) {
+    const candidate = tokens[i];
+    if (candidate.nesting === 1) openers.push(candidate);
+    else if (candidate.nesting === -1) openers.pop();
   }
+  const nearest = (type: string) => [...openers].reverse().find((candidate) => candidate.type === type);
+  if (nearest('heading_open')) return 'heading';
+  if (nearest('th_open') || nearest('td_open')) return 'table-cell';
+  if (nearest('dd_open')) return 'deflist-item';
+  // Tight-list paragraphs are hidden by markdown-it, so their content has to be
+  // owned by the rendered <li>, not the absent <p>.
+  if (nearest('list_item_open')) return 'list-item-content';
+  if (nearest('blockquote_open')) return 'quote-paragraph';
+  if (nearest('paragraph_open')) return 'paragraph';
   return 'paragraph';
 }
 

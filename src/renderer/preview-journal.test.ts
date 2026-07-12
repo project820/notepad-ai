@@ -30,4 +30,13 @@ describe('preview source patch', () => {
     const id = Number(owner.dataset.runId);
     expect(preview.commitSourcePatch(source, [id])).toMatchObject({ ok: true, markdown: expected });
   });
+  it('maps mixed normal blocks without a journal mismatch', () => {
+    const source = '# H\n\ntext\n\n- a\n- b\n\n> quote\n\n    code\n    more\n\nSetext\n===\n\n---';
+    const preview = createPreview(document.createElement('div'));
+    preview.setDoc(source);
+
+    expect(preview.getRunTable()).not.toBeNull();
+    expect(preview.el.querySelectorAll('[data-run-id]')).toHaveLength(7);
+  });
+
 });

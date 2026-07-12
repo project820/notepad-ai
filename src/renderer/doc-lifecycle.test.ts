@@ -25,7 +25,11 @@ function setup(saveFile = vi.fn(async () => ({ saved: true, filePath: '/tmp/draf
     setDoc: () => {},
     setLineNumbers: () => {},
     getSourceMap: () => [],
+    getRunTable: () => null,
     onAfterRender: () => {},
+    onBeforeRender: () => {},
+    onRenderSettled: () => {},
+    commitSourcePatch: () => ({ ok: false, markdown: '', reason: 'stub' }),
   });
   const sendCloseLeaseInvalidated = vi.fn();
   const lifecycle = initDocLifecycle(ctx, {
