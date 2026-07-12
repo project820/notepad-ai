@@ -266,6 +266,18 @@ export function initPreviewEditing(ctx: AppContext, deps: PreviewEditingDeps) {
     previewSyncTimer = null;
     return flushPreviewToSource();
   }
+  // Close compensation captures and restores the debounce rather than leaving a
+  // surviving renderer with a permanently cancelled preview flush.
+  function pausePreviewSyncTimer(): boolean {
+    const pending = previewSyncTimer !== null;
+    if (previewSyncTimer) clearTimeout(previewSyncTimer);
+    previewSyncTimer = null;
+    return pending;
+  }
+
+  function resumePreviewSyncTimer(wasPending: boolean): void {
+    if (wasPending && previewEditPending) syncPreviewToSource();
+  }
 
   function syncPreviewToSource() {
     if (previewSyncTimer) clearTimeout(previewSyncTimer);
@@ -330,7 +342,14 @@ export function initPreviewEditing(ctx: AppContext, deps: PreviewEditingDeps) {
     }, 100);
   });
 
-  return { flushPendingPreviewToSource, flushPreviewToSource, syncPreviewToSource, getMetrics: () => ({ ...metrics }) };
+  return {
+    flushPendingPreviewToSource,
+    flushPreviewToSource,
+    syncPreviewToSource,
+    pausePreviewSyncTimer,
+    resumePreviewSyncTimer,
+    getMetrics: () => ({ ...metrics }),
+  };
 }
 export function createHtmlViewToggle(
   ctx: AppContext,

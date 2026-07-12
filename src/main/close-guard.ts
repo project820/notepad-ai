@@ -9,6 +9,8 @@ export type CloseGuardState = {
   revision: number;
   /** False means the renderer did not provide a live answer; always fail closed. */
   known?: boolean;
+  /** The renderer answered, but could not synchronize preview edits to source. */
+  syncFailed?: boolean;
   locale: CloseGuardLocale;
 };
 
@@ -24,6 +26,8 @@ export type CloseDialogLabels = {
   save: string;
   discard: string;
   cancel: string;
+  /** `false` presents only explicit discard or cancel. */
+  saveAllowed?: boolean;
 };
 
 const CLOSE_DIALOG_LABELS: Record<CloseGuardLocale, CloseDialogLabels> = {
@@ -46,7 +50,7 @@ export function closeGuardChoiceFromButton(buttonIndex: number): CloseGuardChoic
 
 /** An untitled empty buffer is not a document that needs close confirmation. */
 export function needsCloseConfirmation(state: CloseGuardState): boolean {
-  return state.known === false || (state.dirty && (state.hasPath || !state.docEmpty));
+  return state.known === false || state.syncFailed === true || (state.dirty && (state.hasPath || !state.docEmpty));
 }
 
 /** A renderer timeout may use a snapshot for dialog context, but never as approval to close. */
@@ -71,9 +75,12 @@ export async function resolveCloseGuard({
   save: () => Promise<boolean>;
 }): Promise<CloseGuardAction> {
   if (!needsCloseConfirmation(state)) return 'allow';
-  const choice = await showDialog(CLOSE_DIALOG_LABELS[state.locale]);
+  const choice = await showDialog({ ...CLOSE_DIALOG_LABELS[state.locale], saveAllowed: !state.syncFailed });
   if (choice === 'discard') return 'discard';
   if (choice === 'cancel') return 'cancel';
+  // A failed preview-to-source synchronization must never allow a stale save.
+  // This also fails closed if a stale dialog callback returns "save".
+  if (state.syncFailed) return 'cancel';
   return (await save()) ? 'allow' : 'cancel';
 }
 export function guardCloseEvent(

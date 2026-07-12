@@ -85,7 +85,7 @@ export type Api = {
   sessionWrite: (snap: any) => Promise<void>;
   sessionClear: () => Promise<void>;
   onCloseQueryState: (cb: (requestId: string) => void) => () => void;
-  sendCloseState: (requestId: string, state: { dirty: boolean; hasPath: boolean; docEmpty: boolean; revision: number; locale: 'en' | 'ko' | 'zh-Hans' | 'zh-Hant' | 'ja' }) => void;
+  sendCloseState: (requestId: string, state: { dirty: boolean; hasPath: boolean; docEmpty: boolean; revision: number; syncFailed: boolean; locale: 'en' | 'ko' | 'zh-Hans' | 'zh-Hant' | 'ja' }) => void;
   onCloseSave: (cb: (requestId: string, revision: number) => void) => () => void;
   sendCloseSaveResult: (requestId: string, result: { saved: boolean; committedRevision: number | null }) => void;
   onCloseAuthorize: (cb: (requestId: string) => void) => () => void;
@@ -96,6 +96,11 @@ export type Api = {
   sendCloseDiscardResult: (requestId: string, fenced: boolean) => void;
   onCloseDiscardRollback: (cb: (request: { requestId: string; leaseId: string }) => void) => () => void;
   sendCloseLeaseInvalidated: (requestId: string, revision: number) => void;
+  onCloseQuiescePrepare: (cb: (request: { requestId: string; ttlMs: number }) => void) => () => void;
+  onCloseQuiesceRollback: (cb: (request: { requestId: string }) => void) => () => void;
+  onCloseQuiesceHeartbeat: (cb: (request: { requestId: string; ttlMs: number }) => void) => () => void;
+  sendCloseQuiesceResult: (requestId: string, result: { prepared?: boolean; rolledBack?: boolean }) => void;
+  sendCloseQuiesceReady: () => void;
   setCloseLocale: (locale: 'en' | 'ko' | 'zh-Hans' | 'zh-Hant' | 'ja') => void;
   checkForUpdate: () => Promise<{ updateAvailable: boolean; currentVersion: string; latestVersion: string; url: string } | null>;
   openExternal: (url: string) => Promise<void>;

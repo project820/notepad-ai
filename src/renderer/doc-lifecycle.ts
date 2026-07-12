@@ -25,6 +25,10 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
   let closeLease: { id: string; revision: number; invalidated: boolean; consumed: boolean } | null = null;
   let savesFenced = false;
   let saveTail = Promise.resolve();
+  let flushPendingPreview: (() => void) | null = null;
+  let allowingCloseFlush = false;
+  let quiesce: { id: string; expiry: ReturnType<typeof setTimeout> | null; autosavePending: boolean; previewPending: boolean } | null = null;
+  let quiescePreview: { pause: () => boolean; resume: (wasPending: boolean) => void } | null = null;
 
   function invalidateCloseLease(): void {
     if (!closeLease || closeLease.invalidated || closeLease.consumed) return;
@@ -33,7 +37,7 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
   }
 
   function tryMutateDocument(): boolean {
-    return !closeLease?.consumed;
+    return (!savesFenced || allowingCloseFlush) && !quiesce && !closeLease?.consumed;
   }
 
   function recordDocumentMutation(): boolean {
@@ -286,7 +290,9 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
   }
 
   function beginCloseLease(id: string): void {
-    if (savesFenced || closeLease?.consumed) {
+    // A new query replaces an uncommitted/old transaction. Fencing begins only
+    // at consume or discard preparation; querying must leave editing available.
+    if (closeLease?.consumed) {
       savesFenced = false;
       ctx.editor.setMutationFence(false);
       ctx.preview.el.contentEditable = 'true';
@@ -304,6 +310,11 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
     ctx.editor.setMutationFence(true);
     ctx.preview.el.contentEditable = 'false';
     closeLease!.consumed = true;
+    // An approved consume is the quiesce commit. Keep the mutation fence shut
+    // for teardown, but cancel crash-recovery expiry so it cannot reopen an
+    // already-approved window.
+    if (quiesce?.expiry) clearTimeout(quiesce.expiry);
+    quiesce = null;
     return true;
   }
 
@@ -313,16 +324,98 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
     autosaveTimer = null;
     savesFenced = true;
     await saveTail;
-    return authorizeCloseLease(id);
+    if (!authorizeCloseLease(id)) return false;
+    ctx.editor.setMutationFence(true);
+    ctx.preview.el.contentEditable = 'false';
+    return true;
   }
 
   function rollbackDiscardFence(id: string): boolean {
     if (closeLease?.id !== id) return false;
+    // Save remains fenced until canonical source catches up with any DOM-only
+    // preview edit. A failure is deliberately retryable through a later close
+    // query, but must never reopen a stale-source save path.
+    try {
+      allowingCloseFlush = true;
+      flushPendingPreview?.();
+    } catch (error) {
+      console.warn('[close] keeping save fenced after preview flush failure:', error);
+      return false;
+    } finally {
+      allowingCloseFlush = false;
+    }
     savesFenced = false;
     ctx.editor.setMutationFence(false);
     ctx.preview.el.contentEditable = 'true';
     closeLease = null;
     if (ctx.dirty && ctx.currentPath) scheduleAutosave();
+    return true;
+  }
+
+  function setPreviewFlushGate(flush: () => void): void {
+    flushPendingPreview = flush;
+  }
+  function isSaveFenced(): boolean {
+    return savesFenced;
+  }
+
+
+  function setPreviewQuiesceHooks(hooks: { pause: () => boolean; resume: (wasPending: boolean) => void }): void {
+    quiescePreview = hooks;
+  }
+
+  function armQuiesceExpiry(id: string, ttlMs: number): void {
+    if (!quiesce || quiesce.id !== id) return;
+    if (quiesce.expiry) clearTimeout(quiesce.expiry);
+    quiesce.expiry = setTimeout(() => { void rollbackCloseQuiesce(id); }, Math.max(1, ttlMs));
+  }
+
+  async function prepareCloseQuiesce(id: string, ttlMs: number): Promise<boolean> {
+    if (quiesce && quiesce.id !== id) return false;
+    const autosavePending = autosaveTimer !== null;
+    if (autosaveTimer) clearTimeout(autosaveTimer);
+    autosaveTimer = null;
+    const previewPending = quiescePreview?.pause() ?? false;
+    savesFenced = true;
+    ctx.editor.setMutationFence(true);
+    ctx.preview.el.contentEditable = 'false';
+    quiesce = { id, expiry: null, autosavePending, previewPending };
+    armQuiesceExpiry(id, ttlMs);
+    return true;
+  }
+
+  function heartbeatCloseQuiesce(id: string, ttlMs: number): boolean {
+    if (!quiesce || quiesce.id !== id) return false;
+    armQuiesceExpiry(id, ttlMs);
+    return true;
+  }
+
+  async function rollbackCloseQuiesce(id: string): Promise<boolean> {
+    if (!quiesce || quiesce.id !== id) return false;
+    const current = quiesce;
+    if (current.expiry) clearTimeout(current.expiry);
+    try {
+      allowingCloseFlush = true;
+      flushPendingPreview?.();
+    } catch (error) {
+      console.warn('[close] autonomous quiesce rollback kept save fenced:', error);
+      return false;
+    } finally {
+      allowingCloseFlush = false;
+    }
+    quiesce = null;
+    savesFenced = false;
+    ctx.editor.setMutationFence(false);
+    ctx.preview.el.contentEditable = 'true';
+    quiescePreview?.resume(current.previewPending);
+    if ((current.autosavePending || ctx.dirty) && ctx.currentPath) scheduleAutosave();
+    return true;
+  }
+
+  function commitCloseQuiesce(id: string): boolean {
+    if (!quiesce || quiesce.id !== id) return false;
+    if (quiesce.expiry) clearTimeout(quiesce.expiry);
+    quiesce = null;
     return true;
   }
 
@@ -337,6 +430,13 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
     authorizeCloseLease,
     fenceDiscard,
     rollbackDiscardFence,
+    setPreviewFlushGate,
+    isSaveFenced,
+    setPreviewQuiesceHooks,
+    prepareCloseQuiesce,
+    heartbeatCloseQuiesce,
+    rollbackCloseQuiesce,
+    commitCloseQuiesce,
     save,
     saveIfDirtyBeforeReplace,
     setTitle,

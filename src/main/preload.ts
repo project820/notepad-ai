@@ -163,7 +163,7 @@ const api = {
     ipcRenderer.on('close:query-state', listener);
     return () => ipcRenderer.removeListener('close:query-state', listener);
   },
-  sendCloseState: (requestId: string, state: { dirty: boolean; hasPath: boolean; docEmpty: boolean; revision: number; locale: 'en' | 'ko' | 'zh-Hans' | 'zh-Hant' | 'ja' }): void =>
+  sendCloseState: (requestId: string, state: { dirty: boolean; hasPath: boolean; docEmpty: boolean; revision: number; syncFailed: boolean; locale: 'en' | 'ko' | 'zh-Hans' | 'zh-Hant' | 'ja' }): void =>
     ipcRenderer.send('close:state', { requestId, ...state }),
   onCloseSave: (cb: (requestId: string, revision: number) => void): (() => void) => {
     const listener = (_e: unknown, request: { requestId?: unknown; revision?: unknown }) => {
@@ -211,6 +211,30 @@ const api = {
   },
   sendCloseLeaseInvalidated: (requestId: string, revision: number): void =>
     ipcRenderer.send('close:lease-invalidated', { requestId, revision }),
+  onCloseQuiescePrepare: (cb: (request: { requestId: string; ttlMs: number }) => void): (() => void) => {
+    const listener = (_e: unknown, request: { requestId?: unknown; ttlMs?: unknown }) => {
+      if (typeof request?.requestId === 'string' && typeof request.ttlMs === 'number') cb({ requestId: request.requestId, ttlMs: request.ttlMs });
+    };
+    ipcRenderer.on('close:quiesce-prepare', listener);
+    return () => ipcRenderer.removeListener('close:quiesce-prepare', listener);
+  },
+  onCloseQuiesceRollback: (cb: (request: { requestId: string }) => void): (() => void) => {
+    const listener = (_e: unknown, request: { requestId?: unknown }) => {
+      if (typeof request?.requestId === 'string') cb({ requestId: request.requestId });
+    };
+    ipcRenderer.on('close:quiesce-rollback', listener);
+    return () => ipcRenderer.removeListener('close:quiesce-rollback', listener);
+  },
+  onCloseQuiesceHeartbeat: (cb: (request: { requestId: string; ttlMs: number }) => void): (() => void) => {
+    const listener = (_e: unknown, request: { requestId?: unknown; ttlMs?: unknown }) => {
+      if (typeof request?.requestId === 'string' && typeof request.ttlMs === 'number') cb({ requestId: request.requestId, ttlMs: request.ttlMs });
+    };
+    ipcRenderer.on('close:quiesce-heartbeat', listener);
+    return () => ipcRenderer.removeListener('close:quiesce-heartbeat', listener);
+  },
+  sendCloseQuiesceResult: (requestId: string, result: { prepared?: boolean; rolledBack?: boolean }): void =>
+    ipcRenderer.send('close:quiesce-result', { requestId, ...result }),
+  sendCloseQuiesceReady: (): void => ipcRenderer.send('close:quiesce-ready'),
   setCloseLocale: (locale: 'en' | 'ko' | 'zh-Hans' | 'zh-Hant' | 'ja'): void =>
     ipcRenderer.send('close:locale', locale),
 

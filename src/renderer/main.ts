@@ -29,6 +29,7 @@ import { initUnifiedChatWiring, type UnifiedChatWiring } from './unified-chat-wi
 import { folderFromFilePath, initProjectWizardFlow } from './project-wizard-flow';
 import { initSessionSnapshot } from './session-snapshot';
 import { initUpdateBanner } from './update-banner';
+import { handleCloseQueryState } from './close-query-state';
 
 const workspace = document.querySelector('.workspace') as HTMLElement;
 const editorHost = document.getElementById('editor-host') as HTMLDivElement;
@@ -163,12 +164,23 @@ applyPreviewMode();
 ctx.editor.applyTheme(resolvedDark(prefs.theme));
 
 const { selectionSync, scheduleLineAlign } = initPaneSync(ctx, { prefs, editorHost, createRafThrottle });
-const { flushPendingPreviewToSource, flushPreviewToSource, syncPreviewToSource } = initPreviewEditing(ctx, {
+const {
+  flushPendingPreviewToSource,
+  flushPreviewToSource,
+  syncPreviewToSource,
+  pausePreviewSyncTimer,
+  resumePreviewSyncTimer,
+} = initPreviewEditing(ctx, {
   htmlToMarkdown,
   t,
   onSuppressedEditorChange: docLifecycle.onSuppressedEditorChange,
   tryMutateDocument: docLifecycle.tryMutateDocument,
   recordPreviewInput: docLifecycle.recordPreviewInput,
+});
+docLifecycle.setPreviewFlushGate(flushPendingPreviewToSource);
+docLifecycle.setPreviewQuiesceHooks({
+  pause: pausePreviewSyncTimer,
+  resume: resumePreviewSyncTimer,
 });
 updateHtmlViewToggle = createHtmlViewToggle(ctx, { selectionSync, scheduleLineAlign });
 
@@ -209,16 +221,35 @@ docLifecycle.wireMenuActions(cyclePreviewMode);
 window.api.setCloseLocale(getLocale());
 onLocaleChange((locale) => window.api.setCloseLocale(locale));
 window.api.onCloseQueryState((requestId) => {
-  flushPendingPreviewToSource();
-  docLifecycle.beginCloseLease(requestId);
-  window.api.sendCloseState(requestId, {
-    dirty: ctx.dirty,
-    hasPath: ctx.currentPath !== null,
-    docEmpty: ctx.editor.getDoc().length === 0,
-    revision: ctx.docRevision,
-    locale: getLocale(),
+  handleCloseQueryState({
+    requestId,
+    flush: flushPendingPreviewToSource,
+    beginLease: docLifecycle.beginCloseLease,
+    send: window.api.sendCloseState,
+    state: () => ({
+      dirty: ctx.dirty,
+      hasPath: ctx.currentPath !== null,
+      docEmpty: ctx.editor.getDoc().length === 0,
+      revision: ctx.docRevision,
+      locale: getLocale(),
+      syncFailed: docLifecycle.isSaveFenced(),
+    }),
   });
 });
+window.api.onCloseQuiescePrepare(({ requestId, ttlMs }) => {
+  void docLifecycle.prepareCloseQuiesce(requestId, ttlMs).then((prepared) => {
+    window.api.sendCloseQuiesceResult(requestId, { prepared });
+  });
+});
+window.api.onCloseQuiesceHeartbeat(({ requestId, ttlMs }) => {
+  docLifecycle.heartbeatCloseQuiesce(requestId, ttlMs);
+});
+window.api.onCloseQuiesceRollback(({ requestId }) => {
+  void docLifecycle.rollbackCloseQuiesce(requestId).then((rolledBack) => {
+    window.api.sendCloseQuiesceResult(requestId, { rolledBack });
+  });
+});
+window.api.sendCloseQuiesceReady();
 window.api.onCloseSave((requestId, requestedRevision) => {
   void (async () => {
     const committedRevision = await docLifecycle.save();

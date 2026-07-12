@@ -21,7 +21,7 @@ import {
   type CloseGuardState,
 } from './close-guard';
 import { onTrusted } from './ipc-guard';
-import { CloseCoordinator, type CloseCommitResult, type CloseDecision, type CloseTarget } from './close-coordinator';
+import { awaitWithinDeadline, CloseCoordinator, createQuiesceTransaction, runDecideCloseLoop, type CloseAttemptContext, type CloseCommitResult, type CloseDecision, type CloseTarget } from './close-coordinator';
 
 const APP_DISPLAY_NAME = 'Notepad AI';
 const APP_STORAGE_NAME = 'notepad-ai';
@@ -38,7 +38,7 @@ type AppWindowsDeps = {
   removeSessionWindow: (windowKey: string) => Promise<void>;
   removeSessionWindows: (windowKeys: readonly string[]) => Promise<void>;
   commitQuitSession: (discardedWindowKeys: readonly string[]) => Promise<void>;
-  showCloseDialog?: (win: BrowserWindow, labels: { title: string; message: string; save: string; discard: string; cancel: string }) => Promise<CloseGuardChoice>;
+  showCloseDialog?: (win: BrowserWindow, labels: { title: string; message: string; save: string; discard: string; cancel: string; saveAllowed?: boolean }) => Promise<CloseGuardChoice>;
 };
 
 type AppWindows = {
@@ -82,15 +82,19 @@ export function createAppWindows({
   removeSessionWindows,
   commitQuitSession,
   showCloseDialog = async (win, labels) => {
+    const buttons = labels.saveAllowed === false
+      ? [labels.discard, labels.cancel]
+      : [labels.save, labels.discard, labels.cancel];
     const result = await dialog.showMessageBox(win, {
       type: 'warning',
       title: labels.title,
       message: labels.message,
-      buttons: [labels.save, labels.discard, labels.cancel],
+      buttons,
       defaultId: 0,
-      cancelId: 2,
+      cancelId: buttons.length - 1,
       noLink: true,
     });
+    if (labels.saveAllowed === false) return result.response === 0 ? 'discard' : 'cancel';
     return closeGuardChoiceFromButton(result.response);
   },
 }: AppWindowsDeps): AppWindows {
@@ -110,6 +114,9 @@ export function createAppWindows({
   const pendingDiscardRollback = new Map<string, { webContentsId: number; resolve: (rolledBack: boolean) => void }>();
   const pendingConsume = new Map<string, { webContentsId: number; resolve: (consumed: boolean) => void }>();
   const closeLeases = new Map<number, { id: string; invalidated: boolean }>();
+  const quiesceReady = new Set<number>();
+  const pendingQuiesce = new Map<string, { webContentsId: number; resolve: (value: boolean) => void }>();
+  const activeQuiesce = new Map<number, { id: string; heartbeat: ReturnType<typeof setInterval> }>();
 
   const requestId = (kind: string, win: BrowserWindow) => `${kind}:${win.id}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
   const waitForState = (
@@ -155,6 +162,7 @@ export function createAppWindows({
       docEmpty: value.docEmpty,
       revision,
       known: true,
+      syncFailed: value.syncFailed === true,
       locale: normalizeCloseGuardLocale(value.locale),
     });
   });
@@ -197,6 +205,17 @@ export function createAppWindows({
     const pendingRollback = pendingDiscardRollback.get(id);
     if (pendingRollback && pendingRollback.webContentsId === event.sender.id) pendingRollback.resolve(true);
   });
+  onTrusted('close:quiesce-ready', (event) => {
+    quiesceReady.add(event.sender.id);
+  });
+  onTrusted('close:quiesce-result', (event, raw: unknown) => {
+    const value = raw as Record<string, unknown>;
+    const id = typeof value?.requestId === 'string' ? value.requestId : '';
+    const pending = pendingQuiesce.get(id);
+    if (!pending || pending.webContentsId !== event.sender.id) return;
+    pendingQuiesce.delete(id);
+    pending.resolve(value.prepared === true || value.rolledBack === true);
+  });
   onTrusted('close:lease-invalidated', (event, raw: unknown) => {
     const value = raw as Record<string, unknown>;
     const id = typeof value?.requestId === 'string' ? value.requestId : '';
@@ -226,14 +245,16 @@ export function createAppWindows({
     return { ...live, leaseId: id };
   };
 
-  const saveFromRenderer = async (win: BrowserWindow, revision: number) => {
+  const saveFromRenderer = async (win: BrowserWindow, revision: number, deadline = Date.now() + 5_000) => {
     if (win.isDestroyed()) return { saved: false, committedRevision: null };
     const id = requestId('save', win);
     return new Promise<{ saved: boolean; committedRevision: number | null }>((resolve) => {
+      let timer: ReturnType<typeof setTimeout> | null = null;
       const onDestroyed = () => pending.resolve({ saved: false, committedRevision: null });
       const pending = {
         webContentsId: win.webContents.id,
         resolve: (result: { saved: boolean; committedRevision: number | null }) => {
+          if (timer) clearTimeout(timer);
           win.removeListener('closed', onDestroyed);
           pendingSave.delete(id);
           resolve(result);
@@ -241,6 +262,7 @@ export function createAppWindows({
       };
       pendingSave.set(id, pending);
       win.once('closed', onDestroyed);
+      timer = setTimeout(() => pending.resolve({ saved: false, committedRevision: null }), Math.max(0, deadline - Date.now()));
       win.webContents.send('close:save', { requestId: id, revision });
     });
   };
@@ -332,27 +354,94 @@ export function createAppWindows({
       win.webContents.send('close:discard-rollback', { requestId: id, leaseId });
     });
   };
+  const waitForQuiesce = (win: BrowserWindow, channel: 'close:quiesce-prepare' | 'close:quiesce-rollback', ttlMs?: number, timeoutMs = 1_000, id = requestId('quiesce', win)): Promise<boolean> => {
+    if (win.isDestroyed()) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        pendingQuiesce.delete(id);
+        resolve(false);
+      }, timeoutMs);
+      pendingQuiesce.set(id, {
+        webContentsId: win.webContents.id,
+        resolve: (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+      });
+      win.webContents.send(channel, ttlMs == null ? { requestId: id } : { requestId: id, ttlMs });
+    });
+  };
+
+  const quiesceAll = async (targets: readonly CloseTarget[], rollback: boolean): Promise<boolean> => {
+    const active = targets.map((target) => BrowserWindow.fromId(target.windowId))
+      .filter((win): win is BrowserWindow => !!win && quiesceReady.has(win.webContents.id));
+    if (active.length !== targets.length) return true;
+    const results = await Promise.all(active.map(async (win) => {
+      const existing = activeQuiesce.get(win.id);
+      if (rollback) {
+        if (!existing) return true;
+        clearInterval(existing.heartbeat);
+        activeQuiesce.delete(win.id);
+        return waitForQuiesce(win, 'close:quiesce-rollback', undefined, 1_000, existing.id);
+      }
+      const id = requestId('quiesce', win);
+      const heartbeat = setInterval(() => {
+        if (!win.isDestroyed()) win.webContents.send('close:quiesce-heartbeat', { requestId: id, ttlMs: 1_500 });
+      }, 500);
+      activeQuiesce.set(win.id, { id, heartbeat });
+      const prepared = await waitForQuiesce(win, 'close:quiesce-prepare', 1_500, 1_000, id);
+      if (!prepared) {
+        clearInterval(heartbeat);
+        activeQuiesce.delete(win.id);
+      }
+      return prepared;
+    }));
+    return results.every(Boolean);
+  };
+  const quiesceTransaction = createQuiesceTransaction({
+    prepare: async (target) => quiesceAll([target], false),
+    rollback: async (target) => { await quiesceAll([target], true); },
+    commit: async (target) => {
+      const active = activeQuiesce.get(target.windowId);
+      if (active) clearInterval(active.heartbeat);
+      activeQuiesce.delete(target.windowId);
+    },
+    awaitWithinDeadline,
+  });
   const leaseIdFor = (windowId: number) => closeLeases.get(windowId)?.id;
 
-  const decideClose = async (target: CloseTarget): Promise<CloseDecision> => {
+  const decideClose = async (target: CloseTarget, context: CloseAttemptContext): Promise<CloseDecision> => {
     const win = BrowserWindow.fromId(target.windowId);
     if (!win || win.isDestroyed()) return 'allow';
 
-    for (;;) {
-      const state = await queryCloseState(win);
-      const action = await resolveCloseGuard({
-        state,
-        showDialog: (labels) => showCloseDialog(win, labels),
-        save: async () => {
-          const result = await saveFromRenderer(win, state.revision);
-          if (!result.saved) return false;
-          const current = await queryCloseState(win);
-          return current.known === true && current.revision === result.committedRevision;
-        },
-      });
-      if (action === 'cancel') return action;
-      if (await authorizeRendererClose(win, leaseIdFor(win.id))) return action;
-    }
+    let state: (CloseGuardState & { leaseId: string | null }) | null = null;
+    return runDecideCloseLoop({
+      context,
+      queryState: async () => {
+        state = await queryCloseState(win);
+      },
+      resolveGuard: async () => {
+        if (!state) return 'cancel';
+        return resolveCloseGuard({
+          state,
+          // Native dialog dwell is intentionally outside the forward RPC SLA.
+          showDialog: async (labels) => {
+            const opened = Date.now();
+            const choice = await showCloseDialog(win, labels);
+            // Native modal dwell is not renderer RPC time.
+            context.forwardDeadline += Date.now() - opened;
+            return choice;
+          },
+          save: async () => {
+            const result = await saveFromRenderer(win, state!.revision, context.forwardDeadline);
+            if (!result.saved) return false;
+            const current = await queryCloseState(win);
+            return current.known === true && current.revision === result.committedRevision;
+          },
+        });
+      },
+      authorize: () => authorizeRendererClose(win, leaseIdFor(win.id)),
+    });
   };
 
   const targetsFor = (records: readonly WindowRecord[]): CloseTarget[] => records.map((rec) => ({ windowId: rec.windowId, windowKey: rec.windowKey }));
@@ -458,12 +547,12 @@ export function createAppWindows({
     if (approvedCloseWindowIds.has(win.id)) return true;
     const rec = registry.get(win.id);
     if (!rec || win.isDestroyed()) return true;
-    const result = await coordinator.request('close', targetsFor([rec]), decideClose, (transaction) => commitCloseTransaction(transaction));
+    const result = await coordinator.request('close', targetsFor([rec]), decideClose, (transaction) => commitCloseTransaction(transaction), quiesceTransaction);
     return result.approved;
   };
 
   const approveAllForQuit = async (intent: 'quit' | 'relaunch') => {
-    const result = await coordinator.request(intent, targetsFor(registry.all()), decideClose, commitCloseTransaction);
+    const result = await coordinator.request(intent, targetsFor(registry.all()), decideClose, commitCloseTransaction, quiesceTransaction);
     return result.approved && result.intent === intent;
   };
 

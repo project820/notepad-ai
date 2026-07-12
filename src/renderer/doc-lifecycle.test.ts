@@ -191,4 +191,42 @@ describe('document close lease and replacement lifecycle', () => {
     expect(ctx.dirty).toBe(true);
     expect(lifecycle.authorizeCloseLease('lease-1')).toBe(false);
   });
+  it('keeps an active quiesce lease alive with heartbeats', async () => {
+    vi.useFakeTimers();
+    try {
+      const { lifecycle, mutationFenced } = setup();
+      const pause = vi.fn(() => true);
+      const resume = vi.fn();
+      lifecycle.setPreviewQuiesceHooks({ pause, resume });
+
+      await expect(lifecycle.prepareCloseQuiesce('transaction', 100)).resolves.toBe(true);
+      await vi.advanceTimersByTimeAsync(90);
+      expect(lifecycle.heartbeatCloseQuiesce('transaction', 100)).toBe(true);
+      await vi.advanceTimersByTimeAsync(90);
+
+      expect(mutationFenced()).toBe(true);
+      expect(resume).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(11);
+      expect(mutationFenced()).toBe(false);
+      expect(resume).toHaveBeenCalledWith(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('autonomously rolls back an abandoned quiesce lease', async () => {
+    vi.useFakeTimers();
+    try {
+      const { lifecycle, mutationFenced } = setup();
+      await expect(lifecycle.prepareCloseQuiesce('lost-main', 20)).resolves.toBe(true);
+      expect(lifecycle.tryMutateDocument()).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(20);
+
+      expect(mutationFenced()).toBe(false);
+      expect(lifecycle.tryMutateDocument()).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
