@@ -137,16 +137,18 @@ export class ComposedGrokProvider implements AiProvider {
       return { installed: this.cliInstalled, state: this.cliAuthState };
     }
     const generation = this.cliAuthGeneration;
-    this.cliStatusProbe = this.probeCliAuthStatus();
-    try {
-      const probe = await this.cliStatusProbe;
-      if (generation === this.cliAuthGeneration) this.cacheCliAuthState(probe.state, probe.installed);
-      return generation === this.cliAuthGeneration
-        ? probe
-        : { installed: this.cliInstalled, state: this.cliAuthState };
-    } finally {
-      this.cliStatusProbe = null;
-    }
+    const probe = this.probeCliAuthStatus().then((result) => {
+      if (generation === this.cliAuthGeneration) {
+        this.cacheCliAuthState(result.state, result.installed);
+        return result;
+      }
+      return { installed: this.cliInstalled, state: this.cliAuthState };
+    });
+    this.cliStatusProbe = probe;
+    void probe.finally(() => {
+      if (this.cliStatusProbe === probe) this.cliStatusProbe = null;
+    });
+    return probe;
   }
 
   private async probeCliAuthStatus(): Promise<CliAuthProbe> {

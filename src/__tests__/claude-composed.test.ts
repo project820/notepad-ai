@@ -135,10 +135,12 @@ describe('ComposedClaudeProvider (CLI-first + API fallback)', () => {
     const pending = provider.getAuthStatus();
     for (let i = 0; i < 50 && spawn.mock.calls.length === 0; i++) await new Promise((resolve) => setTimeout(resolve, 0));
     provider.recordCliAuthResult('auth_failed');
+    const joined = provider.getAuthStatus();
     status.emitOut('{"loggedIn":true}');
     status.doClose(0);
 
     await expect(pending).resolves.toMatchObject({ cliStatus: { authState: 'auth_failed' } });
+    await expect(joined).resolves.toMatchObject({ cliStatus: { authState: 'auth_failed' } });
     await expect(provider.getAuthStatus()).resolves.toMatchObject({ cliStatus: { authState: 'auth_failed' } });
   });
 
