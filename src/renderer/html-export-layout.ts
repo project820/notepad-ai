@@ -155,7 +155,7 @@ export const MIN_SCALE = 0.7;
 export const MIN_COVER_SCALE = 0.45;
 
 /** Font-floor tolerance is intentionally narrow: it catches a deck-scale regression. */
-export const FONT_FLOOR_TOLERANCE_PX = 0.5;
+const FONT_FLOOR_TOLERANCE_PX = 0.5;
 
 export function effectiveSlideFontSizes(slideScale: number, deckScale: number): {
   bodyPx: number;
