@@ -147,6 +147,16 @@ describe('ComposedGrokProvider restricted transport routing', () => {
       cliStatus: { installed: true, authState: 'succeeded' },
     });
   });
+  it('keeps a confirmed logout as an auth-failed cache entry instead of fresh unknown', async () => {
+    const h = harness(false, []);
+
+    h.provider.recordCliAuthResult('auth_failed');
+
+    await expect(h.provider.getAuthStatus()).resolves.toMatchObject({
+      connected: false,
+      cliStatus: { installed: true, authState: 'auth_failed' },
+    });
+  });
   it('re-probes a persisted Grok CLI session in a fresh provider instance', async () => {
     const spawn = vi.fn(() => authProbeChild('You are logged in with grok.com.\n\nAvailable models:\n'));
     const provider = new ComposedGrokProvider(

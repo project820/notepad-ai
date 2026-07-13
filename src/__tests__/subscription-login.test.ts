@@ -254,7 +254,7 @@ describe('subscription CLI login', () => {
     status.emitOut('{"loggedIn":false}');
     status.close(1);
     await expect(pending).resolves.toBeUndefined();
-    expect(record).toHaveBeenCalledWith('claude', 'unknown');
+    expect(record).toHaveBeenCalledWith('claude', 'auth_failed');
   });
 
   it('rejects failed logout without recording a disconnected CLI state', async () => {

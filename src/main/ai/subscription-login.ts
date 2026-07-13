@@ -29,7 +29,7 @@ type ActiveLogin = {
   command?: string;
   env?: Record<string, string>;
   onResult?: (provider: SubscriptionProvider, state: 'succeeded' | 'unknown') => void;
-  onLogout?: (provider: SubscriptionProvider, state: 'unknown') => void;
+  onLogout?: (provider: SubscriptionProvider, state: 'auth_failed') => void;
   logoutCompletion?: { resolve(): void; reject(error: Error): void };
 };
 const DISCARDED_SENDER: LoginSender = {
@@ -151,7 +151,7 @@ export class SubscriptionLoginService {
     else this.cancelEntry(entry);
   }
 
-  async logout(provider: SubscriptionProvider, onResult?: (provider: SubscriptionProvider, state: 'unknown') => void): Promise<void> {
+  async logout(provider: SubscriptionProvider, onResult?: (provider: SubscriptionProvider, state: 'auth_failed') => void): Promise<void> {
     if (this.active.has(provider)) throw new Error('A login is already in progress for this provider.');
     let resolveCompletion!: () => void;
     let rejectCompletion!: (error: Error) => void;
@@ -356,7 +356,7 @@ export class SubscriptionLoginService {
     if (entry.terminal) return;
     entry.terminal = true;
     clearTimeout(entry.timer);
-    entry.onLogout?.(entry.provider, 'unknown');
+    entry.onLogout?.(entry.provider, 'auth_failed');
     entry.logoutCompletion?.resolve();
     if (!entry.process) this.release(entry);
   }

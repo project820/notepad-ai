@@ -97,8 +97,10 @@ describe('trusted CLI override', () => {
   });
   it('auto-registers an identity-verified login-shell PATH executable as a staged trusted command', async () => {
     const f = await fixture();
+    const target = path.join(f.root, 'agy-2.0.0');
     const agy = path.join(f.root, 'agy');
-    await fs.writeFile(agy, '#!/bin/sh\necho version\n', { mode: 0o700 });
+    await fs.writeFile(target, '#!/bin/sh\necho version\n', { mode: 0o700 });
+    await fs.symlink(target, agy);
     const store = new AtomicCliOverrideStore(f.backend);
     __resetCliSpawnPathForTests();
     __setShellExecForTests(async () => `GJC_PATH=${f.root}`);
@@ -113,5 +115,32 @@ describe('trusted CLI override', () => {
     } finally {
       __resetCliSpawnPathForTests();
     }
+  });
+  it('rejects a group-writable executable and parent directory', async () => {
+    const f = await fixture();
+    await fs.chmod(f.executable, 0o770);
+    const store = new AtomicCliOverrideStore(f.backend);
+    expect(await store.approve('grok', f.executable)).toHaveProperty('error');
+
+    await fs.chmod(f.executable, 0o700);
+    const unsafe = path.join(f.root, 'group-writable');
+    await fs.mkdir(unsafe, { mode: 0o770 });
+    await fs.chmod(unsafe, 0o770);
+    const nested = path.join(unsafe, 'grok');
+    await fs.writeFile(nested, '#!/bin/sh\necho version\n', { mode: 0o700 });
+    expect(await store.approve('grok', nested)).toHaveProperty('error');
+  });
+
+  it('runs version validation only from the staged artifact', async () => {
+    const f = await fixture();
+    const marker = path.join(f.root, 'executed-from');
+    const source = `#!/bin/sh\necho "$0" > '${marker}'\n`;
+    await fs.writeFile(f.executable, source, { mode: 0o700 });
+    const store = new AtomicCliOverrideStore(f.backend);
+
+    const approved = await store.approve('grok', f.executable);
+
+    expect(approved).toHaveProperty('command');
+    expect(await fs.readFile(marker, 'utf-8')).toBe(`${await fs.realpath((approved as { command: string }).command)}\n`);
   });
 });

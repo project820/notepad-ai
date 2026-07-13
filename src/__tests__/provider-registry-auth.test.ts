@@ -1,10 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { ProviderRegistry, type ProviderMap } from '../main/ai/provider-registry';
 import { GrokCliProvider, type PromptFileWriter } from '../main/ai/grok-cli-provider';
 import {
   __resetCliSpawnPathForTests,
-  __setCliProbeForTests,
-  __setShellExecForTests,
   type CliProcess,
   type CliSpawn,
 } from '../main/ai/cli-runner';
@@ -128,7 +126,14 @@ function realGrokProvider(probeExitCode: number, commandFailure?: string) {
     path: '/tmp/fake-grok-prompt.txt',
     cleanup: async () => {},
   });
-  return { provider: new GrokCliProvider({ spawn, writePromptFile }), streamCalls: () => streamCalls };
+  return {
+    provider: new GrokCliProvider({
+      spawn,
+      writePromptFile,
+      resolveCommand: async () => ({ command: '/trusted/grok' }),
+    }),
+    streamCalls: () => streamCalls,
+  };
 }
 
 function grokProvider(status: ProviderAuthStatus): AiProvider & { streamCalls: number } {
@@ -155,11 +160,6 @@ const grokRequest: AiChatRequest = {
   userText: 'hello',
   model: { provider: 'grok', id: 'grok' },
 };
-
-beforeEach(() => {
-  __setShellExecForTests(async () => 'GJC_PATH=/usr/bin\n');
-  __setCliProbeForTests(() => true);
-});
 
 afterEach(() => __resetCliSpawnPathForTests());
 

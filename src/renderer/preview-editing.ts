@@ -212,8 +212,11 @@ export function initPreviewEditing(ctx: AppContext, deps: PreviewEditingDeps) {
   function flushPreviewToSource(): boolean {
     if (!previewEditPending) return false;
     if (!deps.tryMutateDocument()) {
-      restorePreviewFromSource();
-      return false;
+      // A failed close sync fences mutation. Do not rebuild from canonical source:
+      // that source predates this pending DOM edit. Keeping the DOM edit intact
+      // makes a retry fail safely rather than falsely reporting recovery and
+      // allowing a stale source to be saved as clean.
+      throw new Error('preview sync is fenced while an edit is pending');
     }
     ctx.preview.el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach((el) => {
       el.toggleAttribute('checked', el.checked);

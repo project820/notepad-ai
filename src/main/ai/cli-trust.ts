@@ -64,7 +64,7 @@ function parseOverrides(raw: string | null): Partial<Record<TrustedCliName, CliO
 async function assertSafeParents(filePath: string): Promise<void> {
   for (let dir = path.dirname(filePath); ; dir = path.dirname(dir)) {
     const stat = await fs.stat(dir);
-    if ((stat.mode & 0o002) !== 0) throw new Error('CLI executable has a world-writable parent directory.');
+    if ((stat.mode & 0o022) !== 0) throw new Error('CLI executable has a group- or other-writable parent directory.');
     const parent = path.dirname(dir);
     if (parent === dir) return;
   }
@@ -96,7 +96,7 @@ async function readVerifiedCliFile(inputPath: string, requireCmuxBundle = false)
     const stat = await handle.stat();
     if (!stat.isFile()) throw new Error('CLI executable must be a regular file.');
     if ((stat.mode & 0o111) === 0) throw new Error('CLI executable is not executable.');
-    if ((stat.mode & 0o002) !== 0) throw new Error('CLI executable is world-writable.');
+    if ((stat.mode & 0o022) !== 0) throw new Error('CLI executable is group- or other-writable.');
     const bytes = await handle.readFile();
     return {
       identity: {
@@ -158,10 +158,9 @@ export class AtomicCliOverrideStore implements CliOverrideStore {
   approve(cli: TrustedCliName, selectedPath: string): Promise<TrustedCliResult> {
     const run = this.mutationChain.then(async () => {
       await this.load();
-      const checked = await readVerifiedCliFile(selectedPath);
-      await verifyCliVersion(checked.identity.realpath);
+      // The source is read only; it is never executed. All liveness checks run
+      // against the private staged copy whose bytes were re-verified below.
       const source = await readVerifiedCliFile(selectedPath);
-      if (!sameIdentity(source.identity, checked.identity)) throw new Error('CLI executable changed during approval. Select it again.');
       const root = this.backend.stagingRoot();
       await fs.mkdir(root, { recursive: true, mode: 0o700 });
       await fs.chmod(root, 0o700);
@@ -171,6 +170,10 @@ export class AtomicCliOverrideStore implements CliOverrideStore {
       await fs.rename(temporary, stagedPath);
       await fs.chmod(stagedPath, 0o700);
       const staged = await readVerifiedCliFile(stagedPath);
+      if (staged.identity.sizeBytes !== source.identity.sizeBytes || staged.identity.sha256 !== source.identity.sha256) {
+        throw new Error('Trusted CLI staging artifact does not match the selected executable.');
+      }
+      await verifyCliVersion(staged.identity.realpath);
       const next = { ...this.overrides, [cli]: { identity: source.identity, stagedPath, stagedIdentity: staged.identity } };
       await this.backend.writeFile(JSON.stringify({ version: 1, overrides: next }));
       this.overrides = next;
@@ -228,8 +231,7 @@ async function findPathCliCandidate(cli: TrustedCliName): Promise<string | null>
   for (const directory of env.PATH.split(':')) {
     if (!directory) continue;
     try {
-      const candidate = await fs.realpath(path.join(directory, cli));
-      if (path.basename(candidate) !== cli) continue;
+      const candidate = path.join(directory, cli);
       await readVerifiedCliFile(candidate);
       return candidate;
     } catch {

@@ -56,15 +56,27 @@ function bookmark(root: HTMLElement): { runId: string | null; offset: number } |
   if (!owner) return null;
   return { runId: owner.getAttribute('data-run-id'), offset: selection.anchorOffset };
 }
+function firstTextNode(node: Node): Text | null {
+  for (const child of Array.from(node.childNodes)) {
+    if (child.nodeType === Node.TEXT_NODE) return child as Text;
+    const nested = firstTextNode(child);
+    if (nested) return nested;
+  }
+  return null;
+}
 
-function restoreBookmark(root: HTMLElement, value: ReturnType<typeof bookmark>): void {
+
+export function restoreBookmark(root: HTMLElement, value: ReturnType<typeof bookmark>): void {
   if (!value?.runId) return;
   const owner = root.querySelector<HTMLElement>(`[data-run-id="${value.runId}"]`);
   if (!owner) return;
-  const text = owner.firstChild;
-  if (!text) return;
+  const text = firstTextNode(owner);
   const range = document.createRange();
-  range.setStart(text, Math.min(value.offset, text.textContent?.length ?? 0));
+  if (text) {
+    range.setStart(text, Math.min(value.offset, text.data.length));
+  } else {
+    range.setStart(owner, Math.min(value.offset, owner.childNodes.length));
+  }
   range.collapse(true);
   const selection = window.getSelection();
   selection?.removeAllRanges();

@@ -115,6 +115,18 @@ describe('ComposedClaudeProvider (CLI-first + API fallback)', () => {
     await expect(provider.getAuthStatus()).resolves.toMatchObject({ connected: true });
     expect(spawn).toHaveBeenCalledTimes(1);
   });
+  it('keeps a confirmed logout as an auth-failed cache entry instead of fresh unknown', async () => {
+    const spawn = vi.fn(() => new FakeChild());
+    const provider = new ComposedClaudeProvider(noKeyStore, spawn, trustedClaude);
+
+    provider.recordCliAuthResult('auth_failed');
+
+    await expect(provider.getAuthStatus()).resolves.toMatchObject({
+      connected: false,
+      cliStatus: { installed: true, authState: 'auth_failed', errorCode: 'claude_cli_login_required' },
+    });
+    expect(spawn).not.toHaveBeenCalled();
+  });
 
   it('uses the CLI on success and does NOT fall back to the API (no auth error)', async () => {
     const h = run();

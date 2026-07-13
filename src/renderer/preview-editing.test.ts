@@ -165,6 +165,20 @@ describe('initPreviewEditing close flush', () => {
     expect(setDoc).not.toHaveBeenCalled();
     expect(lifecycle).not.toHaveBeenCalled();
   });
+  it('preserves a pending preview edit after a failed close sync so a retry cannot save stale source', () => {
+    const { doc, editing, previewEl, setMayMutate, setPreviewDoc } = setupPreviewEditing();
+    previewEl.innerHTML = '<p>latest preview edit</p>';
+    previewEl.dispatchEvent(new Event('input'));
+    setMayMutate(false);
+
+    expect(() => editing.flushPendingPreviewToSource()).toThrow('preview sync is fenced while an edit is pending');
+    expect(previewEl.textContent).toBe('latest preview edit');
+    expect(setPreviewDoc).not.toHaveBeenCalled();
+
+    setMayMutate(true);
+    expect(editing.flushPendingPreviewToSource()).toBe(true);
+    expect(doc()).toBe('latest preview edit');
+  });
 });
 describe('preview checkbox changes', () => {
   it('does not turn task text clicks into checkbox changes in markdown-it rendered preview DOM', () => {

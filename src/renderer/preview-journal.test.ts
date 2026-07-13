@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from 'vitest';
 
-import { createPreview } from './preview';
+import { createPreview, restoreBookmark } from './preview';
 
 type Golden = { source: string; edit: { runId: number; segments: string[] }; expected: string };
 const goldenModules = import.meta.glob('./__fixtures__/preview-roundtrip/*.json', { eager: true }) as Record<string, { default: Golden }>;
@@ -31,6 +31,18 @@ describe('preview source patch', () => {
 
     expect(preview.getRunTable()).not.toBeNull();
     expect(preview.el.querySelectorAll('[data-run-id]')).toHaveLength(7);
+  });
+  it('restores a caret from a label-wrapped task item without a Range offset exception', () => {
+    const source = '- [ ] task text';
+    const preview = createPreview(document.createElement('div'));
+    preview.setDoc(source);
+    const owner = preview.el.querySelector<HTMLElement>('[data-run-id="0"]')!;
+    expect(owner.querySelector('label input[type="checkbox"]')).not.toBeNull();
+
+    expect(() => restoreBookmark(preview.el, { runId: '0', offset: 4 })).not.toThrow();
+    const selection = window.getSelection()!;
+    expect(selection.anchorNode?.nodeType).toBe(Node.TEXT_NODE);
+    expect(selection.anchorOffset).toBeLessThanOrEqual(selection.anchorNode?.textContent?.length ?? 0);
   });
   it.each([
     ['# not a heading', '\\# not a heading'],

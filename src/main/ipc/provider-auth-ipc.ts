@@ -9,7 +9,7 @@ function isSubscriptionProvider(value: unknown): value is SubscriptionProvider {
 
 export function registerProviderAuthIpc({ getRegistry }: { getRegistry: () => ProviderRegistry }): void {
   const login = getSubscriptionLoginService();
-  const record = (provider: SubscriptionProvider, state: 'succeeded' | 'unknown') => getRegistry().recordCliAuthResult(provider, state);
+  const record = (provider: SubscriptionProvider, state: 'succeeded' | 'unknown' | 'auth_failed') => getRegistry().recordCliAuthResult(provider, state);
   handleTrusted('auth:provider-login', async (event, provider: unknown) => {
     if (!isSubscriptionProvider(provider)) throw new Error('Unknown subscription provider');
     await login.start(provider, event.sender, record);

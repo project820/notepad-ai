@@ -61,8 +61,8 @@ export class ComposedClaudeProvider implements AiProvider {
   }
 
   /** Login lifecycle results update the bounded status cache until the next re-probe. */
-  recordCliAuthResult(state: 'succeeded' | 'unknown'): void {
-    this.cacheCliAuthState(state, state === 'succeeded' || this.cliInstalled);
+  recordCliAuthResult(state: 'succeeded' | 'unknown' | 'auth_failed'): void {
+    this.cacheCliAuthState(state, state !== 'unknown' || this.cliInstalled);
   }
 
   async getAuthStatus(): Promise<ProviderAuthStatus> {

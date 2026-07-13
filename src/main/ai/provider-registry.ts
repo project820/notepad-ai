@@ -122,8 +122,8 @@ export class ProviderRegistry {
     return this.providers[id];
   }
   /** Records a locally observed subscription CLI result without changing API-key state. */
-  recordCliAuthResult(provider: 'claude' | 'grok', state: 'succeeded' | 'unknown'): void {
-    const target = this.providers[provider] as { recordCliAuthResult?: (next: 'succeeded' | 'unknown') => void } | undefined;
+  recordCliAuthResult(provider: 'claude' | 'grok', state: 'succeeded' | 'unknown' | 'auth_failed'): void {
+    const target = this.providers[provider] as { recordCliAuthResult?: (next: 'succeeded' | 'unknown' | 'auth_failed') => void } | undefined;
     target?.recordCliAuthResult?.(state);
   }
 
