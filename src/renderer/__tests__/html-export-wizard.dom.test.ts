@@ -344,6 +344,39 @@ describe('mountHtmlExportWizard — purpose/density/etc are demoted to an option
     expect(savedHtml).toContain('--he-readable-width: clamp(820px, 88vw, 1280px);');
     expect(savedHtml).toContain('--he-rhythm: 48px;');
   });
+  it('saves a contained scroll document when the requested slide plan misses the font floor', async () => {
+    let savedHtml = '';
+    const originalScrollHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollHeight');
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+      configurable: true,
+      get: () => 10_000,
+    });
+
+    try {
+      const { host, deps } = setup({
+        saveHtml: vi.fn(async ({ html }) => {
+          savedHtml = html;
+          return { saved: true, filePath: '/tmp/export.html' };
+        }),
+      });
+      click(host, 'orient-horizontal');
+      click(host, 'layout-slides');
+      click(host, 'design-default');
+      setField(host, 'free-requirement', '');
+      click(host, 'generate-submit');
+      await flush();
+      click(host, 'save-html');
+      await flush();
+
+      expect(deps.saveHtml).toHaveBeenCalledTimes(1);
+      expect(savedHtml).toContain('data-he-layout="scroll"');
+      expect(savedHtml).not.toContain('class="he-doc he-slides"');
+      expect(host.textContent).not.toContain('he.error.containment');
+    } finally {
+      if (originalScrollHeight) Object.defineProperty(HTMLElement.prototype, 'scrollHeight', originalScrollHeight);
+      else delete (HTMLElement.prototype as { scrollHeight?: number }).scrollHeight;
+    }
+  });
 });
 
 describe('mountHtmlExportWizard — getdesign list rows', () => {

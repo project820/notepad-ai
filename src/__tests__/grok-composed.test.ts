@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { API_KEY_PROVIDERS, ApiKeyStore, type KeyStoreBackend } from '../main/ai/api-key-store';
 import { ComposedGrokProvider } from '../main/ai/grok-composed';
 import { XaiApiProvider, XAI_CHAT_COMPLETIONS_URL } from '../main/ai/xai-api-provider';
-import type { CliSpawn } from '../main/ai/cli-runner';
+import type { CliProcess, CliSpawn } from '../main/ai/cli-runner';
 import type { AiChatEvent, AiChatRequest, ProviderAuthStatus } from '../main/ai/types';
 
 const request: AiChatRequest = {
@@ -38,6 +38,25 @@ function cliStatus(installed = true): ProviderAuthStatus {
     installed, authUnverified: installed,
     errorCode: installed ? 'grok_cli_auth_unknown' : 'grok_cli_setup_required',
   };
+}
+
+function authProbeChild(output: string): CliProcess {
+  let onOutput: ((chunk: string) => void) | undefined;
+  let onClose: ((code: number | null) => void) | undefined;
+  const child: CliProcess = {
+    stdin: { write: () => {}, end: () => {}, on: () => {} },
+    stdout: { on: (_event, callback) => { onOutput = callback; } },
+    stderr: { on: () => {} },
+    on: (event, callback) => {
+      if (event === 'close') onClose = callback as (code: number | null) => void;
+    },
+    kill: () => {},
+  };
+  queueMicrotask(() => {
+    onOutput?.(output);
+    onClose?.(0);
+  });
+  return child;
 }
 
 describe('ApiKeyStore Grok allowlist', () => {
@@ -123,8 +142,25 @@ describe('ComposedGrokProvider restricted transport routing', () => {
     expect(h.apiCalls()).toBe(0);
     expect(h.cliCalls()).toBe(1);
     await expect(h.provider.getAuthStatus()).resolves.toMatchObject({
-      connected: false,
+      connected: true,
       authKind: 'api_key',
+      cliStatus: { installed: true, authState: 'succeeded' },
+    });
+  });
+  it('re-probes a persisted Grok CLI session in a fresh provider instance', async () => {
+    const spawn = vi.fn(() => authProbeChild('You are logged in with grok.com.\n\nAvailable models:\n'));
+    const provider = new ComposedGrokProvider(
+      keyStore(),
+      spawn,
+      async () => ({ command: '/trusted/grok' }),
+    );
+
+    const status = await provider.getAuthStatus();
+
+    expect(spawn).toHaveBeenCalledWith('/trusted/grok', ['models'], expect.any(Object));
+    expect(status).toMatchObject({
+      connected: true,
+      connectionSource: 'cli',
       cliStatus: { installed: true, authState: 'succeeded' },
     });
   });

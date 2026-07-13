@@ -133,6 +133,12 @@ function loadFixtures() {
     required: true,
     kind: 'synthetic',
   });
+  fixtures.push({
+    name: 'slide-fallback',
+    md: `# Fallback proof\n\n## ${'H'.repeat(3000)}\n\nThis section title cannot satisfy the slide font floor.`,
+    required: true,
+    kind: 'synthetic',
+  });
   const realPath = resolve(FIXTURE_DIR, REAL_HANDOVER);
   const realPresent = existsSync(realPath);
   if (realPresent) {
@@ -254,7 +260,6 @@ async function run() {
   for (const fx of fixtures) {
     for (const orientation of ORIENTATIONS) {
       for (const layout of ['slides', 'scroll']) {
-        const viewports = layout === 'slides' ? slideViewports(orientation) : scrollViewports(orientation);
         for (const presentationCase of PRESENTATIONS) {
           const bundle = await callHarness('bundleDoc', fx.md, {
             orientation,
@@ -262,9 +267,14 @@ async function run() {
             title: fx.name,
             presentation: presentationCase.presentation,
           });
+          const emittedLayout = bundle.manifest.layout;
+          if (fx.name === 'slide-fallback' && layout === 'slides' && (emittedLayout !== 'scroll' || !bundle.degraded)) {
+            throw new Error('slide-fallback fixture did not emit a degraded scroll document');
+          }
+          const viewports = emittedLayout === 'slides' ? slideViewports(orientation) : scrollViewports(orientation);
           for (const vp of viewports) {
             const remote = await loadHtmlAt(bundle.html, vp.w, vp.h);
-            const assertFn = layout === 'slides' ? 'assertSlides' : 'assertScroll';
+            const assertFn = emittedLayout === 'slides' ? 'assertSlides' : 'assertScroll';
             const verdict = await callHarness(assertFn, fx.md, {
               orientation,
               title: fx.name,
@@ -279,7 +289,9 @@ async function run() {
             const row = {
               fixture: fx.name,
               kind: fx.kind,
-              layout,
+              requestedLayout: layout,
+              layout: emittedLayout,
+              degraded: bundle.degraded === true,
               orientation,
               presentation: presentationCase.label,
               viewport: `${vp.w}x${vp.h}(${vp.label})`,
@@ -295,7 +307,8 @@ async function run() {
               minEffectiveBodyPx: typeof verdict.minEffectiveBodyPx === 'number' ? verdict.minEffectiveBodyPx : null,
               minEffectiveCaptionPx: typeof verdict.minEffectiveCaptionPx === 'number' ? verdict.minEffectiveCaptionPx : null,
               shippedDeckScale: typeof verdict.shippedDeckScale === 'number' ? verdict.shippedDeckScale : null,
-
+              clippingCount: typeof verdict.clippingCount === 'number' ? verdict.clippingCount : null,
+              overlapCount: typeof verdict.overlapCount === 'number' ? verdict.overlapCount : verdict.navOverlapCount ?? null,
 
               failures,
             };
@@ -306,12 +319,12 @@ async function run() {
             if (ok) pass += 1;
             else fail += 1;
             // Optional: capture ONE real screenshot of an applied (paginated+scaled) cell.
-            if (DUMP && !shotDone && ok && fx.kind !== 'inject' && layout === 'slides' && orientation === 'horizontal') {
+            if (DUMP && !shotDone && ok && fx.kind !== 'inject' && emittedLayout === 'slides' && orientation === 'horizontal') {
               writeFileSync(DUMP, bundle.html, 'utf8');
               shotDone = true;
               console.log(`DUMP saved: ${DUMP} (${fx.name} / slides / horizontal)`);
             }
-            if (SHOT && !shotDone && ok && fx.kind !== 'inject' && layout === 'slides' && orientation === 'horizontal') {
+            if (SHOT && !shotDone && ok && fx.kind !== 'inject' && emittedLayout === 'slides' && orientation === 'horizontal') {
               try {
                 const img = await withTimeout(win.webContents.capturePage(), 15000, 'capturePage');
                 writeFileSync(SHOT, img.toPNG());
@@ -332,9 +345,9 @@ async function run() {
   for (const r of rows) {
     const status = r.ok ? 'PASS' : 'FAIL';
     log(
-      `[${status}] ${r.fixture.padEnd(15)} ${r.layout.padEnd(6)} ${r.orientation.padEnd(10)} ${r.presentation.padEnd(6)} ${r.viewport.padEnd(18)} ` +
+      `[${status}] ${r.fixture.padEnd(15)} ${r.layout.padEnd(6)}${r.degraded ? '*' : ' '} ${r.orientation.padEnd(10)} ${r.presentation.padEnd(6)} ${r.viewport.padEnd(18)} ` +
         `slides=${String(r.slides).padStart(3)} splits=${String(r.splits ?? '-').padStart(3)} minScale=${r.minScale ?? '-'} ` +
-        `nav=${r.navMinWidth ?? '-'}×${r.navMinHeight ?? '-'} deck=${r.shippedDeckScale ?? '-'} overlap=${r.navOverlapCount ?? '-'} body=${r.minEffectiveBodyPx ?? '-'} caption=${r.minEffectiveCaptionPx ?? '-'} topOffset=${r.maxTopOffset ?? '-'} fill=${r.readingWidthRatio ?? '-'}`,
+        `nav=${r.navMinWidth ?? '-'}×${r.navMinHeight ?? '-'} deck=${r.shippedDeckScale ?? '-'} clip=${r.clippingCount ?? '-'} overlap=${r.overlapCount ?? '-'} body=${r.minEffectiveBodyPx ?? '-'} caption=${r.minEffectiveCaptionPx ?? '-'} topOffset=${r.maxTopOffset ?? '-'} fill=${r.readingWidthRatio ?? '-'}`,
     );
     for (const f of r.failures) log(`        ↳ ${f}`);
   }

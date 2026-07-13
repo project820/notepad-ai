@@ -319,8 +319,8 @@ export function initPreviewEditing(ctx: AppContext, deps: PreviewEditingDeps) {
   }, true);
   ctx.preview.el.addEventListener('input', beginPreviewInput);
   ctx.preview.el.addEventListener('change', (e) => {
-    const target = e.target as HTMLInputElement | null;
-    if (target && target.type === 'checkbox') {
+    const target = e.target;
+    if (target instanceof HTMLInputElement && target.type === 'checkbox') {
       captureCheckboxEdit(target);
       beginPreviewInput(e);
     }

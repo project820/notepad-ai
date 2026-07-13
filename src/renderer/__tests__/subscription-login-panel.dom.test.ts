@@ -2,29 +2,32 @@
 import { describe, expect, it, vi } from 'vitest';
 import { mountProviderSettingsPanel, type ProviderStatusView } from '../provider-settings-panel';
 
-const statuses: ProviderStatusView[] = [
-  { provider: 'claude', label: 'Claude', authKind: 'api_key', connected: false, cliStatus: { installed: true, authState: 'unknown' } },
-];
-
 describe('subscription login panel', () => {
-  it('lazy-mounts advanced API-key and executable controls, then unmounts them', () => {
+  it('uses in-app Claude sign-in and code entry without legacy advanced controls', () => {
     const parent = document.createElement('div');
     document.body.appendChild(parent);
-    mountProviderSettingsPanel(parent, {
-      statuses, onChatgptSignIn: vi.fn(), onChatgptSignOut: vi.fn(), onSaveKey: vi.fn(), onDeleteKey: vi.fn(), onSetCustomModel: vi.fn(),
-      onSelectCliOverride: vi.fn(), onClearCliOverride: vi.fn(), onSubscriptionLogin: vi.fn(),
+    const onSubscriptionLogin = vi.fn();
+    const onSubscriptionCode = vi.fn();
+    const handle = mountProviderSettingsPanel(parent, {
+      statuses: [{ provider: 'claude', label: 'Claude', authKind: 'api_key', connected: false } satisfies ProviderStatusView],
+      onChatgptSignIn: vi.fn(),
+      onChatgptSignOut: vi.fn(),
+      onSubscriptionLogin,
+      onSubscriptionCode,
     });
-    const advanced = parent.querySelector<HTMLDetailsElement>('[data-prov-advanced="claude"]')!;
-    expect(parent.querySelector('[data-prov-action="subscription-login"]')).not.toBeNull();
-    expect(parent.querySelector('[data-prov-key="claude"]')).toBeNull();
+
+    parent.querySelector<HTMLButtonElement>('[data-prov-action="subscription-login"]')!.click();
+    expect(onSubscriptionLogin).toHaveBeenCalledWith('claude');
+
+    handle.setSubscriptionProgress({ provider: 'claude', kind: 'awaiting-code' });
+    const input = parent.querySelector<HTMLInputElement>('[data-prov-login-code="claude"]')!;
+    input.value = 'code-from-browser';
+    parent.querySelector<HTMLButtonElement>('[data-prov-action="subscription-code"]')!.click();
+
+    expect(onSubscriptionCode).toHaveBeenCalledWith('claude', 'code-from-browser');
+    expect(parent.querySelector('[data-prov-advanced]')).toBeNull();
+    expect(parent.querySelector('[data-prov-key]')).toBeNull();
     expect(parent.querySelector('[data-prov-action="select-cli-override"]')).toBeNull();
-    advanced.open = true;
-    advanced.dispatchEvent(new Event('toggle', { bubbles: true }));
-    expect(parent.querySelector('[data-prov-key="claude"]')).not.toBeNull();
-    expect(parent.querySelector('[data-prov-action="select-cli-override"]')).not.toBeNull();
-    advanced.open = false;
-    advanced.dispatchEvent(new Event('toggle', { bubbles: true }));
-    expect(parent.querySelector('[data-prov-key="claude"]')).toBeNull();
-    expect(parent.querySelector('[data-prov-action="select-cli-override"]')).toBeNull();
+    expect(parent.textContent).not.toContain('claude login');
   });
 });

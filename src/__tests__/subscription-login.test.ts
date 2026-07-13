@@ -80,7 +80,7 @@ describe('subscription CLI login', () => {
     service.submitCode('claude', ' user-code ');
     login.close(0);
     await flush();
-    expect(spawn).toHaveBeenNthCalledWith(2, '/trusted/claude', ['auth', 'status'], expect.any(Object));
+    expect(spawn).toHaveBeenNthCalledWith(2, '/trusted/claude', ['auth', 'status', '--json'], expect.any(Object));
     status.emitOut('{"loggedIn":true,"authMethod":"oauth_token"}');
     status.close(0);
     status.close(0);

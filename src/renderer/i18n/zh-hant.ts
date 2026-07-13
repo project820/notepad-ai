@@ -114,9 +114,10 @@ export const zhHant: Dict = {
     // v0.2 — settings: default .md editor
     'settings.mdHandler.title': '預設 .md 編輯器', 'settings.mdHandler.desc': '點擊讓 Notepad AI 開啟你的 Markdown 檔案。若 macOS 阻止自動變更（未簽署版本），會顯示一次性的 Finder 操作步驟。', 'settings.mdHandler.button': '設為預設 .md 編輯器', 'settings.mdHandler.registered': '完成——Notepad AI 現在是你的預設 .md 編輯器。雙擊任一 .md 檔案即可在此開啟。', 'settings.mdHandler.partial': '已加入「開啟方式」，但無法自動設為預設。請在 Finder 右鍵 .md → 顯示簡介 → 「開啟方式」→ Notepad AI →「全部變更」。', 'settings.mdHandler.unsupported': '此作業系統/版本不支援',
     // v0.4 — local AI providers (Ollama / LM Studio) + small-context HTML notice
-    'settings.local.urlLabel': '伺服器 URL', 'settings.local.save': '儲存 URL', 'settings.local.reset': '預設值', 'settings.local.modelsFound': '可用模型', 'settings.local.hint': '在本機執行 — 不需要 API 金鑰。', 'settings.local.noModels': '找不到本機模型。請啟動 Ollama 或在 LM Studio 中載入模型。', 'he.smallContext': '此模型的上下文視窗較小 — 長文件可能會被削弱或截斷。',
+    'settings.local.urlLabel': '伺服器 URL', 'settings.local.save': '儲存 URL', 'settings.local.reset': '預設值', 'settings.local.modelsFound': '可用模型', 'settings.local.hint': '在本機執行 — 不需要 API 金鑰。', 'settings.local.noModels': '找不到本機模型。請啟動 Ollama 或新增模型。', 'he.smallContext': '此模型的上下文視窗較小 — 長文件可能會被削弱或截斷。',
     // AI provider settings
     'settings.prov.title': 'AI 供應商',
+    'settings.prov.localModels': '本機模型',
     'settings.prov.notConnected': '未連線',
     'settings.prov.unverified': '狀態未確認',
     'settings.prov.signedIn': '已登入',

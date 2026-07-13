@@ -114,9 +114,10 @@ export const ja: Dict = {
     // v0.2 — settings: default .md editor
     'settings.mdHandler.title': '既定の .md エディター', 'settings.mdHandler.desc': 'クリックで Notepad AI が Markdown ファイルを開くようにします。macOS が自動変更をブロックする場合（未署名ビルド）、一度だけ行う Finder の手順を表示します。', 'settings.mdHandler.button': '既定の .md エディターに設定', 'settings.mdHandler.registered': '完了 — Notepad AI が既定の .md エディターになりました。.md ファイルをダブルクリックするとここで開きます。', 'settings.mdHandler.partial': '「このアプリケーションで開く」に追加しましたが、既定の自動設定はできませんでした。Finder で .md を右クリック → 情報を見る →「このアプリケーションで開く」→ Notepad AI →「すべてを変更」。', 'settings.mdHandler.unsupported': 'この OS/ビルドでは未対応',
     // v0.4 — local AI providers (Ollama / LM Studio) + small-context HTML notice
-    'settings.local.urlLabel': 'サーバー URL', 'settings.local.save': 'URL を保存', 'settings.local.reset': '既定値', 'settings.local.modelsFound': '利用可能なモデル', 'settings.local.hint': 'お使いのマシンで実行 — API キーは不要です。', 'settings.local.noModels': 'ローカルモデルが見つかりません。Ollama を起動するか、LM Studio でモデルを読み込んでください。', 'he.smallContext': 'このモデルはコンテキストウィンドウが小さいため、長い文書は品質が低下したり切り詰められる場合があります。',
+    'settings.local.urlLabel': 'サーバー URL', 'settings.local.save': 'URL を保存', 'settings.local.reset': '既定値', 'settings.local.modelsFound': '利用可能なモデル', 'settings.local.hint': 'お使いのマシンで実行 — API キーは不要です。', 'settings.local.noModels': 'ローカルモデルが見つかりません。Ollama を起動するか、モデルを追加してください。', 'he.smallContext': 'このモデルはコンテキストウィンドウが小さいため、長い文書は品質が低下したり切り詰められる場合があります。',
     // AI provider settings
     'settings.prov.title': 'AI プロバイダー',
+    'settings.prov.localModels': 'ローカルモデル',
     'settings.prov.notConnected': '未接続',
     'settings.prov.unverified': '状態未確認',
     'settings.prov.signedIn': 'サインイン済み',

@@ -56,7 +56,7 @@
   left: -4px; right: -4px;
 }
 
-.preview-host { background: var(--color-canvas); }
+.preview-host { position: relative; background: var(--color-canvas); }
 .preview {
   flex: 1;
   overflow-y: auto;
@@ -69,6 +69,24 @@
   caret-color: var(--color-primary);
 }
 .preview:focus { outline: none; }
+.preview-loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--color-canvas) 72%, transparent);
+}
+.preview-loading::after {
+  content: '';
+  width: 24px;
+  height: 24px;
+  border: 3px solid var(--color-hairline-strong);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: preview-loading-spin 0.7s linear infinite;
+}
+@keyframes preview-loading-spin { to { transform: rotate(360deg); } }
 
 /* Preview typography — DESIGN.md hierarchy */
 .preview h1, .preview h2, .preview h3, .preview h4 {
@@ -231,11 +249,13 @@
   display: inline-flex;
   vertical-align: middle;
   margin-right: 6px;
+  pointer-events: none;
 }
 .cm-task-checkbox input[type='checkbox'] {
   width: 14px; height: 14px;
   margin: 0;
   cursor: pointer;
+  pointer-events: auto;
   accent-color: var(--color-primary);
 }
 

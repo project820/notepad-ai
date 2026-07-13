@@ -31,6 +31,9 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
   let quiescePreview: { pause: () => boolean; resume: (wasPending: boolean) => void } | null = null;
   let previewSyncFailed = false;
   let discardFenced = false;
+  let openGeneration = 0;
+  let pendingOpen: { cancel: () => void; hideLoading: () => void } | null = null;
+
   function hasMutationFence(): boolean {
     return previewSyncFailed || discardFenced || !!quiesce || closeLease?.consumed === true;
   }
@@ -126,6 +129,20 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
   }
 
   const previewRenderThrottle = deps.createRafThrottle();
+  function showPreviewLoading(): () => void {
+    const host = ctx.preview.el.parentElement;
+    if (!host) return () => {};
+    const indicator = document.createElement('div');
+    indicator.className = 'preview-loading';
+    indicator.setAttribute('aria-hidden', 'true');
+    host.appendChild(indicator);
+    ctx.preview.el.setAttribute('aria-busy', 'true');
+    return () => {
+      indicator.remove();
+      ctx.preview.el.removeAttribute('aria-busy');
+    };
+  }
+
   function onDocChange(doc: string) {
     if (ctx.suppressEditorChange || !recordDocumentMutation()) return;
     if (!ctx.dirty) {
@@ -257,39 +274,65 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
         return;
       }
       if (!tryMutateDocument()) return;
-      let docMd = content;
-      // Every open/new resets the HTML-view toggle so a converted doc never inherits
-      // the previous document's rich-HTML view state.
-      ctx.showingConvertedHtml = false;
-      if (html && converted) {
-        try {
-          const md = deps.htmlToMarkdown(html);
-          if (md && md.trim().length > 0) docMd = md;
-        } catch (e) {
-          console.warn('turndown of kordoc HTML failed; using raw markdown:', e);
+
+      pendingOpen?.cancel();
+      pendingOpen?.hideLoading();
+      const generation = ++openGeneration;
+      const hideLoading = showPreviewLoading();
+      let frame = 0;
+      const renderOpen = () => {
+        if (generation !== openGeneration || !tryMutateDocument()) {
+          hideLoading();
+          return;
         }
-        ctx.convertedHtml = html;
-      } else {
-        ctx.convertedHtml = null;
-      }
-      replaceDocument({
-        doc: docMd,
-        currentPath: filePath ?? null,
-        pendingTitle: null,
-        dirty: !!converted,
-        scheduleSnapshot: false,
+        pendingOpen = null;
+        try {
+          let docMd = content;
+          // Every open/new resets the HTML-view toggle so a converted doc never inherits
+          // the previous document's rich-HTML view state.
+          ctx.showingConvertedHtml = false;
+          if (html && converted) {
+            try {
+              const md = deps.htmlToMarkdown(html);
+              if (md && md.trim().length > 0) docMd = md;
+            } catch (e) {
+              console.warn('turndown of kordoc HTML failed; using raw markdown:', e);
+            }
+            ctx.convertedHtml = html;
+          } else {
+            ctx.convertedHtml = null;
+          }
+          replaceDocument({
+            doc: docMd,
+            currentPath: filePath ?? null,
+            pendingTitle: null,
+            dirty: !!converted,
+            scheduleSnapshot: false,
+          });
+          deps.syncWorkspaceRootToCurrent();
+          if (ctx.showingConvertedHtml && ctx.convertedHtml) {
+            // Converted HTML is sanitized into an inert fragment (never raw innerHTML).
+            ctx.preview.el.replaceChildren(deps.buildConvertedHtmlFrame(ctx.convertedHtml));
+          }
+          deps.updateHtmlViewToggle();
+          if (converted) {
+            ctx.setStatus(deps.t('status.converted').replace('{format}', converted.from).replace('{filePath}', filePath ?? ''));
+          } else {
+            ctx.setStatus(deps.t('status.opened').replace('{filePath}', filePath ?? ''));
+          }
+        } finally {
+          hideLoading();
+        }
+      };
+      // A second animation frame gives the browser a paint opportunity for the
+      // spinner before synchronous markdown rendering starts.
+      frame = window.requestAnimationFrame(() => {
+        frame = window.requestAnimationFrame(renderOpen);
       });
-      deps.syncWorkspaceRootToCurrent();
-      if (ctx.showingConvertedHtml && ctx.convertedHtml) {
-        // Converted HTML is sanitized into an inert fragment (never raw innerHTML).
-        ctx.preview.el.replaceChildren(deps.buildConvertedHtmlFrame(ctx.convertedHtml));
-      }
-      deps.updateHtmlViewToggle();
-      if (converted) {
-        ctx.setStatus(deps.t('status.converted').replace('{format}', converted.from).replace('{filePath}', filePath ?? ''));
-      } else {
-        ctx.setStatus(deps.t('status.opened').replace('{filePath}', filePath ?? ''));
-      }
+      pendingOpen = {
+        cancel: () => window.cancelAnimationFrame(frame),
+        hideLoading,
+      };
     });
   }
 

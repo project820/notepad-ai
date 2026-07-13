@@ -50,9 +50,11 @@ class CheckboxWidget extends WidgetType {
     return wrap;
   }
   ignoreEvent(event: Event) {
-    // allow click events to bubble to our plugin handler
+    // Let CodeMirror place a caret for every non-input pointer target in the
+    // replacement widget. The plugin intercepts only the checkbox input below.
     return event.type !== 'mousedown' && event.type !== 'click';
   }
+
 }
 
 function buildTaskDecorations(view: EditorView): DecorationSet {
@@ -95,12 +97,12 @@ const taskCheckboxPlugin = ViewPlugin.fromClass(
     decorations: (v) => v.decorations,
     eventHandlers: {
       mousedown(event, view) {
-        const target = event.target as HTMLElement;
-        if (target.tagName !== 'INPUT') return false;
+        const target = event.target;
+        if (!(target instanceof HTMLInputElement) || target.type !== 'checkbox') return false;
         const wrap = target.closest('.cm-task-checkbox') as HTMLElement | null;
         if (!wrap) return false;
-        const pos = view.posAtDOM(wrap);
-        // The widget replaces 3 chars starting at pos; find the bracket
+        const pos = view.posAtDOM(wrap, 0);
+        // The widget replaces exactly the three-character task marker.
         const slice = view.state.doc.sliceString(pos, pos + 3);
         if (!/\[[ xX]\]/.test(slice)) return false;
         event.preventDefault();

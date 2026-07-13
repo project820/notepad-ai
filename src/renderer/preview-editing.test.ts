@@ -165,3 +165,19 @@ describe('initPreviewEditing close flush', () => {
     expect(lifecycle).not.toHaveBeenCalled();
   });
 });
+describe('preview checkbox changes', () => {
+  it('records only a direct checkbox change, not a nearby preview click', () => {
+    const { ctx, previewEl, recordPreviewInput } = setupPreviewEditing();
+    previewEl.innerHTML = '<p><input type="checkbox"><span>nearby punctuation.</span></p>';
+
+    previewEl.querySelector('span')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(recordPreviewInput).not.toHaveBeenCalled();
+    expect(ctx.editingInPreview).toBe(false);
+
+    const checkbox = previewEl.querySelector<HTMLInputElement>('input')!;
+    checkbox.checked = true;
+    checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(recordPreviewInput).toHaveBeenCalledOnce();
+    expect(ctx.editingInPreview).toBe(true);
+  });
+});

@@ -108,11 +108,11 @@ describe('i18n — 5 locales (#3)', () => {
         ja: 'お使いのマシンで実行 — API キーは不要です。',
       },
       'settings.local.noModels': {
-        en: 'No local models found. Start Ollama or load a model in LM Studio.',
-        ko: '로컬 모델이 없습니다. Ollama를 실행하거나 LM Studio에서 모델을 로드하세요.',
-        'zh-Hans': '未找到本地模型。请启动 Ollama 或在 LM Studio 中加载模型。',
-        'zh-Hant': '找不到本機模型。請啟動 Ollama 或在 LM Studio 中載入模型。',
-        ja: 'ローカルモデルが見つかりません。Ollama を起動するか、LM Studio でモデルを読み込んでください。',
+        en: 'No local models found. Start Ollama or add a model.',
+        ko: '로컬 모델이 없습니다. Ollama를 실행하거나 모델을 추가하세요.',
+        'zh-Hans': '未找到本地模型。请启动 Ollama 或添加模型。',
+        'zh-Hant': '找不到本機模型。請啟動 Ollama 或新增模型。',
+        ja: 'ローカルモデルが見つかりません。Ollama を起動するか、モデルを追加してください。',
       },
       'he.smallContext': {
         en: 'This model has a small context window — long documents may be weakened or truncated.',

@@ -369,7 +369,7 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
     render();
     try {
       const orientation = state.orientation;
-      const layout = state.layout;
+      const requestedLayout = state.layout;
       const designSource = state.designSource ?? (state.design ? 'getdesign' : 'default');
       const designMd = state.design?.designMd ?? '';
       const summaryChartMode = state.summaryChartMode ?? DEFAULT_SUMMARY_MODE;
@@ -387,32 +387,32 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
       const checklist = evaluateDesignChecklist({ designMd, theme, css: `${themeCss}\n${componentCss}` });
 
 
+      let effectiveLayout = requestedLayout;
       let plan: readonly PlannedSlide[] | undefined;
-      if (layout === 'slides') {
+      if (requestedLayout === 'slides') {
         const res = await planSlides({
           model,
           orientation,
           dims: slideDimsFor(orientation, resolveHtmlExportSlideGeometry(theme, presentation)),
           includeCover: true,
-          measure: createDomMeasure({ doc: document, styleCss: buildExportStyle(theme, orientation, layout, presentation) }),
+          measure: createDomMeasure({ doc: document, styleCss: buildExportStyle(theme, orientation, requestedLayout, presentation) }),
 
           fontsReady: domFontsReady(document),
         });
         if (disposed) return;
-        if (!res.ok) {
-          saving = false;
-          saveError = t('he.error.containment');
-          render();
-          return;
-        }
-        plan = res.slides;
+        // A readability-floor miss is not a reason to deny the user's export.
+        // Preserve containment by emitting the same document as a scroll layout,
+        // where vertical overflow is intentional and horizontal containment remains
+        // checked by the exported CSS and self-containment validators.
+        if (!res.ok) effectiveLayout = 'scroll';
+        else plan = res.slides;
       }
 
       const { html } = bundleHtml({
         model,
         theme,
         orientation,
-        layout,
+        layout: effectiveLayout,
         summaryChartMode,
         designSource,
         designMd,

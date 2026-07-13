@@ -93,6 +93,28 @@ describe('ComposedClaudeProvider (CLI-first + API fallback)', () => {
     });
     expect(status.keyLast4).toBeUndefined();
   });
+  it('re-probes a persisted Claude CLI session in a fresh provider instance', async () => {
+    const spawn = vi.fn((_command: string, args: string[]) => {
+      const child = new FakeChild();
+      queueMicrotask(() => {
+        child.emitOut('{"loggedIn":true,"authMethod":"oauth_token"}');
+        child.doClose(0);
+      });
+      return child;
+    });
+
+    const provider = new ComposedClaudeProvider(noKeyStore, spawn, trustedClaude);
+    const status = await provider.getAuthStatus();
+
+    expect(spawn).toHaveBeenCalledWith('/trusted/claude', ['auth', 'status', '--json'], expect.any(Object));
+    expect(status).toMatchObject({
+      connected: true,
+      connectionSource: 'cli',
+      cliStatus: { installed: true, authState: 'succeeded' },
+    });
+    await expect(provider.getAuthStatus()).resolves.toMatchObject({ connected: true });
+    expect(spawn).toHaveBeenCalledTimes(1);
+  });
 
   it('uses the CLI on success and does NOT fall back to the API (no auth error)', async () => {
     const h = run();

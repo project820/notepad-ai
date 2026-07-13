@@ -264,10 +264,11 @@ export const en: Dict = {
     'settings.local.reset': 'Reset',
     'settings.local.modelsFound': 'Models available',
     'settings.local.hint': 'Runs on your machine — no API key needed.',
-    'settings.local.noModels': 'No local models found. Start Ollama or load a model in LM Studio.',
+    'settings.local.noModels': 'No local models found. Start Ollama or add a model.',
     'he.smallContext': 'This model has a small context window — long documents may be weakened or truncated.',
     // AI provider settings
     'settings.prov.title': 'AI providers',
+    'settings.prov.localModels': 'Local models',
     'settings.prov.notConnected': 'Not connected',
     'settings.prov.unverified': 'Status unverified',
     'settings.prov.signedIn': 'Signed in',

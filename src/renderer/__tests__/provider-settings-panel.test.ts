@@ -7,258 +7,101 @@ import {
   type ProviderStatusView,
 } from '../provider-settings-panel';
 
-const connected: ProviderStatusView[] = [
-  { provider: 'chatgpt', label: 'ChatGPT', authKind: 'oauth', connected: true, accountLabel: 'me@x.com · plus' },
-  { provider: 'claude', label: 'Claude (API key)', authKind: 'api_key', connected: true, keyLast4: '1234' },
-  { provider: 'openrouter', label: 'OpenRouter (API key)', authKind: 'api_key', connected: false },
+const statuses: ProviderStatusView[] = [
+  { provider: 'chatgpt', label: 'ChatGPT', authKind: 'oauth', connected: false },
+  { provider: 'claude', label: 'Claude', authKind: 'api_key', connected: false, cliStatus: { installed: true, authState: 'unknown' } },
+  { provider: 'grok', label: 'Grok', authKind: 'api_key', connected: false, cliStatus: { installed: true, authState: 'unknown' } },
+  { provider: 'ollama', label: 'Ollama', authKind: 'local', connected: true, localUrl: 'http://127.0.0.1:11434', localUrlDefault: 'http://127.0.0.1:11434', localModelCount: 0 },
 ];
 
-const allOff: ProviderStatusView[] = [
-  { provider: 'chatgpt', label: 'ChatGPT', authKind: 'oauth', connected: false },
-  { provider: 'claude', label: 'Claude (API key)', authKind: 'api_key', connected: false },
-  { provider: 'openrouter', label: 'OpenRouter (API key)', authKind: 'api_key', connected: false },
-];
+function mount(overrides: Partial<Parameters<typeof mountProviderSettingsPanel>[1]> = {}) {
+  const parent = document.createElement('div');
+  document.body.appendChild(parent);
+  const handlers = {
+    statuses,
+    onChatgptSignIn: vi.fn(),
+    onChatgptSignOut: vi.fn(),
+    onSubscriptionLogin: vi.fn(),
+    onSubscriptionLogout: vi.fn(),
+    onSubscriptionCode: vi.fn(),
+    onSubscriptionCancel: vi.fn(),
+    onSaveLocalUrl: vi.fn(),
+    onResetLocalUrl: vi.fn(),
+    ...overrides,
+  };
+  const handle = mountProviderSettingsPanel(parent, handlers);
+  return { parent, handlers, handle };
+}
 
 describe('renderProviderSettingsPanel', () => {
-  it('lists all three providers', () => {
-    const html = renderProviderSettingsPanel({ statuses: connected });
-    expect(html).toContain('ChatGPT');
-    expect(html).toContain('Claude (API key)');
-    expect(html).toContain('OpenRouter (API key)');
+  it('renders the cloud account providers in order, then a local-model section with Ollama', () => {
+    const html = renderProviderSettingsPanel({ statuses });
+    const order = ['chatgpt', 'claude', 'grok', 'ollama'].map((provider) => html.indexOf(`data-prov-row="${provider}"`));
+
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+    expect(html).toContain('prov-local-section');
+    expect(html.indexOf('prov-local-section')).toBeGreaterThan(order[2]);
+    expect(html.indexOf('prov-local-section')).toBeLessThan(order[3]);
   });
 
-  it('shows a zero-auth onboarding notice only when no provider is connected (AC23)', () => {
-    expect(renderProviderSettingsPanel({ statuses: allOff })).toContain('No AI provider connected');
-    expect(renderProviderSettingsPanel({ statuses: connected })).not.toContain('No AI provider connected');
+  it('does not expose retired providers or API-key, executable, custom-model, or onboarding UI', () => {
+    const html = renderProviderSettingsPanel({ statuses });
+
+    expect(html).not.toContain('OpenRouter');
+    expect(html).not.toContain('LM Studio');
+    expect(html).not.toContain('data-prov-key=');
+    expect(html).not.toContain('save-key');
+    expect(html).not.toContain('delete-key');
+    expect(html).not.toContain('data-prov-custom=');
+    expect(html).not.toContain('set-custom');
+    expect(html).not.toContain('cli-override');
+    expect(html).not.toContain('select-cli-override');
+    expect(html).not.toContain('dismiss-cli-onboarding');
+    expect(html).not.toContain('claude login');
   });
 
-  it('renders ChatGPT as sign-in (OAuth), not an API key input', () => {
-    const html = renderProviderSettingsPanel({ statuses: allOff });
+  it('keeps ChatGPT OAuth and Claude/Grok subscription sign-in controls', () => {
+    const html = renderProviderSettingsPanel({ statuses });
     expect(html).toContain('data-prov-action="signin"');
-    // ChatGPT row must not offer a key input
-    const chatgptRow = html.slice(html.indexOf('data-prov-row="chatgpt"'), html.indexOf('data-prov-row="claude"'));
-    expect(chatgptRow).not.toContain('data-prov-key="chatgpt"');
-  });
-
-  it('makes subscription login primary while keeping Claude API-key access in lazy advanced options', () => {
-    const html = renderProviderSettingsPanel({ statuses: allOff });
     expect(html).toContain('data-prov-action="subscription-login" data-prov="claude"');
-    expect(html).toContain('data-prov-advanced="claude"');
-    expect(html).not.toContain('data-prov-key="claude"');
-    // OpenRouter remains a direct API-key integration.
-    expect(html).toContain('data-prov-key="openrouter"');
-
-    const parent = document.createElement('div');
-    mountProviderSettingsPanel(parent, {
-      statuses: connected,
-      onChatgptSignIn: vi.fn(),
-      onChatgptSignOut: vi.fn(),
-      onSaveKey: vi.fn(),
-      onDeleteKey: vi.fn(),
-      onSetCustomModel: vi.fn(),
-    });
-    const advanced = parent.querySelector<HTMLDetailsElement>('details[data-prov-advanced="claude"]')!;
-    advanced.open = true;
-    advanced.dispatchEvent(new Event('toggle', { bubbles: true }));
-
-    // A legacy saved-key holder can still reach the API-key field through Advanced options.
-    expect(parent.querySelector('[data-prov-key="claude"]')).not.toBeNull();
-    expect(parent.textContent).toContain('••••1234');
+    expect(html).toContain('data-prov-action="subscription-login" data-prov="grok"');
   });
 
-  it('shows only the last 4 chars of a saved key, never the full key', () => {
-    const html = renderProviderSettingsPanel({ statuses: connected });
-    expect(html).toContain('••••1234');
-    expect(html).not.toMatch(/sk-[A-Za-z0-9]/); // no raw key material
-  });
-
-  it('renders a custom model-ID input per provider (catalog-staleness fallback)', () => {
-    const html = renderProviderSettingsPanel({ statuses: connected });
-    expect(html).toContain('data-prov-custom="chatgpt"');
-    expect(html).toContain('data-prov-custom="claude"');
-    expect(html).toContain('data-prov-custom="openrouter"');
-  });
-
-  it('shows connected status with account/key detail', () => {
-    const html = renderProviderSettingsPanel({ statuses: connected });
-    expect(html).toContain('me@x.com · plus');
-    expect(html).toContain('Connected');
-  });
-
-  it('renders an inline error when a provider reports one', () => {
+  it('does not surface a retained API-key identifier for a legacy connected provider', () => {
     const html = renderProviderSettingsPanel({
-      statuses: [{ provider: 'claude', label: 'Claude', authKind: 'api_key', connected: false, error: 'Invalid key' }],
+      statuses: [{ provider: 'claude', label: 'Claude', authKind: 'api_key', connected: true, keyLast4: '1234' }],
     });
-    expect(html).toContain('Invalid key');
-    expect(html).toContain('prov-error');
-  });
-
-  it('escapes HTML in labels and account details', () => {
-    const html = renderProviderSettingsPanel({
-      statuses: [{ provider: 'claude', label: '<b>x</b>', authKind: 'api_key', connected: true, keyLast4: '<i>' }],
-    });
-    expect(html).not.toContain('<b>x</b>');
-    expect(html).toContain('&lt;b&gt;x&lt;/b&gt;');
-  });
-
-  it('does not throw on empty statuses and still warns about zero auth', () => {
-    const html = renderProviderSettingsPanel({ statuses: [] });
-    expect(typeof html).toBe('string');
-    expect(html).toContain('No AI provider connected');
+    expect(html).toContain('Signed in');
+    expect(html).not.toContain('1234');
+    expect(html).not.toContain('API key');
   });
 });
 
-const localOffline: ProviderStatusView[] = [
-  { provider: 'ollama', label: 'Ollama', authKind: 'local', connected: true, localUrl: 'http://127.0.0.1:11434', localUrlDefault: 'http://127.0.0.1:11434', localModelCount: 0 },
-  { provider: 'lmstudio', label: 'LM Studio', authKind: 'local', connected: true, localUrl: 'http://127.0.0.1:1234', localUrlDefault: 'http://127.0.0.1:1234', localModelCount: 0 },
-];
+describe('mountProviderSettingsPanel', () => {
+  it('submits an awaiting Claude code but keeps Grok to its sign-in button', () => {
+    const { parent, handlers, handle } = mount();
+    handle.setSubscriptionProgress({ provider: 'claude', kind: 'awaiting-code' });
 
-describe('renderProviderSettingsPanel — local providers (G003)', () => {
-  it('renders a URL input + save/reset per local provider instead of an API key', () => {
-    const html = renderProviderSettingsPanel({ statuses: localOffline });
-    expect(html).toContain('data-prov-url="ollama"');
-    expect(html).toContain('data-prov-url="lmstudio"');
-    expect(html).toContain('data-prov-action="save-url"');
-    expect(html).toContain('data-prov-action="reset-url"');
-    // Local rows never offer an API-key input.
-    expect(html).not.toContain('data-prov-key="ollama"');
-    expect(html).not.toContain('data-prov-key="lmstudio"');
+    const code = parent.querySelector<HTMLInputElement>('[data-prov-login-code="claude"]')!;
+    code.value = 'claude-code';
+    parent.querySelector<HTMLButtonElement>('[data-prov-action="subscription-code"]')!.click();
+
+    expect(handlers.onSubscriptionCode).toHaveBeenCalledWith('claude', 'claude-code');
+    expect(parent.querySelector('[data-prov-row="grok"] [data-prov-login-code]')).toBeNull();
+    expect(parent.querySelector('[data-prov-action="subscription-login"][data-prov="grok"]')).not.toBeNull();
   });
 
-  it('prefills the configured server URL', () => {
-    const html = renderProviderSettingsPanel({
-      statuses: [
-        { provider: 'ollama', label: 'Ollama', authKind: 'local', connected: true, localUrl: 'http://127.0.0.1:9999', localUrlDefault: 'http://127.0.0.1:11434', localModelCount: 0 },
-      ],
-    });
-    expect(html).toContain('value="http://127.0.0.1:9999"');
-  });
+  it('saves and resets Ollama URLs without exposing other local providers', async () => {
+    const { parent, handlers } = mount();
+    parent.querySelector<HTMLButtonElement>('[data-prov-action="reset-url"]')!.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    const input = parent.querySelector<HTMLInputElement>('[data-prov-url="ollama"]')!;
+    input.value = 'http://localhost:11500';
+    parent.querySelector<HTMLButtonElement>('[data-prov-action="save-url"]')!.click();
 
-  it('shows an offline state as friendly guidance, never an auth error or "Not connected"', () => {
-    const html = renderProviderSettingsPanel({ statuses: localOffline });
-    expect(html).toContain('No local models found. Start Ollama or load a model in LM Studio.');
-    expect(html).toContain('prov-local-note');
-    expect(html).not.toContain('prov-error');
-    expect(html).not.toContain('Not connected');
-  });
-
-  it('shows a positive "models available" status when local models are discovered', () => {
-    const html = renderProviderSettingsPanel({
-      statuses: [
-        { provider: 'ollama', label: 'Ollama', authKind: 'local', connected: true, localUrl: 'http://127.0.0.1:11434', localUrlDefault: 'http://127.0.0.1:11434', localModelCount: 2 },
-      ],
-    });
-    expect(html).toContain('Models available');
-    expect(html).toContain('prov-status-on');
-  });
-
-  it('suppresses the zero-auth notice when a local provider has models, even with no cloud auth', () => {
-    const statuses: ProviderStatusView[] = [
-      { provider: 'chatgpt', label: 'ChatGPT', authKind: 'oauth', connected: false },
-      { provider: 'ollama', label: 'Ollama', authKind: 'local', connected: true, localModelCount: 1 },
-    ];
-    expect(renderProviderSettingsPanel({ statuses })).not.toContain('No AI provider connected');
-  });
-
-  it('still shows the zero-auth notice when cloud is off and local has no models', () => {
-    const statuses: ProviderStatusView[] = [
-      { provider: 'chatgpt', label: 'ChatGPT', authKind: 'oauth', connected: false },
-      { provider: 'ollama', label: 'Ollama', authKind: 'local', connected: true, localModelCount: 0 },
-    ];
-    expect(renderProviderSettingsPanel({ statuses })).toContain('No AI provider connected');
-  });
-
-  it('keeps cloud custom-model and lazy API-key access intact alongside local rows (no regression)', () => {
-    const statuses: ProviderStatusView[] = [
-      { provider: 'claude', label: 'Claude (API key)', authKind: 'api_key', connected: true, keyLast4: '1234' },
-      { provider: 'ollama', label: 'Ollama', authKind: 'local', connected: true, localModelCount: 0 },
-    ];
-    const parent = document.createElement('div');
-    mountProviderSettingsPanel(parent, {
-      statuses,
-      onChatgptSignIn: vi.fn(),
-      onChatgptSignOut: vi.fn(),
-      onSaveKey: vi.fn(),
-      onDeleteKey: vi.fn(),
-      onSetCustomModel: vi.fn(),
-    });
-
-    expect(parent.querySelector('[data-prov-action="subscription-login"][data-prov="claude"]')).not.toBeNull();
-    expect(parent.querySelector('[data-prov-key="claude"]')).toBeNull();
-    const advanced = parent.querySelector<HTMLDetailsElement>('details[data-prov-advanced="claude"]')!;
-    advanced.open = true;
-    advanced.dispatchEvent(new Event('toggle', { bubbles: true }));
-    expect(parent.querySelector('[data-prov-key="claude"]')).not.toBeNull();
-    expect(parent.textContent).toContain('••••1234');
-    expect(parent.querySelector('[data-prov-custom="claude"]')).not.toBeNull();
-    // The local row gets no custom-model input.
-    expect(parent.querySelector('[data-prov-custom="ollama"]')).toBeNull();
-  });
-});
-
-describe('renderProviderSettingsPanel — CLI providers (G006)', () => {
-  const grokConnected: ProviderStatusView[] = [
-    { provider: 'grok', label: 'Grok (CLI)', authKind: 'cli', connected: true },
-  ];
-  const grokOffline: ProviderStatusView[] = [
-    { provider: 'grok', label: 'Grok (CLI)', authKind: 'cli', connected: false, error: 'Grok CLI not found. Install grok and run `grok login`.' },
-  ];
-
-  it('renders a cli row with NO API-key or URL controls and NO custom-model input', () => {
-    const html = renderProviderSettingsPanel({ statuses: grokConnected });
-    expect(html).toContain('data-prov-row="grok"');
-    expect(html).not.toContain('data-prov-key="grok"'); // no API key input
-    expect(html).not.toContain('data-prov-url="grok"'); // no server URL input
-    expect(html).not.toContain('data-prov-custom="grok"'); // no custom-model input
-    expect(html).toContain('Connected · local CLI');
-  });
-
-  it('surfaces the install/login guidance error when the CLI is absent', () => {
-    const html = renderProviderSettingsPanel({ statuses: grokOffline });
-    expect(html).toContain('Not connected');
-    expect(html).toMatch(/grok login|Install/);
-  });
-
-  it('a connected cli provider satisfies the zero-auth notice (counts as usable)', () => {
-    const html = renderProviderSettingsPanel({ statuses: grokConnected });
-    expect(html).not.toContain('No AI provider connected');
-  });
-  it('renders an installed CLI with unverified auth as usable without a disconnected badge', () => {
-    const html = renderProviderSettingsPanel({
-      statuses: [{
-        provider: 'grok',
-        label: 'Grok (CLI)',
-        authKind: 'cli',
-        connected: false,
-        installed: true,
-        authUnverified: true,
-        error: 'Grok CLI is installed, but its sign-in status could not be verified. Run `grok login` in a terminal, then reopen the app.',
-      }],
-    });
-    expect(html).toContain('Status unverified');
-    expect((html.match(/grok login/g) ?? [])).toHaveLength(1);
-    expect(html).toContain('prov-status-unknown');
-    expect(html).not.toContain('Not connected');
-    expect(html).not.toContain('No AI provider connected');
-    expect((html.match(/prov-local-note/g) ?? [])).toHaveLength(0);
-  });
-  it('a contradictory unverified-but-not-installed shape stays non-usable (mirrors the registry gate)', () => {
-    const html = renderProviderSettingsPanel({
-      statuses: [{
-        provider: 'grok',
-        label: 'Grok (CLI)',
-        authKind: 'cli',
-        connected: false,
-        installed: false,
-        authUnverified: true,
-        error: 'Grok CLI is unavailable. Install it and run `grok login` in a terminal, then reopen the app.',
-      }],
-    });
-    // Onboarding stays visible and the row reads as a coherent missing-CLI state,
-    // never as an unverified-but-ready provider.
-    expect(html).toContain('No AI provider connected');
-    expect(html).not.toContain('prov-status-unknown');
-    expect(html).not.toContain('Status unverified');
-    expect(html).toContain('Not connected');
+    expect(handlers.onSaveLocalUrl).toHaveBeenCalledWith('ollama', 'http://localhost:11500');
+    expect(handlers.onResetLocalUrl).toHaveBeenCalledWith('ollama');
+    expect(parent.querySelector('[data-prov-row="lmstudio"]')).toBeNull();
   });
 });

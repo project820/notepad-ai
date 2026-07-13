@@ -11,6 +11,8 @@ import {
 import { applyStructuralEdit, assembleSource, structuralJournalSupport, type ClassifyResult, type NormalizedEdit, type RunTable } from './source-journal';
 import { serializeChangedRun } from './fragment-serialize';
 
+export const PREVIEW_JOURNAL_MAX_SOURCE_LENGTH = 24 * 1024;
+
 type RenderSettled = { ok: boolean };
 export type PreviewHandle = {
   el: HTMLDivElement;
@@ -172,40 +174,51 @@ export function createPreview(parent: HTMLElement): PreviewHandle {
     try {
       const env = {};
       const tokens = md.parse(source, env);
-      const built = buildRunTable(tokens, source);
-      injectRunIds(tokens, built.runTable);
+      // The source journal does several source-wide ownership scans. It is useful
+      // for small interactive documents, but doing that work for a file open makes
+      // large previews appear blank while the main thread is blocked. Large files
+      // retain their complete rendered preview and source map; preview edits use
+      // the established full-document serialization fallback instead.
+      const built = source.length <= PREVIEW_JOURNAL_MAX_SOURCE_LENGTH
+        ? buildRunTable(tokens, source)
+        : null;
+      if (built) injectRunIds(tokens, built.runTable);
       el.innerHTML = md.renderer.render(tokens, md.options, env);
       sourceMap = buildTokenLineRangesFromTokens(tokens);
       tagPreviewBlocks(el, sourceMap);
       tagNestedPreviewBlocksFromTokens(el, tokens);
 
-      try {
-        // Some markdown-it renderers (fence and hidden tight-list paragraphs)
-        // do not propagate token attributes. Attach their owner id once, in
-        // document order, using the subtype's actual rendered owner.
-        for (const run of built.runTable.runs) {
-          let owner = el.querySelector<HTMLElement>(`[data-run-id="${run.runId}"]`);
-          if (!owner) {
-            owner = Array.from(el.querySelectorAll<HTMLElement>(ownerSelector(run.subtype)))
-              .find((node) => !node.hasAttribute('data-run-id')) ?? null;
+      if (built) {
+        try {
+          // Some markdown-it renderers (fence and hidden tight-list paragraphs)
+          // do not propagate token attributes. Attach their owner id once, in
+          // document order, using the subtype's actual rendered owner.
+          for (const run of built.runTable.runs) {
+            let owner = el.querySelector<HTMLElement>(`[data-run-id="${run.runId}"]`);
+            if (!owner) {
+              owner = Array.from(el.querySelectorAll<HTMLElement>(ownerSelector(run.subtype)))
+                .find((node) => !node.hasAttribute('data-run-id')) ?? null;
+            }
+            if (!owner) throw new Error(`preview run ${run.runId} has no DOM owner`);
+            owner.dataset.runId = String(run.runId);
+            owner.dataset.sourceSliceCount = String(run.sourceSlices.length);
+            if (run.syntheticIndentPrefixes) owner.dataset.syntheticIndentPrefixes = JSON.stringify(run.syntheticIndentPrefixes);
           }
-          if (!owner) throw new Error(`preview run ${run.runId} has no DOM owner`);
-          owner.dataset.runId = String(run.runId);
-          owner.dataset.sourceSliceCount = String(run.sourceSlices.length);
-          if (run.syntheticIndentPrefixes) owner.dataset.syntheticIndentPrefixes = JSON.stringify(run.syntheticIndentPrefixes);
+          validateDom(el, built.runTable);
+          runTable = built.runTable;
+        } catch (error) {
+          // Source journaling is an optional enhancement. A renderer/plugin shape
+          // we cannot map must preserve the established preview and line-span
+          // tagging behavior rather than making ordinary documents unrenderable.
+          console.warn('preview source journal unavailable; using line-span map only:', error);
+          el.querySelectorAll<HTMLElement>('[data-run-id]').forEach((owner) => {
+            owner.removeAttribute('data-run-id');
+            owner.removeAttribute('data-source-slice-count');
+            owner.removeAttribute('data-synthetic-indent-prefixes');
+          });
+          runTable = null;
         }
-        validateDom(el, built.runTable);
-        runTable = built.runTable;
-      } catch (error) {
-        // Source journaling is an optional enhancement. A renderer/plugin shape
-        // we cannot map must preserve the established preview and line-span
-        // tagging behavior rather than making ordinary documents unrenderable.
-        console.warn('preview source journal unavailable; using line-span map only:', error);
-        el.querySelectorAll<HTMLElement>('[data-run-id]').forEach((owner) => {
-          owner.removeAttribute('data-run-id');
-          owner.removeAttribute('data-source-slice-count');
-          owner.removeAttribute('data-synthetic-indent-prefixes');
-        });
+      } else {
         runTable = null;
       }
       afterCallbacks.forEach((cb) => cb());

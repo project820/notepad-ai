@@ -8,16 +8,10 @@
  *   - `mountProviderSettingsPanel(parent, opts)` — DOM-dependent, wires actions.
  *
  * Surfaces:
- *   - Cloud providers (ChatGPT sign-in, Claude / OpenRouter API key) with a
- *     per-provider connected/last-4 status and a custom model-ID input.
- *   - Local providers (Ollama / LM Studio, `authKind: 'local'`) with a server
- *     URL input + save/reset instead of an API key. Local servers are discovery,
- *     not auth: an offline server is shown as a friendly "no models found" hint,
- *     never an auth error.
- *   - A zero-auth onboarding notice when no cloud provider is connected and no
- *     local models are discovered (AC23).
- *
- * Secrets are never rendered — only the last 4 chars of a saved key are shown.
+ *   - Cloud providers (ChatGPT, Claude, Grok) with account sign-in controls.
+ *   - The Ollama local provider with a server URL input + save/reset controls.
+ *   - A zero-auth notice when no cloud provider is connected and no local
+ *     models are discovered.
  */
 
 import { t } from './i18n';
@@ -50,14 +44,10 @@ export type ProviderStatusView = {
   localUrl?: string;
   /** Local providers only: default base URL (drives the reset button). */
   localUrlDefault?: string;
+  /** CLI transport state used to reflect subscription sign-in status. */
+  cliStatus?: ProviderAuthStatus['cliStatus'];
   /** Local providers only: count of discovered models (drives the offline hint). */
   localModelCount?: number;
-  /** Optional persistent guidance note shown under the row (e.g. CLI-first usage). */
-  hint?: string;
-  /** Claude's CLI transport state, distinct from this row's API-key status. */
-  cliStatus?: ProviderAuthStatus['cliStatus'];
-  /** User-approved executable path for CLI transport, if one is configured. */
-  cliOverridePath?: string;
   /** Ephemeral progress for an in-app subscription CLI login. */
   loginUpdate?: SubscriptionLoginUpdate;
 };
@@ -71,16 +61,11 @@ export type ProviderSettingsRenderOptions = {
 export type ProviderSettingsOptions = ProviderSettingsRenderOptions & {
   onChatgptSignIn: () => void;
   onChatgptSignOut: () => Promise<void> | void;
-  onSaveKey: (provider: 'claude' | 'openrouter' | 'grok', key: string) => Promise<void> | void;
-  onDeleteKey: (provider: 'claude' | 'openrouter' | 'grok') => Promise<void> | void;
-  onSetCustomModel: (provider: AiProviderId, modelId: string) => void;
-  /** Persist a local provider's server URL (validated localhost in main). */
-  onSaveLocalUrl?: (provider: 'ollama' | 'lmstudio', url: string) => Promise<void> | void;
-  /** Reset a local provider's server URL to its default. */
-  onResetLocalUrl?: (provider: 'ollama' | 'lmstudio') => Promise<void> | void;
+  /** Persist Ollama's server URL (validated localhost in main). */
+  onSaveLocalUrl?: (provider: 'ollama', url: string) => Promise<void> | void;
+  /** Reset Ollama's server URL to its default. */
+  onResetLocalUrl?: (provider: 'ollama') => Promise<void> | void;
   onRetryStatus?: () => void;
-  onSelectCliOverride?: (provider: 'claude' | 'grok') => Promise<void> | void;
-  onClearCliOverride?: (provider: 'claude' | 'grok') => Promise<void> | void;
   onSubscriptionLogin?: (provider: 'claude' | 'grok') => Promise<void> | void;
   onSubscriptionLogout?: (provider: 'claude' | 'grok') => Promise<void> | void;
   onSubscriptionCode?: (provider: 'claude', code: string) => Promise<void> | void;
@@ -123,74 +108,25 @@ function statusLine(s: ProviderStatusView): string {
   if (s.authKind === 'cli' && s.installed === true && s.authUnverified) {
     return `<span class="prov-status prov-status-unknown">${escapeHTML(t('settings.prov.unverified'))}</span>`;
   }
-  if (!s.connected) {
+  const subscriptionConnected = s.cliStatus?.authState === 'succeeded';
+  if (!s.connected && !subscriptionConnected) {
     return `<span class="prov-status prov-status-off">${escapeHTML(t('settings.prov.notConnected'))}</span>`;
   }
   const detail =
-    s.authKind === 'cli' || s.connectionSource === 'cli'
+    s.connectionSource === 'cli' || subscriptionConnected
       ? escapeHTML(t('settings.prov.cliConnected'))
       : s.authKind === 'oauth'
         ? s.accountLabel
           ? escapeHTML(s.accountLabel)
           : escapeHTML(t('settings.prov.signedIn'))
+        : s.provider === 'claude' || s.provider === 'grok'
+          ? escapeHTML(t('settings.prov.signedIn'))
         : s.keyLast4
           ? `${escapeHTML(t('settings.prov.apiKeyLabel'))} ••••${escapeHTML(s.keyLast4)}`
           : escapeHTML(t('settings.prov.keySet'));
   return `<span class="prov-status prov-status-on">${t('settings.prov.connected').replace('{detail}', detail)}</span>`;
 }
-function cliStatusBadge(s: ProviderStatusView): string {
-  const cli = s.cliStatus;
-  if (!cli) return '';
-  if (!cli.installed) {
-    return `<span class="prov-status prov-status-off">${escapeHTML(t('settings.prov.error.claudeCliSetupRequired'))}</span>`;
-  }
-  const key = cli.authState === 'succeeded'
-    ? 'settings.prov.cliBadge.connected'
-    : cli.authState === 'auth_failed'
-      ? 'settings.prov.cliBadge.loginRequired'
-      : 'settings.prov.cliBadge.unknown';
-  const tone = cli.authState === 'succeeded' ? 'prov-status-on' : cli.authState === 'auth_failed' ? 'prov-status-off' : 'prov-status-unknown';
-  return `<span class="prov-status ${tone}" data-prov-cli-status="${s.provider}">${escapeHTML(t(key))}</span>`;
-}
 
-const CLI_ONBOARDING_DISMISSED_KEY = 'notepad-ai:cli-onboarding-dismissed:v1';
-const CLI_ONBOARDING_GUIDE_VERSION = 1;
-
-function isCliOnboardingDismissed(provider: AiProviderId): boolean {
-  try {
-    const raw = localStorage.getItem(CLI_ONBOARDING_DISMISSED_KEY);
-    const value = raw ? JSON.parse(raw) : {};
-    return value?.[provider] === CLI_ONBOARDING_GUIDE_VERSION;
-  } catch {
-    return false;
-  }
-}
-
-function cliOnboardingCard(s: ProviderStatusView): string {
-  const needsGuide = s.provider === 'grok'
-    ? s.authKind === 'cli' && !isAttemptableView(s)
-    : s.provider === 'claude' && !s.connected && s.cliStatus?.authState !== 'succeeded';
-  if (!needsGuide || isCliOnboardingDismissed(s.provider)) return '';
-  const guide = s.provider === 'grok' ? 'grok' : 'claude';
-  return `<div class="prov-onboarding" role="status" aria-live="polite">
-    <strong>${escapeHTML(t(`settings.onboarding.${guide}.title`))}</strong>
-    <p>${escapeHTML(t(`settings.onboarding.${guide}.steps`))}</p>
-    <p>${escapeHTML(t('settings.onboarding.commonNote'))}</p>
-    <button class="prov-btn" data-prov-action="dismiss-cli-onboarding" data-prov="${s.provider}" type="button" aria-label="${escapeHTML(t('settings.onboarding.a11y.dismissLabel'))}">${escapeHTML(t(`settings.onboarding.${guide}.dismiss`))}</button>
-  </div>`;
-}
-function dismissCliOnboarding(provider: AiProviderId): void {
-  try {
-    const raw = localStorage.getItem(CLI_ONBOARDING_DISMISSED_KEY);
-    const value = raw ? JSON.parse(raw) : {};
-    localStorage.setItem(CLI_ONBOARDING_DISMISSED_KEY, JSON.stringify({
-      ...(value && typeof value === 'object' ? value : {}),
-      [provider]: CLI_ONBOARDING_GUIDE_VERSION,
-    }));
-  } catch {
-    // Storage may be unavailable; keep the card visible rather than dismissing silently.
-  }
-}
 function providerControls(s: ProviderStatusView): string {
   if (s.loading) return '';
   const disabled = s.busy ? ' disabled' : '';
@@ -212,18 +148,13 @@ function providerControls(s: ProviderStatusView): string {
     const cliConnected = s.cliStatus?.authState === 'succeeded';
     return cliConnected
       ? `<button class="prov-btn" data-prov-action="subscription-logout" data-prov="${s.provider}" type="button"${disabled}>${escapeHTML(t('settings.prov.signOut'))}</button>`
-      : `${s.loginUpdate?.kind === 'awaiting-code'
+      : `${s.provider === 'claude' && s.loginUpdate?.kind === 'awaiting-code'
         ? `<input class="prov-key-input" data-prov-login-code="claude" type="text" placeholder="${escapeHTML(t('settings.prov.pasteClaudeCode'))}" />
            <button class="prov-btn prov-btn-primary" data-prov-action="subscription-code" data-prov="claude" type="button">${escapeHTML(t('settings.prov.submitCode'))}</button>`
         : `<button class="prov-btn prov-btn-primary" data-prov-action="subscription-login" data-prov="${s.provider}" type="button"${disabled}>${escapeHTML(t('settings.prov.subscriptionLogin'))}</button>`}
          ${s.loginUpdate && s.loginUpdate.kind !== 'success' && s.loginUpdate.kind !== 'error' ? `<button class="prov-btn" data-prov-action="subscription-cancel" data-prov="${s.provider}" type="button">${escapeHTML(t('settings.prov.cancelLogin'))}</button>` : ''}`;
   }
-  if (s.authKind === 'cli') return '';
-  return `
-    <input class="prov-key-input" data-prov-key="${s.provider}" type="password"${disabled}
-      placeholder="${escapeHTML(t('settings.prov.apiKeyPlaceholder'))}" aria-label="${escapeHTML(`${s.label} ${t('settings.prov.apiKeyLabel')}`)}" />
-    <button class="prov-btn prov-btn-primary" data-prov-action="save-key" data-prov="${s.provider}" type="button"${disabled}>${escapeHTML(t('settings.prov.saveKey'))}</button>
-    <button class="prov-btn" data-prov-action="delete-key" data-prov="${s.provider}" type="button"${s.connected && !s.busy ? '' : ' disabled'}>${escapeHTML(t('settings.prov.removeKey'))}</button>`;
+  return '';
 }
 /** Local provider footer: a friendly, non-auth hint (offline → run-server guidance). */
 function localHint(s: ProviderStatusView): string {
@@ -231,54 +162,6 @@ function localHint(s: ProviderStatusView): string {
   return `<div class="prov-local-note">${escapeHTML(msg)}</div>`;
 }
 
-/** CLI provider footer: a no-key/no-URL hint pointing at the local subscription CLI. */
-function cliHint(s: ProviderStatusView): string {
-  if (!s.connected && s.error) return '';
-  const msg = s.connected
-    ? t('settings.prov.cliConnectedHint')
-    : t('settings.prov.cliDisconnectedHint');
-  return `<div class="prov-local-note">${escapeHTML(msg)}</div>`;
-}
-function cliOverrideControl(s: ProviderStatusView): string {
-  if (s.loading || (s.provider !== 'claude' && s.provider !== 'grok')) return '';
-  const disabled = s.busy ? ' disabled' : '';
-  const selected = s.cliOverridePath
-    ? `<div class="prov-local-note" data-cli-override-path="${s.provider}">${escapeHTML(s.cliOverridePath)}</div>
-       <button class="prov-btn" data-prov-action="clear-cli-override" data-prov="${s.provider}" type="button"${disabled}>${escapeHTML(t('settings.prov.cliOverrideClear'))}</button>`
-    : '';
-  return `<div class="prov-cli-override">
-    <button class="prov-btn" data-prov-action="select-cli-override" data-prov="${s.provider}" type="button"${disabled}>${escapeHTML(t('settings.prov.cliOverrideSelect'))}</button>
-    ${selected}
-    <div class="prov-cli-warning">${escapeHTML(t('settings.prov.cliOverrideWarning'))}</div>
-  </div>`;
-}
-function advancedControl(s: ProviderStatusView): string {
-  if (s.loading || (s.provider !== 'claude' && s.provider !== 'grok')) return '';
-  return `<details class="prov-advanced" data-prov-advanced="${s.provider}">
-    <summary>${escapeHTML(t('settings.prov.advancedOptions'))}</summary>
-  </details>`;
-}
-
-function advancedBody(s: ProviderStatusView): string {
-  const disabled = s.busy ? ' disabled' : '';
-  const key = `<input class="prov-key-input" data-prov-key="${s.provider}" type="password"${disabled}
-    placeholder="${escapeHTML(t('settings.prov.apiKeyPlaceholder'))}" aria-label="${escapeHTML(`${s.label} ${t('settings.prov.apiKeyLabel')}`)}" />
-    <button class="prov-btn prov-btn-primary" data-prov-action="save-key" data-prov="${s.provider}" type="button"${disabled}>${escapeHTML(t('settings.prov.saveKey'))}</button>
-    <button class="prov-btn" data-prov-action="delete-key" data-prov="${s.provider}" type="button"${s.connected && !s.busy ? '' : ' disabled'}>${escapeHTML(t('settings.prov.removeKey'))}</button>`;
-  return `<div class="prov-advanced-body">${key}${cliOverrideControl(s)}</div>`;
-}
-
-
-/** Cloud provider footer: a custom model-ID input (mitigates catalog staleness). */
-function customModelControl(s: ProviderStatusView): string {
-  if (s.loading) return '';
-  const disabled = s.busy ? ' disabled' : '';
-  return `<div class="prov-custom">
-      <input class="prov-custom-input" data-prov-custom="${s.provider}" type="text"${disabled}
-        placeholder="${escapeHTML(t('settings.prov.customModelPlaceholder'))}" aria-label="${escapeHTML(`${s.label} ${t('settings.prov.customModelLabel')}`)}" />
-      <button class="prov-btn" data-prov-action="set-custom" data-prov="${s.provider}" type="button"${disabled}>${escapeHTML(t('settings.prov.useModel'))}</button>
-    </div>`;
-}
 function renderPanelNotice(opts: ProviderSettingsRenderOptions): string {
   const statuses = opts.statuses ?? [];
   if (opts.loadError) {
@@ -306,20 +189,16 @@ function renderProviderRowContent(s: ProviderStatusView): string {
     </div>`;
   }
   const isLocal = s.authKind === 'local';
-  const footer = isLocal ? localHint(s) : s.authKind === 'cli' ? cliHint(s) : customModelControl(s);
+  const footer = isLocal ? localHint(s) : '';
   return `<div class="prov-row-head">
       <span class="prov-label">${escapeHTML(s.label)}</span>
       ${statusLine(s)}
-      ${cliStatusBadge(s)}
       ${s.busy ? '<span class="prov-row-spinner" role="status" aria-live="polite">…</span>' : ''}
     </div>
     ${s.error ? `<div class="prov-error" role="alert">${escapeHTML(s.error)}</div>` : ''}
     ${s.errorDetail ? `<div class="prov-error-detail">${escapeHTML(s.errorDetail)}</div>` : ''}
     <div class="prov-controls">${providerControls(s)}</div>
-    ${advancedControl(s)}
-    ${s.hint ? `<div class="prov-local-note">${escapeHTML(s.hint)}</div>` : ''}
-    ${footer}
-    ${cliOnboardingCard(s)}`;
+    ${footer}`;
 }
 function renderProviderRow(s: ProviderStatusView): string {
   return `<section class="prov-row" data-prov-row="${s.provider}" aria-busy="${s.loading || s.busy ? 'true' : 'false'}">
@@ -327,7 +206,16 @@ function renderProviderRow(s: ProviderStatusView): string {
   </section>`;
 }
 export function renderProviderSettingsPanel(opts: ProviderSettingsRenderOptions): string {
-  const rows = (opts.statuses ?? []).map(renderProviderRow).join('\n');
+  let localSectionRendered = false;
+  const rows = (opts.statuses ?? []).map((status) => {
+    const divider = !localSectionRendered && status.authKind === 'local'
+      ? (() => {
+        localSectionRendered = true;
+        return `<h3 class="prov-local-section">${escapeHTML(t('settings.prov.localModels'))}</h3>`;
+      })()
+      : '';
+    return `${divider}${renderProviderRow(status)}`;
+  }).join('\n');
   return `<div class="prov-root">
   <h2 class="prov-title">${escapeHTML(t('settings.prov.title'))}</h2>
   ${renderPanelNotice(opts)}
@@ -343,7 +231,7 @@ type FocusSnapshot = {
 function captureFocus(parent: HTMLElement): FocusSnapshot | null {
   const active = document.activeElement;
   if (!(active instanceof HTMLInputElement) || !parent.contains(active)) return null;
-  for (const attr of ['data-prov-key', 'data-prov-url', 'data-prov-custom']) {
+  for (const attr of ['data-prov-url']) {
     const value = active.getAttribute(attr);
     if (value !== null) {
       return {
@@ -382,20 +270,8 @@ export function mountProviderSettingsPanel(
       ? { loginUpdate: loginUpdates.get(view.provider) }
       : {}),
   });
-  const restoreAdvanced = (root: HTMLElement, providers: ReadonlySet<string>) => {
-    for (const provider of providers) {
-      if (provider !== 'claude' && provider !== 'grok') continue;
-      const details = root.querySelector<HTMLDetailsElement>(`details[data-prov-advanced="${provider}"]`);
-      const view = current.statuses.find((candidate) => candidate.provider === provider);
-      if (details && view) {
-        details.open = true;
-        details.insertAdjacentHTML('beforeend', advancedBody(effective(view)));
-      }
-    }
-  };
   const patchRows = (providers?: ReadonlySet<AiProviderId>) => {
     const saved = captureFocus(parent);
-    const openAdvanced = new Set([...parent.querySelectorAll<HTMLDetailsElement>('details[data-prov-advanced][open]')].map((details) => details.dataset.provAdvanced ?? ''));
     const root = parent.querySelector<HTMLElement>('.prov-root');
     if (!root) return;
     for (const view of current.statuses) {
@@ -403,7 +279,10 @@ export function mountProviderSettingsPanel(
       const next = effective(view);
       const row = root.querySelector<HTMLElement>(`[data-prov-row="${view.provider}"]`);
       if (!row) {
-        root.insertAdjacentHTML('beforeend', renderProviderRow(next));
+        const divider = next.authKind === 'local' && !root.querySelector('.prov-local-section')
+          ? `<h3 class="prov-local-section">${escapeHTML(t('settings.prov.localModels'))}</h3>`
+          : '';
+        root.insertAdjacentHTML('beforeend', `${divider}${renderProviderRow(next)}`);
         continue;
       }
       const content = renderProviderRowContent(next);
@@ -411,7 +290,6 @@ export function mountProviderSettingsPanel(
       if (row.innerHTML.trim() !== content.trim()) row.innerHTML = content;
       if (row.getAttribute('aria-busy') !== busy) row.setAttribute('aria-busy', busy);
     }
-    restoreAdvanced(root, openAdvanced);
     restoreFocus(parent, saved);
   };
   const patch = (next: ProviderSettingsRenderOptions) => {
@@ -456,35 +334,8 @@ export function mountProviderSettingsPanel(
     const action = btn.dataset.provAction;
     const prov = (btn.dataset.prov ?? btn.closest<HTMLElement>('[data-prov-row]')?.dataset.provRow) as AiProviderId | undefined;
     if (action === 'retry-status') return opts.onRetryStatus?.();
-    if (action === 'dismiss-cli-onboarding' && prov) {
-      dismissCliOnboarding(prov);
-      patchRows(new Set([prov]));
-      return;
-    }
     if (action === 'signin') return opts.onChatgptSignIn();
     if (action === 'signout' && prov === 'chatgpt') return runRowAction(prov, opts.onChatgptSignOut);
-    if (action === 'save-key' && (prov === 'claude' || prov === 'openrouter' || prov === 'grok')) {
-      const input = parent.querySelector<HTMLInputElement>(`input[data-prov-key="${prov}"]`);
-      const key = input?.value.trim() ?? '';
-      if (!key || !input) return;
-      setRowBusy(prov, true);
-      void Promise.resolve(opts.onSaveKey(prov, key))
-        .then(() => {
-          input.value = '';
-        })
-        .catch(() => {
-          const row = parent.querySelector<HTMLElement>(`[data-prov-row="${prov}"]`);
-          row?.querySelector('.prov-error[data-prov-save-error]')?.remove();
-          const error = document.createElement('div');
-          error.className = 'prov-error';
-          error.dataset.provSaveError = '';
-          error.setAttribute('role', 'alert');
-          error.textContent = t('settings.prov.saveKeyFailed');
-          row?.querySelector('.prov-row-head')?.insertAdjacentElement('afterend', error);
-        })
-        .finally(() => setRowBusy(prov, false));
-      return;
-    }
     if (action === 'subscription-login' && (prov === 'claude' || prov === 'grok')) {
       return runRowAction(prov, () => opts.onSubscriptionLogin?.(prov));
     }
@@ -499,42 +350,16 @@ export function mountProviderSettingsPanel(
       if (input?.value.trim()) return runRowAction(prov, () => opts.onSubscriptionCode?.(prov, input.value));
       return;
     }
-    if (action === 'delete-key' && (prov === 'claude' || prov === 'openrouter' || prov === 'grok')) {
-      return runRowAction(prov, () => opts.onDeleteKey(prov));
-    }
-    if (action === 'save-url' && (prov === 'ollama' || prov === 'lmstudio')) {
+    if (action === 'save-url' && prov === 'ollama') {
       const input = parent.querySelector<HTMLInputElement>(`input[data-prov-url="${prov}"]`);
       const url = input?.value.trim() ?? '';
       if (url) return runRowAction(prov, () => opts.onSaveLocalUrl?.(prov, url));
       return;
     }
-    if (action === 'reset-url' && (prov === 'ollama' || prov === 'lmstudio')) {
+    if (action === 'reset-url' && prov === 'ollama') {
       return runRowAction(prov, () => opts.onResetLocalUrl?.(prov));
     }
-    if (action === 'select-cli-override' && (prov === 'claude' || prov === 'grok')) {
-      return runRowAction(prov, () => opts.onSelectCliOverride?.(prov));
-    }
-    if (action === 'clear-cli-override' && (prov === 'claude' || prov === 'grok')) {
-      return runRowAction(prov, () => opts.onClearCliOverride?.(prov));
-    }
-    if (action === 'set-custom' && prov) {
-      const input = parent.querySelector<HTMLInputElement>(`input[data-prov-custom="${prov}"]`);
-      const id = input?.value.trim() ?? '';
-      if (id) opts.onSetCustomModel(prov, id);
-    }
   };
-  const onToggle = (e: Event) => {
-    const details = e.target instanceof HTMLDetailsElement ? e.target : null;
-    const provider = details?.dataset.provAdvanced;
-    if (!details || (provider !== 'claude' && provider !== 'grok')) return;
-    if (!details.open) {
-      details.querySelector('.prov-advanced-body')?.remove();
-      return;
-    }
-    const view = current.statuses.find((candidate) => candidate.provider === provider);
-    if (view && !details.querySelector('.prov-advanced-body')) details.insertAdjacentHTML('beforeend', advancedBody(effective(view)));
-  };
-  parent.addEventListener('toggle', onToggle, true);
   parent.addEventListener('click', onClick);
   return {
     patch,
@@ -544,7 +369,6 @@ export function mountProviderSettingsPanel(
       patchRows(new Set([update.provider]));
     },
     destroy: () => {
-      parent.removeEventListener('toggle', onToggle, true);
       parent.removeEventListener('click', onClick);
       parent.innerHTML = '';
     },

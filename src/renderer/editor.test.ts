@@ -56,3 +56,28 @@ describe('editor mutation fence', () => {
     expect(editor.getDoc()).toBe('draft');
   });
 });
+describe('task checkbox mouse targets', () => {
+  let host: HTMLDivElement | null = null;
+  let editor: ReturnType<typeof createEditor> | null = null;
+
+  afterEach(() => {
+    editor?.view.destroy();
+    host?.remove();
+    editor = null;
+    host = null;
+  });
+
+  it('toggles only the checkbox input and leaves nearby text clicks as editor events', () => {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    editor = createEditor(host, { initialDoc: '- [ ] task.', onChange: vi.fn() });
+    const checkbox = editor.view.dom.querySelector<HTMLInputElement>('.cm-task-checkbox input')!;
+    const line = editor.view.dom.querySelector<HTMLElement>('.cm-line')!;
+
+    line.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    expect(editor.getDoc()).toBe('- [ ] task.');
+
+    checkbox.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    expect(editor.getDoc()).toBe('- [x] task.');
+  });
+});

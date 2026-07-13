@@ -250,7 +250,7 @@ export class SubscriptionLoginService {
     if (!this.isCurrent(entry) || !entry.command || !entry.env) return;
     let output = '';
     try {
-      const child = this.deps.spawn(entry.command, ['auth', 'status'], { env: entry.env, cwd: entry.env.HOME || process.cwd() });
+      const child = this.deps.spawn(entry.command, ['auth', 'status', '--json'], { env: entry.env, cwd: entry.env.HOME || process.cwd() });
       if (!this.isCurrent(entry)) return this.killDetached(child);
       entry.process = child;
       this.absorbStdinErrors(child);

@@ -75,33 +75,45 @@ function buildModel(md: string, title?: string): ContentModel {
 /** Build the self-contained document using the same planned deck asserted below. */
 async function bundleDoc(md: string, opts: CellOpts) {
   const model = buildModel(md, opts.title);
+  const requestedLayout = opts.layout || 'slides';
   const dims = slideDimsFor(opts.orientation, resolveHtmlExportSlideGeometry(theme, opts.presentation));
   const measure = createDomMeasure({
     doc: document,
-    styleCss: buildExportStyle(theme, opts.orientation, opts.layout || 'slides', opts.presentation),
+    styleCss: buildExportStyle(theme, opts.orientation, requestedLayout, opts.presentation),
   });
   const planResult =
-    (opts.layout || 'slides') === 'slides'
+    requestedLayout === 'slides'
       ? await planSlides({ model, orientation: opts.orientation, dims, includeCover: true, measure, fontsReady: domFontsReady(document) })
       : undefined;
-  if (planResult && !planResult.ok) throw new Error(`planSlides failed for ${opts.title || 'untitled'}: ${planResult.diagnostics.reason || 'no contained plan'}`);
+  // Readability-floor misses degrade to the vertically scrolling artifact that
+  // the wizard saves. Never bundle the legacy unplanned deck for a rejected plan:
+  // it can clip content inside a fixed slide canvas.
+  const layout: LayoutKind = planResult && !planResult.ok ? 'scroll' : requestedLayout;
   const { html, manifest } = bundleHtml({
     model,
     theme,
     themeCss,
     componentCss,
     orientation: opts.orientation,
-    layout: opts.layout || 'slides',
+    layout,
     summaryChartMode: 'B',
     designSource: 'default',
     designMd: DESIGN_MD,
     freeRequirement: 'containment runner',
     checklist,
     presentation: opts.presentation,
-    plan: planResult?.slides,
+    plan: planResult?.ok ? planResult.slides : undefined,
   });
   const verdict = validateSelfContainedHtml(html);
-  return { html, manifest, validate: verdict, sectionCount: model.sections.length };
+  return {
+    html,
+    manifest,
+    validate: verdict,
+    sectionCount: model.sections.length,
+    requestedLayout,
+    degraded: requestedLayout !== layout,
+    planDiagnostics: planResult?.diagnostics,
+  };
 }
 
 /** The synthetic header blocks the engine prepended when it measured a slide. */
@@ -456,11 +468,24 @@ async function assertScroll(md: string, opts: CellOpts) {
     '.he-scroll .he-callout',
   ].join(',');
   const blocks = Array.from(document.querySelectorAll(selector)) as HTMLElement[];
-  for (const el of blocks) {
+  let clippingCount = 0;
+  // Flow overlap is an acceptance check for the fallback artifact. Other scroll
+  // fixtures intentionally include layered chart structures that are not a
+  // top-level flow regression.
+  let overlapCount: number | null = opts.title === 'slide-fallback' ? 0 : null;
+  for (let idx = 0; idx < blocks.length; idx++) {
+    const el = blocks[idx];
     const r = el.getBoundingClientRect();
     if (r.width === 0 && r.height === 0) continue;
     if (r.right > vw + TOL || r.left < -TOL) {
+      clippingCount += 1;
       failures.push(`block <${(el.className || el.tagName).toString().split(' ')[0]}> exceeds width (right=${r.right.toFixed(0)} vw=${vw})`);
+      break;
+    }
+    const previous = blocks[idx - 1]?.getBoundingClientRect();
+    if (overlapCount !== null && previous && r.top < previous.bottom - TOL) {
+      overlapCount += 1;
+      failures.push(`blocks ${idx - 1}/${idx} overlap (${previous.bottom.toFixed(1)} > ${r.top.toFixed(1)})`);
       break;
     }
   }
@@ -472,7 +497,10 @@ async function assertScroll(md: string, opts: CellOpts) {
     contentW: scroll.contentW,
     contentH: scroll.contentH,
     safeW: scroll.safeW,
+    safeH: scroll.safeH,
     readingWidthRatio,
+    clippingCount,
+    overlapCount,
   };
 }
 

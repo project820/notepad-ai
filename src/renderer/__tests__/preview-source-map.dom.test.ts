@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it } from 'vitest';
-import { createPreview } from '../preview';
+import { createPreview, PREVIEW_JOURNAL_MAX_SOURCE_LENGTH } from '../preview';
 import { htmlToMarkdown } from '../html-to-md';
 import { collectPreviewBlocks, previewElementToLineRange } from '../source-preview-map';
 
@@ -75,6 +75,33 @@ describe('preview source map — top-level blocks get data-src/map attributes', 
     // The markup survives as visible text.
     expect(preview.el.textContent).toContain('<b>bold</b>');
     expect(preview.el.textContent).toContain('alert(1)');
+  });
+});
+function largeMarkdown(minLength: number): string {
+  let markdown = '';
+  let index = 0;
+  while (markdown.length <= minLength) {
+    markdown += `paragraph ${index++}: source mapping must remain available during a large document open.\n\n`;
+  }
+  return markdown;
+}
+
+describe('preview source map — large documents', () => {
+  it('renders 29 KB and 69 KB documents without source-journal work blocking the preview', () => {
+    const preview = mount();
+
+    const medium = largeMarkdown(29 * 1024);
+    preview.setDoc(medium);
+    expect(preview.el.textContent).toContain('paragraph 0');
+    expect(preview.getSourceMap()).not.toHaveLength(0);
+    expect(preview.getRunTable()).toBeNull();
+
+    const large = largeMarkdown(69 * 1024);
+    preview.setDoc(large);
+    expect(large.length).toBeGreaterThan(PREVIEW_JOURNAL_MAX_SOURCE_LENGTH);
+    expect(preview.el.textContent).toContain('paragraph 0');
+    expect(preview.getSourceMap()).not.toHaveLength(0);
+    expect(preview.getRunTable()).toBeNull();
   });
 });
 

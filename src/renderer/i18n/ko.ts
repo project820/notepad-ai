@@ -253,10 +253,11 @@ export const ko: Dict = {
     'settings.local.reset': '기본값',
     'settings.local.modelsFound': '모델 사용 가능',
     'settings.local.hint': '내 컴퓨터에서 실행 — API 키가 필요 없습니다.',
-    'settings.local.noModels': '로컬 모델이 없습니다. Ollama를 실행하거나 LM Studio에서 모델을 로드하세요.',
+    'settings.local.noModels': '로컬 모델이 없습니다. Ollama를 실행하거나 모델을 추가하세요.',
     'he.smallContext': '이 모델은 컨텍스트 창이 작아 긴 문서는 품질이 떨어지거나 잘릴 수 있습니다.',
     // AI provider settings
     'settings.prov.title': 'AI 제공자',
+    'settings.prov.localModels': '로컬 모델',
     'settings.prov.notConnected': '연결 안 됨',
     'settings.prov.unverified': '상태 미확인',
     'settings.prov.signedIn': '로그인됨',
