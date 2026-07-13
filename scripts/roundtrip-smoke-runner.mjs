@@ -67,16 +67,22 @@ async function runElectronWorker(phase) {
     const liveWindowCount = BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed()).length;
     if (liveWindowCount !== 1) throw new Error(`open-file startup created ${liveWindowCount} windows; expected exactly one`);
     console.log('[roundtrip-smoke] phase-1-open-file-window-count=1');
-    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'A', modifiers: ['meta'] });
-    win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'A', modifiers: ['meta'] });
-    await delay(30);
-    win.webContents.insertText(editedContent);
+    // Headless CI delivers synthesized ⌘A keystrokes unreliably. Focus the editor
+    // and retry selectAll()+insertText() until CodeMirror actually holds the edited
+    // content, rather than assuming a single synthetic edit lands first try.
+    await win.webContents.executeJavaScript(`document.querySelector('.cm-content')?.focus(); true`);
     const renderedContent = await waitFor('CodeMirror edit', async () => {
+      win.focus();
+      win.webContents.focus();
+      win.webContents.selectAll();
+      await delay(30);
+      win.webContents.insertText(editedContent);
+      await delay(30);
       const text = await win.webContents.executeJavaScript(
         `Array.from(document.querySelectorAll('.cm-line')).map((line) => line.textContent || '').join('\\n')`,
       );
       return text === editedContent ? text : null;
-    });
+    }, 60_000);
     const saveResult = await win.webContents.executeJavaScript(
       `window.api.saveFile(${JSON.stringify(documentPath)}, ${JSON.stringify(renderedContent)})`,
     );
