@@ -31,7 +31,7 @@ function delay(ms) {
   return new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
 }
 
-async function waitFor(name, predicate, timeoutMs = 15_000) {
+async function waitFor(name, predicate, timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs;
   let lastError;
   while (Date.now() < deadline) {
@@ -89,7 +89,7 @@ async function runElectronWorker(phase) {
       if (!existsSync(sessionPath)) return false;
       const aggregate = JSON.parse(readFileSync(sessionPath, 'utf8'));
       return aggregate.cleanExit === false && aggregate.windows?.some((entry) => entry.path === documentPath && entry.doc === editedContent);
-    });
+    }, 60_000);
     console.log('[roundtrip-smoke] phase-1-ready: document saved and snapshot flushed');
     await new Promise(() => {});
   }
@@ -179,7 +179,7 @@ if (workerPhase) {
 
     console.log('[roundtrip-smoke] phase 1: launch, save, snapshot, crash');
     const first = launchPhase('save');
-    await waitFor('phase 1 snapshot flush', () => first.logs.join('').includes('phase-1-ready'));
+    await waitFor('phase 1 snapshot flush', () => first.logs.join('').includes('phase-1-ready'), 60_000);
     check('opened, edited, and saved through the production Electron app', first.logs.join('').includes('phase-1-ready'));
     check('early open-file delivery creates exactly one window', first.logs.join('').includes('phase-1-open-file-window-count=1'));
     check('saved file round-trips edited content byte-exactly', readFileSync(roundtripDocument).equals(Buffer.from(editedContent, 'utf8')));
@@ -204,10 +204,20 @@ if (workerPhase) {
     console.error(`[roundtrip-smoke] ENV-FAIL (not a pass): ${error?.stack ?? String(error)}`);
     exitCode = 2;
   } finally {
-    for (const child of children) {
+    const pending = [...children];
+    for (const child of pending) {
       if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
     }
-    rmSync(userData, { recursive: true, force: true });
+    // Wait for killed children to actually exit so none still holds files under
+    // userData when we remove it; otherwise rmSync races and throws ENOTEMPTY on
+    // slower CI runners and turns an env timeout into a hard crash.
+    await Promise.allSettled(pending.map((child) => waitForExit(child, 10_000).catch(() => {})));
+    // Best-effort temp cleanup: a cleanup race must never turn the result into a crash.
+    try {
+      rmSync(userData, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    } catch (cleanupError) {
+      console.warn(`[roundtrip-smoke] temp cleanup skipped: ${cleanupError?.message ?? cleanupError}`);
+    }
   }
   process.exitCode = exitCode;
   })();
