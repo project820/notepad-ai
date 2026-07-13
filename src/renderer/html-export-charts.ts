@@ -48,7 +48,7 @@ const FONT = 'system-ui, -apple-system, Segoe UI, sans-serif';
 
 // Wide canvas for bar / line / timeline; square (+ legend) for pie / donut.
 const W = 640;
-const H = 360;
+const H = 270;
 const M = { top: 28, right: 20, bottom: 44, left: 48 };
 
 // Size caps so a malformed/hostile spec can't generate a multi-MB SVG (G006).
@@ -213,7 +213,11 @@ function xAxisLabels(labels: string[]): string {
       const cx = box.left + groupW * i + groupW / 2;
       return (
         `<text x="${n2(cx)}" y="${n2(H - 16)}" text-anchor="middle" font-family="${FONT}" ` +
-        `font-size="11" fill="${MUTED}">${escapeXml(label)}</text>`
+        `font-size="16" fill="${MUTED}">${escapeXml(label)}</text>`
+
+
+
+
       );
     })
     .join('');
@@ -295,7 +299,11 @@ function legend(spec: ChartSpec, palette: string[]): string {
     const name = s.name || `Series ${si + 1}`;
     items.push(
       `<rect x="${n2(x)}" y="6" width="10" height="10" rx="2" fill="${colorAt(palette, si)}"></rect>` +
-        `<text x="${n2(x + 14)}" y="15" font-family="${FONT}" font-size="11" fill="${INK}">${escapeXml(name)}</text>`,
+        `<text x="${n2(x + 14)}" y="15" font-family="${FONT}" font-size="16" fill="${INK}">${escapeXml(name)}</text>`,
+
+
+
+
     );
     x += 14 + Math.max(name.length * 6.2, 28) + 16;
   });
@@ -363,7 +371,11 @@ function pieSlices(spec: ChartSpec, palette: string[], donut: boolean): string {
     const ly = 316 + i * 22;
     return (
       `<rect x="24" y="${n2(ly)}" width="12" height="12" rx="2" fill="${s.color}"></rect>` +
-      `<text x="44" y="${n2(ly + 10)}" font-family="${FONT}" font-size="12" fill="${INK}">` +
+      `<text x="44" y="${n2(ly + 10)}" font-family="${FONT}" font-size="16" fill="${INK}">` +
+
+
+
+
       `${escapeXml(`${s.label} — ${s.value}${spec.unit ? ` ${spec.unit}` : ''}`)}</text>`
     );
   });
@@ -399,11 +411,14 @@ function renderTimeline(spec: ChartSpec, palette: string[]): string {
     const x = xAt(i);
     out.push(`<circle cx="${n2(x)}" cy="${baseline}" r="6" fill="${color}"></circle>`);
     out.push(
-      `<text x="${n2(x)}" y="${baseline + 28}" text-anchor="middle" font-family="${FONT}" font-size="12" fill="${INK}">${escapeXml(label)}</text>`,
+      `<text x="${n2(x)}" y="${baseline + 28}" text-anchor="middle" font-family="${FONT}" font-size="16" fill="${INK}">${escapeXml(label)}</text>`,
+
+
+
     );
     if (Number.isFinite(values[i])) {
       out.push(
-        `<text x="${n2(x)}" y="${baseline - 18}" text-anchor="middle" font-family="${FONT}" font-size="11" fill="${MUTED}">${escapeXml(`${values[i]}${spec.unit ? ` ${spec.unit}` : ''}`)}</text>`,
+        `<text x="${n2(x)}" y="${baseline - 18}" text-anchor="middle" font-family="${FONT}" font-size="16" fill="${MUTED}">${escapeXml(`${values[i]}${spec.unit ? ` ${spec.unit}` : ''}`)}</text>`,
       );
     }
   });

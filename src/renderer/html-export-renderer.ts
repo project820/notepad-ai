@@ -231,21 +231,31 @@ function buildPlannedSlides(
 ): { bodyHtml: string; slideCount: number } {
   const safeW = (ctx.dims ?? slideDimsFor(ctx.orientation)).safeW;
   const slides: string[] = [];
-  // Cover slide (index 0) — the only `.slide.active` at build time, scale 1.
-  slides.push(
-    `<section class="slide active he-cover" data-he-slide-index="0" aria-roledescription="slide">` +
-      scalerHtml(`<h1 class="he-doc-title">${esc(model.title)}</h1>`, 1, safeW) +
-      `</section>`,
-  );
-  plan.forEach((s, i) => {
-    const idx = i + 1;
-    const parts: string[] = [];
-    if (s.kicker) parts.push(`<p class="he-kicker">${esc(s.kicker)}</p>`);
-    if (s.sectionTitle) parts.push(`<h2 class="he-section-header">${esc(s.sectionTitle)}</h2>`);
-    const blocks = Array.isArray(s.blocks) ? s.blocks : [];
-    for (let b = 0; b < blocks.length; b++) parts.push(renderBlock(blocks[b], `he-p${idx}-b${b}`, counters));
+  if (!plan.some((slide) => slide.cover)) {
     slides.push(
-      `<section class="slide" data-he-slide-index="${idx}"${s.continued ? ' data-he-continued' : ''} aria-roledescription="slide">` +
+      `<section class="slide active he-cover" data-he-slide-index="0" aria-roledescription="slide">` +
+        scalerHtml(`<h1 class="he-heading he-h1">${esc(model.title)}</h1>`, 1, safeW) +
+        `</section>`,
+    );
+  }
+
+  const planHasCover = plan.some((slide) => slide.cover);
+  const indexOffset = planHasCover ? 0 : 1;
+
+  plan.forEach((s, i) => {
+    const idx = i + indexOffset;
+
+    const parts: string[] = [];
+    if (s.cover) {
+      parts.push(renderBlock(s.blocks[0] ?? { kind: 'heading', level: 1, text: model.title }, `he-p${idx}-cover`, counters));
+    } else {
+      if (s.kicker) parts.push(`<p class="he-kicker">${esc(s.kicker)}</p>`);
+      if (s.sectionTitle) parts.push(`<h2 class="he-heading he-h2">${esc(s.sectionTitle)}</h2>`);
+      const blocks = Array.isArray(s.blocks) ? s.blocks : [];
+      for (let b = 0; b < blocks.length; b++) parts.push(renderBlock(blocks[b], `he-p${idx}-b${b}`, counters));
+    }
+    slides.push(
+      `<section class="slide${i === 0 && planHasCover ? ' active' : ''}" data-he-slide-index="${idx}"${s.continued ? ' data-he-continued' : ''} aria-roledescription="slide">` +
         scalerHtml(parts.join('\n'), s.scale, safeW) +
         `</section>`,
     );

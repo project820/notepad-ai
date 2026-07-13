@@ -127,6 +127,12 @@ function loadFixtures() {
     const p = resolve(FIXTURE_DIR, `${name}.md`);
     fixtures.push({ name, md: readFileSync(p, 'utf8'), required: true, kind: 'synthetic' });
   }
+  fixtures.push({
+    name: 'long-title',
+    md: `# ${'L'.repeat(600)}\n\n## Summary\n\nThe cover title must be measured, scaled, and kept clear of navigation.`,
+    required: true,
+    kind: 'synthetic',
+  });
   const realPath = resolve(FIXTURE_DIR, REAL_HANDOVER);
   const realPresent = existsSync(realPath);
   if (realPresent) {

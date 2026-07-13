@@ -393,6 +393,7 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
           model,
           orientation,
           dims: slideDimsFor(orientation, resolveHtmlExportSlideGeometry(theme, presentation)),
+          includeCover: true,
           measure: createDomMeasure({ doc: document, styleCss: buildExportStyle(theme, orientation, layout, presentation) }),
 
           fontsReady: domFontsReady(document),

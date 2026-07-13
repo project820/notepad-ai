@@ -204,7 +204,8 @@ describe('html-export pipeline — synthetic corpus containment gate', () => {
         it(`slides/${orientation}: bundles the ENGINE-PLANNED deck self-contained`, async () => {
           // The shipped bundle must emit the engine's PLAN (cover + one slide per
           // PLANNED slide, each at its uniform scale) — not a naive section deck.
-          const plan = await planSlides({ model, orientation, measure: columnMeasure });
+          const plan = await planSlides({ model, orientation, includeCover: true, measure: columnMeasure });
+
           expect(plan.ok).toBe(true);
           const { html, manifest } = bundleFor(model, orientation, 'slides', plan.slides);
           const verdict = validateSelfContainedHtml(html);
@@ -214,8 +215,9 @@ describe('html-export pipeline — synthetic corpus containment gate', () => {
           expect(manifest.schemaVersion).toBe(EXPORT_MANIFEST_SCHEMA_VERSION);
           expect(manifest.layout).toBe('slides');
           expect(manifest.orientation).toBe(orientation);
-          // Cover + one `.slide` per PLANNED slide (NOT per source section).
-          expect(manifest.slideCount).toBe(plan.slides.length + 1);
+          // Every planned slide, including the cover, is emitted at its planned scale.
+          expect(manifest.slideCount).toBe(plan.slides.length);
+
           expect(manifest.chartCount).toBe(countCharts(model));
           // The plan's uniform scale is BAKED into the document.
           expect(manifest.minScale).not.toBeNull();
@@ -225,7 +227,7 @@ describe('html-export pipeline — synthetic corpus containment gate', () => {
           // Every planned slide carries an explicit scale marker; any sub-1 scale
           // is applied as a real CSS transform (never a silent clip).
           const scalerCount = html.match(/data-he-scale=/g)?.length ?? 0;
-          expect(scalerCount).toBe(plan.slides.length + 1); // + cover
+          expect(scalerCount).toBe(plan.slides.length);
           if ((manifest.minScale as number) < 1) expect(html).toContain('transform:scale(');
         });
 

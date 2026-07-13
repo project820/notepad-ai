@@ -24,6 +24,8 @@ import {
   planScrollContainment,
   slideDimsFor,
   MIN_SCALE,
+  MIN_COVER_SCALE,
+
 } from '../src/renderer/html-export-layout';
 import type { SlideDims } from '../src/renderer/html-export-layout';
 import { renderBlocks } from '../src/renderer/html-export-renderer';
@@ -67,9 +69,19 @@ function buildModel(md: string, title?: string): ContentModel {
   return corpusToModel(md, title || 'Untitled');
 }
 
-/** PURE: build the self-contained document + manifest for a fixture cell. */
-function bundleDoc(md: string, opts: CellOpts) {
+/** Build the self-contained document using the same planned deck asserted below. */
+async function bundleDoc(md: string, opts: CellOpts) {
   const model = buildModel(md, opts.title);
+  const dims = slideDimsFor(opts.orientation, resolveHtmlExportSlideGeometry(theme, opts.presentation));
+  const measure = createDomMeasure({
+    doc: document,
+    styleCss: buildExportStyle(theme, opts.orientation, opts.layout || 'slides', opts.presentation),
+  });
+  const planResult =
+    (opts.layout || 'slides') === 'slides'
+      ? await planSlides({ model, orientation: opts.orientation, dims, includeCover: true, measure, fontsReady: domFontsReady(document) })
+      : undefined;
+  if (planResult && !planResult.ok) throw new Error(`planSlides failed for ${opts.title || 'untitled'}: ${planResult.diagnostics.reason || 'no contained plan'}`);
   const { html, manifest } = bundleHtml({
     model,
     theme,
@@ -83,7 +95,7 @@ function bundleDoc(md: string, opts: CellOpts) {
     freeRequirement: 'containment runner',
     checklist,
     presentation: opts.presentation,
-
+    plan: planResult?.slides,
   });
   const verdict = validateSelfContainedHtml(html);
   return { html, manifest, validate: verdict, sectionCount: model.sections.length };
@@ -116,7 +128,7 @@ async function assertSlides(md: string, opts: CellOpts) {
 
   const fontsReady = domFontsReady(document);
 
-  const plan = await planSlides({ model, orientation, dims, measure, fontsReady });
+  const plan = await planSlides({ model, orientation, dims, includeCover: true, measure, fontsReady });
   const failures: string[] = [];
   if (!plan.ok) {
     return {
@@ -156,7 +168,7 @@ async function assertSlides(md: string, opts: CellOpts) {
   // 100vw/100vh) so containment is asserted against the SLIDE CANVAS, never the
   // (possibly oversized) browser window.
   const deck = document.createElement('div');
-  deck.className = 'he-slides';
+  deck.className = 'he-doc he-slides';
   Object.assign(deck.style, {
     position: 'fixed',
     left: '0px',
@@ -235,7 +247,8 @@ async function assertSlides(md: string, opts: CellOpts) {
 
 
     // (1) scale floor respected.
-    if (slide.scale < MIN_SCALE - 1e-9) failures.push(`slide ${idx}: scale ${slide.scale.toFixed(3)} < MIN_SCALE ${MIN_SCALE.toFixed(3)}`);
+    const minAllowedScale = slide.cover ? MIN_COVER_SCALE : MIN_SCALE;
+    if (slide.scale < minAllowedScale - 1e-9) failures.push(`slide ${idx}: scale ${slide.scale.toFixed(3)} < minimum ${minAllowedScale.toFixed(3)}`);
 
     // (2) every rendered element's rect stays inside the SLIDE safe-area box.
     //     Catches content (overflow:visible) that escapes the slide canvas on any

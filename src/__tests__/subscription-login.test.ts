@@ -10,7 +10,7 @@ class FakeChild implements CliProcess {
   private err: Array<(chunk: string) => void> = [];
   private closes: Array<(code: number | null) => void> = [];
   private errors: Array<(error: Error) => void> = [];
-  stdin = { write: (chunk: string) => this.stdinChunks.push(chunk), end: () => {} };
+  stdin = { writable: true, write: (chunk: string) => this.stdinChunks.push(chunk), end: () => {} };
   stdout = { on: (_event: 'data', cb: (chunk: string) => void) => this.out.push(cb) };
   stderr = { on: (_event: 'data', cb: (chunk: string) => void) => this.err.push(cb) };
   on(event: 'error' | 'close', cb: ((error: Error) => void) | ((code: number | null) => void)): void {
@@ -101,6 +101,49 @@ describe('subscription CLI login', () => {
     expect(updates.at(-1)).toMatchObject({ kind: 'error', provider: 'claude', code: 'login_failed' });
   });
 
+  it('ignores late Claude code while auth-status verification owns the process', async () => {
+    const { SubscriptionLoginService } = await modulePromise;
+    const login = new FakeChild();
+    const status = new FakeChild();
+    const statusWrite = vi.fn(() => { throw new Error('write after end'); });
+    status.stdin.write = statusWrite;
+    const service = new SubscriptionLoginService({
+      spawn: vi.fn().mockReturnValueOnce(login).mockReturnValueOnce(status), resolveCommand: async () => ({ command: '/trusted/claude' }),
+      buildEnv: async () => ({ HOME: '/real-home' }), openExternal: vi.fn(async () => {}), timeoutMs: 10_000,
+    });
+    await service.start('claude', senderFor([]));
+    login.emitOut('https://claude.com/cai/oauth/authorize?code=true\n');
+    login.close(0);
+    await flush();
+    service.submitCode('claude', 'late-code');
+    expect(statusWrite).not.toHaveBeenCalled();
+  });
+  it('ignores non-writable Claude login stdin', async () => {
+    const { SubscriptionLoginService } = await modulePromise;
+    const child = new FakeChild();
+    child.stdin.writable = false;
+    const service = new SubscriptionLoginService({
+      spawn: vi.fn(() => child), resolveCommand: async () => ({ command: '/trusted/claude' }),
+      buildEnv: async () => ({ HOME: '/real-home' }), openExternal: vi.fn(async () => {}), timeoutMs: 10_000,
+    });
+    await service.start('claude', senderFor([]));
+    service.submitCode('claude', 'late-code');
+    expect(child.stdinChunks).toEqual([]);
+  });
+
+  it('reports unavailable CLI without spawning and releases its slot', async () => {
+    const { SubscriptionLoginService } = await modulePromise;
+    const spawn = vi.fn();
+    const service = new SubscriptionLoginService({
+      spawn, resolveCommand: async () => ({ error: 'CLI executable is unavailable.' }),
+      buildEnv: async () => ({ HOME: '/real-home' }), openExternal: vi.fn(async () => {}), timeoutMs: 10_000,
+    });
+    const updates: any[] = [];
+    await service.start('grok', senderFor(updates));
+    expect(spawn).not.toHaveBeenCalled();
+    expect(updates).toEqual([{ kind: 'error', provider: 'grok', code: 'cli_unavailable' }]);
+    await expect(service.start('grok', senderFor([]))).resolves.toBeUndefined();
+  });
   it('kills a timed-out child with TERM followed by KILL', async () => {
     vi.useFakeTimers();
     const { SubscriptionLoginService } = await modulePromise;
@@ -145,13 +188,31 @@ describe('subscription CLI login', () => {
     await first;
     expect((service as any).deps.spawn).toHaveBeenCalledTimes(1);
   });
-  it('cancels a reserved login when its sender is destroyed before preparation completes', async () => {
+  it('reserves the provider slot for logout, allowing only one concurrent logout child', async () => {
+    const { SubscriptionLoginService } = await modulePromise;
+    const child = new FakeChild();
+    let resolveCommand!: (value: { command: string }) => void;
+    const spawn = vi.fn(() => child);
+    const service = new SubscriptionLoginService({
+      spawn, resolveCommand: () => new Promise((resolve) => { resolveCommand = resolve; }),
+      buildEnv: async () => ({ HOME: '/real-home' }), openExternal: vi.fn(async () => {}), timeoutMs: 10_000,
+    });
+    const first = service.logout('grok');
+    await expect(service.logout('grok')).rejects.toThrow('already in progress');
+    resolveCommand({ command: '/trusted/grok' });
+    await flush();
+    expect(spawn).toHaveBeenCalledTimes(1);
+    child.close(0);
+    await first;
+  });
+  it('cancels preparation when the sender is destroyed before command resolution', async () => {
     const { SubscriptionLoginService } = await modulePromise;
     const spawn = vi.fn(() => new FakeChild());
+    let destroyed = false;
     let destroy!: () => void;
     let resolveCommand!: (value: { command: string }) => void;
     const sender = {
-      isDestroyed: () => true,
+      isDestroyed: () => destroyed,
       send: vi.fn(),
       once: (_event: 'destroyed', listener: () => void) => { destroy = listener; },
     };
@@ -160,6 +221,7 @@ describe('subscription CLI login', () => {
       buildEnv: async () => ({ HOME: '/real-home' }), openExternal: vi.fn(async () => {}), timeoutMs: 10_000,
     });
     const start = service.start('grok', sender);
+    destroyed = true;
     destroy();
     resolveCommand({ command: '/trusted/grok' });
     await start;

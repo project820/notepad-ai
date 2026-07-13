@@ -69,6 +69,9 @@ export type PlannedSlide = {
   blocks: ContentBlock[];
   /** Uniform scale in [MIN_SCALE, 1] applied to the slide content. */
   scale: number;
+  /** True when this is the planned title cover. */
+  cover?: boolean;
+
   /** Section title repeated on every slide of the section. */
   sectionTitle?: string;
   /** Section kicker repeated on every slide of the section. */
@@ -115,6 +118,9 @@ export type PlanSlidesArgs = {
   orientation: Orientation;
   /** Defaults to `slideDimsFor(orientation)`. */
   dims?: SlideDims;
+  /** Include a planned cover slide for the document title. */
+  includeCover?: boolean;
+
   measure: MeasureFn;
   /** Defaults to an already-resolved promise. */
   fontsReady?: FontsReadyFn;
@@ -138,14 +144,16 @@ export type PlanScrollContainmentArgs = {
 export const MIN_BODY_PX = 14;
 /** Captions / chart notes must never render below this size. */
 export const MIN_CAPTION_PX = 11;
-/** The body size at scale 1. MIN_SCALE is derived from this + MIN_BODY_PX. */
+/** Rendered body and caption sizes are clamped to these CSS baselines. */
 export const BASE_BODY_PX = 20;
+export const BASE_CAPTION_PX = 16;
 /**
- * The smallest uniform scale the engine will apply. Derived from the base body
- * size so scaled body text never drops below MIN_BODY_PX. Below this, the
- * engine SPLITS instead of scaling.
+ * The planner floor keeps body text at 14px and caption/chart text above 11px.
  */
-export const MIN_SCALE = MIN_BODY_PX / BASE_BODY_PX;
+export const MIN_SCALE = 0.7;
+/** Cover titles may scale to about 22px, but never below that readable display floor. */
+export const MIN_COVER_SCALE = 0.45;
+
 /** Default hard iteration cap for the measure→split loop. */
 export const DEFAULT_MAX_ITERATIONS = 200;
 
@@ -214,6 +222,17 @@ function makeSlide(
   if (continued) slide.continued = true;
   return slide;
 }
+function makeCover(title: string, dims: SlideDims, measure: MeasureFn, budget: Budget): PlannedSlide | null {
+  const blocks: ContentBlock[] = [{ kind: 'heading', level: 1, text: title }];
+  const scale = scaleToFit(measure(blocks, dims, 1), dims);
+  if (scale < MIN_COVER_SCALE) {
+    budget.failScale = scale;
+    return null;
+  }
+  budget.minScale = Math.min(budget.minScale, scale);
+  return { blocks, scale, cover: true };
+}
+
 
 // ---------------------------------------------------------------------------
 // Block splitting — the split-before-scaling strategy
@@ -405,7 +424,7 @@ function packSection(
       budget.failScale = scale;
       return {
         ok: false,
-        reason: `block (${block.kind}) cannot fit readably and cannot be split further`,
+        reason: `block (${block.kind}) cannot fit readably and cannot be split further (scale ${scale.toFixed(3)})`,
       };
     }
     budget.splits += 1;
@@ -439,6 +458,25 @@ export async function planSlides(args: PlanSlidesArgs): Promise<LayoutResult> {
   const slides: PlannedSlide[] = [];
   const sections = Array.isArray(args.model?.sections) ? args.model.sections : [];
 
+  if (args.includeCover) {
+    const cover = makeCover(typeof args.model?.title === 'string' ? args.model.title : '', dims, measure, budget);
+    if (!cover) {
+      return {
+        ok: false,
+        slides: [],
+        diagnostics: {
+          slideCount: 0,
+          splits: budget.splits,
+          minScale: budget.failScale,
+          iterations: budget.iterations,
+          overflowSlides: 1,
+          reason: `cover title cannot fit readably (scale ${budget.failScale.toFixed(3)})`,
+          containmentPass: false,
+        },
+      };
+    }
+    slides.push(cover);
+  }
   for (const section of sections) {
     const res = packSection(section, dims, measure, budget);
     if (!res.ok) {

@@ -107,7 +107,7 @@ describe('bundleHtml — single self-contained document', () => {
     });
 
     expect(html).toContain('--he-slide-pad: 38px;');
-    expect(html).toContain('--he-nav-reserve: 86px;');
+    expect(html).toContain('--he-nav-reserve: 118px;');
     expect(html).toContain('padding-bottom:calc(var(--he-slide-pad) + var(--he-nav-reserve))');
     expect(html).toContain('style="width:1204px"');
   });

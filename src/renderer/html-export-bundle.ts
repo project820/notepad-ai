@@ -75,7 +75,9 @@ export type BundleResult = { html: string; manifest: ExportManifest };
 const COMMON_CSS = [
   '*,*::before,*::after{box-sizing:border-box;}',
   'html,body{margin:0;padding:0;}',
-  'body{background:var(--he-bg);color:var(--he-body);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-size:var(--he-body-size);line-height:var(--he-line-height);}',
+  'body{background:var(--he-bg);color:var(--he-body);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-size:max(20px,var(--he-body-size));line-height:var(--he-line-height);}',
+
+
   // Long unbreakable tokens (URLs, IDs, CJK runs, code-y strings) must wrap, never
   // force a wider-than-viewport line — otherwise a SCROLL page gains a horizontal
   // scrollbar at narrow widths (hard containment failure). overflow-wrap/word-break
@@ -83,6 +85,8 @@ const COMMON_CSS = [
   '.he-doc{overflow-wrap:break-word;word-break:break-word;}',
   '.he-doc-title{font-size:var(--he-title-size);font-weight:var(--he-title-weight);color:var(--he-heading-color,var(--he-ink));line-height:var(--he-line-height);margin:0 0 var(--he-rhythm);}',
   '.he-heading{color:var(--he-heading-color,var(--he-ink));line-height:var(--he-line-height);margin:var(--he-rhythm) 0 var(--he-rhythm-sm);}',
+  '.he-h1{font-size:var(--he-title-size);font-weight:var(--he-title-weight);}',
+  '.he-h2{font-size:var(--he-heading-size);font-weight:var(--he-heading-weight);letter-spacing:var(--he-heading-tracking);}',
 
   '.he-paragraph{margin:0 0 var(--he-rhythm-sm);max-width:100%;}',
   '.he-list{margin:0 0 var(--he-rhythm-sm);padding-left:1.4em;}',
@@ -101,7 +105,7 @@ const COMMON_CSS = [
   // Charts stretch to the column width; cap their height to the fixed canvas so
   // a full-width chart can never exceed the slide safe area (G006 containment).
   '.he-chart svg{max-width:100%;height:auto;max-height:calc(var(--he-canvas-h, 720px) * 0.6);}',
-  '.he-chart-note{font-size:var(--he-caption-size);color:var(--he-muted);margin-top:var(--he-rhythm-sm);}',
+  '.he-chart-note{font-size:max(16px,var(--he-caption-size));color:var(--he-muted);margin-top:var(--he-rhythm-sm);}',
   // Slide-component contract (harmless when no `.slide` exists, e.g. scroll docs).
   '.slide{display:none;}',
   '.slide.active{display:flex;flex-direction:column;}',

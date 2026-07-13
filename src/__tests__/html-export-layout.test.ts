@@ -16,6 +16,8 @@ import {
   MIN_CAPTION_PX,
   MIN_SCALE,
   BASE_BODY_PX,
+  BASE_CAPTION_PX,
+
   DEFAULT_MAX_ITERATIONS,
   type MeasureFn,
   type FontsReadyFn,
@@ -97,12 +99,13 @@ function list(items: number): ContentBlock {
 // ---------------------------------------------------------------------------
 
 describe('readability floor constants', () => {
-  it('MIN_SCALE is derived from the base body size + MIN_BODY_PX', () => {
+  it('MIN_SCALE protects the rendered body and caption baselines', () => {
     expect(MIN_BODY_PX).toBe(14);
     expect(MIN_CAPTION_PX).toBe(11);
-    expect(MIN_SCALE).toBeCloseTo(MIN_BODY_PX / BASE_BODY_PX, 10);
-    // scaling body by MIN_SCALE must never drop it below the floor.
-    expect(BASE_BODY_PX * MIN_SCALE).toBeCloseTo(MIN_BODY_PX, 10);
+    expect(MIN_SCALE).toBe(0.7);
+    expect(BASE_BODY_PX * MIN_SCALE).toBeGreaterThanOrEqual(MIN_BODY_PX);
+    expect(BASE_CAPTION_PX * MIN_SCALE).toBeGreaterThanOrEqual(MIN_CAPTION_PX);
+
     expect(DEFAULT_MAX_ITERATIONS).toBe(200);
   });
 });
@@ -144,17 +147,30 @@ describe('planSlides — fit / scale / split', () => {
     expect(res.diagnostics.containmentPass).toBe(true);
     expect(res.diagnostics.minScale).toBe(1);
   });
+  it('plans the title cover with the same readable scale contract as content', async () => {
+    const res = await planSlides({
+      model: { title: 'x'.repeat(600), sections: [section({ kind: 'paragraph', text: 'body' })] },
+      orientation: 'horizontal',
+      dims: DIMS,
+      includeCover: true,
+      measure: columnMeasure,
+    });
+
+    expect(res.ok).toBe(true);
+    expect(res.slides[0]).toMatchObject({ cover: true, scale: 1 });
+    expect(res.slides[0].blocks[0]).toMatchObject({ kind: 'heading', level: 1 });
+  });
 
   it('applies a uniform scale in [MIN_SCALE, 1) — no split — for a slightly-too-big slide', async () => {
-    // code(18): height 720 > safeH 624 → scale 624/720 ≈ 0.867, still readable.
-    const m = model(section(code(18)));
+    // code(17): height 680 > safeH 624 → scale 624/680 ≈ 0.918, still readable.
+    const m = model(section(code(17)));
     const res = await planSlides({ model: m, orientation: 'horizontal', dims: DIMS, measure: columnMeasure });
 
     expect(res.ok).toBe(true);
     expect(res.slides).toHaveLength(1);
     expect(res.slides[0].scale).toBeGreaterThanOrEqual(MIN_SCALE);
     expect(res.slides[0].scale).toBeLessThan(1);
-    expect(res.slides[0].scale).toBeCloseTo(DIMS.safeH / 720, 6);
+    expect(res.slides[0].scale).toBeCloseTo(DIMS.safeH / 680, 6);
     expect(res.diagnostics.splits).toBe(0);
     expect(res.diagnostics.overflowSlides).toBe(0);
   });

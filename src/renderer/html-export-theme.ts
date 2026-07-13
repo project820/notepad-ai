@@ -646,7 +646,10 @@ export function resolveHtmlExportSlideGeometry(
   const rhythm = Math.round(clamp(theme.spacing.rhythm * densityFactor(theme.tone.density, presentation), RHYTHM_MIN, RHYTHM_MAX));
   return {
     padding: rhythm,
-    navReserve: 48 + Math.round(rhythm / 2) * 2,
+    navReserve: 80 + Math.round(rhythm / 2) * 2,
+
+
+
   };
 }
 
@@ -714,7 +717,9 @@ export function toCssVariables(theme: DesignTheme, presentation?: HtmlExportPres
   out.push(`  --he-component-padding: ${cssNum(Math.round(rhythm / 3))}px;`);
   out.push(`  --he-readable-width: ${readableWidth(presentation?.readableWidth)};`);
   out.push(`  --he-slide-pad: ${cssNum(rhythm)}px;`);
-  out.push(`  --he-nav-reserve: ${cssNum(48 + Math.round(rhythm / 2) * 2)}px;`);
+  out.push(`  --he-nav-reserve: ${cssNum(80 + Math.round(rhythm / 2) * 2)}px;`);
+
+
   out.push('  /* shape + tone */');
   out.push(`  --he-radius: ${cssNum(radius)}px;`);
   out.push(`  --he-radius-sm: ${cssNum(theme.radii.sm)}px;`);
@@ -743,7 +748,10 @@ export function themeComponentClasses(theme: DesignTheme): string {
   return [
     '.he-kicker {',
     '  display: inline-block;',
-    '  font-size: var(--he-caption-size);',
+    '  font-size: max(16px, var(--he-caption-size));',
+
+
+
     `  font-weight: ${kickerWeight};`,
     '  letter-spacing: var(--he-heading-tracking);',
     '  text-transform: uppercase;',
@@ -787,7 +795,7 @@ export function themeComponentClasses(theme: DesignTheme): string {
     '  box-sizing: border-box;',
     '}',
     '.he-footer-counter {',
-    '  font-size: var(--he-caption-size);',
+    '  font-size: max(16px, var(--he-caption-size));',
     '  color: var(--he-muted);',
     '}',
   ].join('\n');

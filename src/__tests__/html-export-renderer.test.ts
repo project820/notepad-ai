@@ -98,6 +98,21 @@ describe('renderContent — slides layout', () => {
     expect(r.bodyHtml).toContain('he-slide-inner');
     expect(r.slideCount).toBe(3);
   });
+  it('renders planned headers and cover with the exact elements used for measurement', () => {
+    const planned = renderContent(MODEL, {
+      layout: 'slides',
+      orientation: 'horizontal',
+      plan: [
+        { cover: true, scale: 1, blocks: [{ kind: 'heading', level: 1, text: 'Deck' }] },
+        { scale: 1, sectionTitle: 'One', blocks: [{ kind: 'paragraph', text: 'Body' }] },
+      ],
+    });
+
+    expect(planned.bodyHtml).toContain('class="he-heading he-h1"');
+    expect(planned.bodyHtml).toContain('class="he-heading he-h2"');
+    expect(planned.bodyHtml).not.toContain('class="he-section-header"');
+    expect(planned.slideCount).toBe(2);
+  });
 
   it('emits the G005 nav hooks + reflow root + live counter', () => {
     expect(r.bodyHtml).toContain('data-he-reflow-root');

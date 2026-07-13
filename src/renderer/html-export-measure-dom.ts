@@ -95,6 +95,7 @@ function ensureRoot(doc: Document, styleCss?: string): HTMLElement {
   s.pointerEvents = 'none';
   s.margin = '0';
   s.padding = '0';
+  s.display = 'flow-root';
   doc.body.appendChild(root);
   return root;
 }
