@@ -37,6 +37,7 @@ class FakeChild implements CliProcess {
 const noKeyStore = { getApiKey: async () => null, getKeyStatus: async () => ({ connected: false, persisted: false }) } as unknown as ApiKeyStore;
 
 const req: AiChatRequest = { instructions: 's', history: [], userText: 'hi', model: { provider: 'claude', id: 'claude-sonnet-4-5' } };
+const trustedClaude = async () => ({ command: '/trusted/claude' });
 
 describe('ComposedClaudeProvider (CLI-first + API fallback)', () => {
   // Hermetic CLI resolver: stub shell-exec (no real subprocess) and force the CLI
@@ -61,7 +62,7 @@ describe('ComposedClaudeProvider (CLI-first + API fallback)', () => {
       else child = next;
       return next;
     };
-    const provider = new ComposedClaudeProvider(noKeyStore, spawn);
+    const provider = new ComposedClaudeProvider(noKeyStore, spawn, trustedClaude);
     const events: AiChatEvent[] = [];
     const promise = provider.streamChat({ ...req, ...over }, (e) => events.push(e));
     // spawn is now deferred behind `await buildMinimalEnv()`; waitChild flushes the
@@ -79,7 +80,7 @@ describe('ComposedClaudeProvider (CLI-first + API fallback)', () => {
       queueMicrotask(() => child.doClose(0));
       return child;
     };
-    const status = await new ComposedClaudeProvider(noKeyStore, spawn).getAuthStatus();
+    const status = await new ComposedClaudeProvider(noKeyStore, spawn, trustedClaude).getAuthStatus();
     expect(status).toMatchObject({
       provider: 'claude',
       authKind: 'api_key',
@@ -143,7 +144,7 @@ describe('ComposedClaudeProvider (CLI-first + API fallback)', () => {
     let child: FakeChild | undefined;
     let spawnCalls = 0;
     const spawn = () => { spawnCalls++; child = new FakeChild(); return child; };
-    const provider = new ComposedClaudeProvider(connectedKey, spawn);
+    const provider = new ComposedClaudeProvider(connectedKey, spawn, trustedClaude);
     const events: AiChatEvent[] = [];
     const promise = provider.streamChat({ ...req, maxOutputTokens: 64_000 }, (e) => events.push(e));
     for (let i = 0; i < 50 && !child; i++) await new Promise((r) => setTimeout(r, 0));
@@ -180,8 +181,10 @@ describe('ProviderRegistry — grok routing + cli auth', () => {
     expect(events.map((e) => e.kind)).toContain('done');
   });
 
-  it('rejects setApiKey for the grok CLI provider with install/login guidance', async () => {
-    const reg = new ProviderRegistry({ setApiKey: vi.fn() } as unknown as ApiKeyStore, {});
-    await expect(reg.setApiKey('grok', 'x')).rejects.toThrow(/CLI|login|install/i);
+  it('persists a Grok xAI API key instead of rejecting the dual-transport provider', async () => {
+    const setApiKey = vi.fn().mockResolvedValue({ persisted: true });
+    const reg = new ProviderRegistry({ setApiKey, deleteApiKey: vi.fn() } as unknown as ApiKeyStore, {});
+    await expect(reg.setApiKey('grok', 'x')).resolves.toEqual({ persisted: true });
+    expect(setApiKey).toHaveBeenCalledWith('grok', 'x');
   });
 });

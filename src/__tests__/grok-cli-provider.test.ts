@@ -27,7 +27,7 @@ const req: AiChatRequest = {
   instructions: 'sys',
   history: [],
   userText: 'SENTINEL-USER-TEXT',
-  model: { provider: 'grok', id: 'grok' },
+  model: { provider: 'grok', id: 'grok-4.5' },
 };
 
 // Provider methods now `await buildMinimalEnv()` (async PATH resolver) before spawning.
@@ -58,7 +58,7 @@ describe('GrokCliProvider', () => {
       return { path: '/tmp/fake-grok-prompt.txt', cleanup };
     };
     const spawn = (_c: string, a: string[]) => { args = a; child = new FakeChild(); return child; };
-    const provider = new GrokCliProvider({ spawn, writePromptFile });
+    const provider = new GrokCliProvider({ spawn, resolveCommand: async () => ({ command: '/trusted/grok' }), writePromptFile });
     const events: AiChatEvent[] = [];
     const promise = provider.streamChat(req, (e) => events.push(e));
     return { promise, getChild: () => child!, getArgs: () => args, events, cleanup, getPromptContent: () => promptFileContent };
@@ -80,6 +80,8 @@ describe('GrokCliProvider', () => {
     expect(h.getArgs()).toContain('--prompt-file');
     expect(h.getArgs()).toContain('/tmp/fake-grok-prompt.txt');
     expect(h.getArgs()).toContain('--disable-web-search');
+    expect(h.getArgs()).toContain('--model');
+    expect(h.getArgs()).toContain('grok-4.5');
     expect(h.getArgs().join(' ')).not.toContain('SENTINEL-USER-TEXT');
     // Prompt content went into the temp file.
     expect(h.getPromptContent()).toContain('SENTINEL-USER-TEXT');
@@ -105,7 +107,7 @@ describe('GrokCliProvider auth + models', () => {
       queueMicrotask(() => c.doClose(0));
       return c;
     };
-    const provider = new GrokCliProvider({ spawn });
+    const provider = new GrokCliProvider({ spawn, resolveCommand: async () => ({ command: '/trusted/grok' }) });
     const status = await provider.getAuthStatus();
     expect(status).toMatchObject({
       provider: 'grok',
@@ -122,7 +124,7 @@ describe('GrokCliProvider auth + models', () => {
       queueMicrotask(() => c.doClose(127));
       return c;
     };
-    const provider = new GrokCliProvider({ spawn });
+    const provider = new GrokCliProvider({ spawn, resolveCommand: async () => ({ command: '/trusted/grok' }) });
     const status = await provider.getAuthStatus();
     expect(status).toMatchObject({
       connected: false,
@@ -131,10 +133,9 @@ describe('GrokCliProvider auth + models', () => {
     });
     expect(status.authUnverified).toBeUndefined();
   });
-  it('lists a single default Grok CLI model', async () => {
+  it('lists the curated Grok CLI models', async () => {
     const provider = new GrokCliProvider({ spawn: () => new FakeChild() });
     const models = await provider.listModels();
-    expect(models).toHaveLength(1);
-    expect(models[0]).toMatchObject({ provider: 'grok', id: 'grok', requiresAuth: true });
+    expect(models.map((model) => model.id)).toEqual(['grok-4.5', 'grok-composer-2.5-fast']);
   });
 });

@@ -284,7 +284,38 @@ describe('mountUnifiedChat — streaming assistant', () => {
     expect(final).toBe('full answer');
     expect(parent.querySelector<HTMLElement>('.uc-assistant')!.dataset.text).toBe('full answer');
   });
+  it('preserves streamed deltas when final text is empty', () => {
+    const { parent, handle } = mount();
+    const stream = handle.beginAssistant();
+    stream.pushDelta('Hello ');
+    stream.pushDelta('world');
 
+    const final = stream.finalize('');
+    const node = parent.querySelector<HTMLElement>('.uc-assistant')!;
+    expect(final).toBe('Hello world');
+    expect(node.dataset.text).toBe('Hello world');
+    expect(node.querySelector<HTMLElement>('.uc-body')!.textContent.trim()).toBe('Hello world');
+  });
+  it('treats whitespace-only final text as absent and preserves streamed deltas', () => {
+    const { parent, handle } = mount();
+    const stream = handle.beginAssistant();
+    stream.pushDelta('Hello ');
+    stream.pushDelta('world');
+
+    const final = stream.finalize('   ');
+    expect(final).toBe('Hello world');
+    expect(parent.querySelector<HTMLElement>('.uc-assistant')!.dataset.text).toBe('Hello world');
+  });
+
+  it('treats undefined final text as absent and preserves streamed deltas', () => {
+    const { parent, handle } = mount();
+    const stream = handle.beginAssistant();
+    stream.pushDelta('Hello ');
+    stream.pushDelta('world');
+
+    expect(stream.finalize(undefined)).toBe('Hello world');
+    expect(parent.querySelector<HTMLElement>('.uc-assistant')!.dataset.text).toBe('Hello world');
+  });
   it('fail() renders an inline error and clears streaming state', () => {
     const { parent, handle } = mount();
     const stream = handle.beginAssistant();

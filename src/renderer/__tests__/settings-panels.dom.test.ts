@@ -155,6 +155,24 @@ describe('mountProviderSettingsPanel — interactions', () => {
     await Promise.resolve();
     expect(input.value).toBe('');
   });
+  it('shows Grok API-key controls while retaining its independent CLI badge', () => {
+    const { parent, handlers } = mountProviders({
+      statuses: [{
+        provider: 'grok',
+        label: 'Grok (xAI API · CLI fallback)',
+        authKind: 'api_key',
+        connected: true,
+        keyLast4: '1234',
+        cliStatus: { installed: true, authState: 'unknown', errorCode: 'grok_cli_auth_unknown' },
+      }],
+    });
+    const input = parent.querySelector<HTMLInputElement>('input[data-prov-key="grok"]');
+    expect(input).not.toBeNull();
+    expect(parent.querySelector('[data-prov-cli-status="grok"]')?.textContent).toContain('CLI status unverified');
+    input!.value = 'xai-key';
+    parent.querySelector<HTMLButtonElement>('[data-prov-action="save-key"][data-prov="grok"]')!.click();
+    expect(handlers.onSaveKey).toHaveBeenCalledWith('grok', 'xai-key');
+  });
 
   it('does not save an empty key', () => {
     const { parent, handlers } = mountProviders();
@@ -425,7 +443,10 @@ describe('openSettingsModal — accessibility', () => {
       } satisfies ProviderAuthStatus]),
     );
     try {
-      openSettingsModal({ onSetCustomModel: vi.fn() });
+      openSettingsModal({
+        onSetCustomModel: vi.fn(),
+        currentSelections: [{ provider: 'openrouter', id: 'vendor/legacy-model' }],
+      });
       await flushSettingsRender();
 
       expect(document.querySelector('.prov-error')?.textContent).toBe('We could not determine this provider’s status. Try again.');

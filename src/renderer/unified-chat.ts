@@ -317,7 +317,7 @@ export function mountUnifiedChat(parent: HTMLElement, handlers: UnifiedChatHandl
         scrollToEnd();
       },
       finalize(finalText?: string) {
-        buffer = (finalText ?? buffer).trim();
+        buffer = (finalText && finalText.trim() ? finalText : buffer).trim();
         node.dataset.text = buffer;
         renderBody(node, buffer, true);
         node.classList.remove('uc-streaming');

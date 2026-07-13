@@ -185,6 +185,7 @@ describe('mountHtmlExportWizard — HTML-only model picker', () => {
     const { host, deps } = setup({
       listHtmlModels: async () => [
         { provider: 'chatgpt', id: 'gpt-5.4-mini', label: 'GPT-5.4 mini', contextWindow: 400_000 },
+        { provider: 'chatgpt', id: 'gpt-5.6', label: 'GPT-5.6', contextWindow: 1_000_000 },
         { provider: 'chatgpt', id: 'gpt-5.4', label: 'GPT-5.4', contextWindow: 1_000_000 },
       ],
       getDefaultModel: () => ({ provider: 'chatgpt', id: 'gpt-5.4-mini' }),
@@ -197,15 +198,16 @@ describe('mountHtmlExportWizard — HTML-only model picker', () => {
     expect(select).toBeTruthy();
     expect(select!.value).toBe('chatgpt:gpt-5.4-mini');
     const optText = Array.from(select!.querySelectorAll('option')).map((o) => o.textContent);
-    expect(optText).toContain('GPT-5.4 · 1M');
+    expect(optText).toContain('GPT-5.6 · 1M');
     expect(optText).toContain('GPT-5.4 mini · 400K');
+    expect(optText).not.toContain('GPT-5.4 · 1M');
     // Pick the bigger model.
-    select!.value = 'chatgpt:gpt-5.4';
+    select!.value = 'chatgpt:gpt-5.6';
     click(host, 'generate-submit');
     await flush();
     expect(deps.aiGenerate).toHaveBeenCalledTimes(1);
     const passedModel = (deps.aiGenerate as ReturnType<typeof vi.fn>).mock.calls[0][1];
-    expect(passedModel).toEqual({ provider: 'chatgpt', id: 'gpt-5.4' });
+    expect(passedModel).toEqual({ provider: 'chatgpt', id: 'gpt-5.6' });
   });
 });
 
@@ -245,8 +247,9 @@ describe('mountHtmlExportWizard — local model context badge + small-model noti
   it('lists a local model with a context badge and warns when its context window is small', async () => {
     const { host, handle } = setup({
       listHtmlModels: async () => [
-        { provider: 'chatgpt', id: 'gpt-5.4', label: 'GPT-5.4', contextWindow: 1_000_000 },
+        { provider: 'chatgpt', id: 'gpt-5.6', label: 'GPT-5.6', contextWindow: 1_000_000 },
         { provider: 'ollama', id: 'llama3:latest', label: 'llama3:latest', contextWindow: 8_192 },
+        { provider: 'grok', id: 'grok-4.5', label: 'Grok 4.5', contextWindow: 256_000 },
       ],
       getDefaultModel: () => ({ provider: 'ollama', id: 'llama3:latest' }),
     });
@@ -259,13 +262,14 @@ describe('mountHtmlExportWizard — local model context badge + small-model noti
     expect(select!.value).toBe('ollama:llama3:latest');
     const optText = Array.from(select!.querySelectorAll('option')).map((o) => o.textContent);
     expect(optText).toContain('llama3:latest · 8K');
-    expect(optText).toContain('GPT-5.4 · 1M');
+    expect(optText).toContain('GPT-5.6 · 1M');
+    expect(optText).toContain('Grok 4.5 · 256K');
     const note = host.querySelector<HTMLElement>('[data-he-note="model"]');
     expect(note).toBeTruthy();
     expect(note!.hidden).toBe(false);
     expect(note!.textContent).toContain('he.smallContext');
     // Switching to the large cloud model hides the advisory.
-    select!.value = 'chatgpt:gpt-5.4';
+    select!.value = 'chatgpt:gpt-5.6';
     select!.dispatchEvent(new Event('change', { bubbles: true }));
     expect(host.querySelector<HTMLElement>('[data-he-note="model"]')!.hidden).toBe(true);
     expect(handle.getState().step).toBe('summary-requirement');

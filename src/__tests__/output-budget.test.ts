@@ -32,6 +32,12 @@ describe('htmlExportMaxTokens', () => {
     expect(htmlExportMaxTokens('openrouter', 'google/gemini-2.5-pro')).toBe(65_536);
     expect(htmlExportMaxTokens('openrouter', 'x-ai/grok-4')).toBe(32_000);
   });
+  it('sizes curated Grok models and retains a conservative custom-model fallback', () => {
+    expect(htmlExportMaxTokens('grok', 'grok-4.5')).toBe(8_192);
+    expect(htmlExportMaxTokens('grok', 'grok-composer-2.5-fast')).toBe(8_192);
+    expect(htmlExportMaxTokens('grok', 'grok-custom')).toBe(8_192);
+  });
+
 
   it('falls back to a safe per-provider default for unknown / custom models', () => {
     expect(htmlExportMaxTokens('claude', 'claude-some-custom')).toBe(8_192);
@@ -57,6 +63,8 @@ describe('modelContextWindowTokens', () => {
     expect(modelContextWindowTokens('openrouter', 'google/gemini-2.5-pro')).toBe(1_000_000);
     expect(modelContextWindowTokens('claude', 'claude-sonnet-4-6')).toBe(200_000);
     expect(modelContextWindowTokens('openrouter', 'x-ai/grok-4')).toBe(256_000);
+    expect(modelContextWindowTokens('grok', 'grok-4.5')).toBe(256_000);
+    expect(modelContextWindowTokens('grok', 'grok-composer-2.5-fast')).toBe(256_000);
     // Unknown/custom → provider default.
     expect(modelContextWindowTokens('claude', 'claude-future')).toBe(200_000);
     expect(modelContextWindowTokens('openrouter', 'meta/llama')).toBe(128_000);
@@ -133,9 +141,9 @@ describe('budget retention (HARD GATE — conservative verified floor, no raise)
 });
 
 describe('catalog <-> budget sync guard', () => {
-  it('every curated claude:/openrouter: id has a MODEL_MAX_OUTPUT + MODEL_CONTEXT_WINDOW entry', () => {
+  it('every curated claude:/openrouter:/grok: id has a MODEL_MAX_OUTPUT + MODEL_CONTEXT_WINDOW entry', () => {
     const keys = getCuratedModels()
-      .filter((m) => m.provider === 'claude' || m.provider === 'openrouter')
+      .filter((m) => m.provider === 'claude' || m.provider === 'openrouter' || m.provider === 'grok')
       .map((m) => `${m.provider}:${m.id}`);
     expect(keys.length).toBeGreaterThan(0);
     for (const key of keys) {
@@ -152,5 +160,9 @@ describe('catalog <-> supportsVision sync guard', () => {
     for (const m of claudeIds) {
       expect(supportsVision('claude', m.id), `supportsVision failed for ${m.id}`).toBe(true);
     }
+  });
+  it('allows only the verified Grok vision model', () => {
+    expect(supportsVision('grok', 'grok-4.5')).toBe(true);
+    expect(supportsVision('grok', 'grok-composer-2.5-fast')).toBe(false);
   });
 });

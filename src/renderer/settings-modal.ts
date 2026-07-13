@@ -32,7 +32,7 @@ const KNOWN_PROVIDER_ROWS: readonly ProviderStatusView[] = [
   { provider: 'openrouter', label: 'OpenRouter', authKind: 'api_key', connected: false },
   { provider: 'ollama', label: 'Ollama', authKind: 'local', connected: false },
   { provider: 'lmstudio', label: 'LM Studio', authKind: 'local', connected: false },
-  { provider: 'grok', label: 'Grok (CLI)', authKind: 'cli', connected: false },
+  { provider: 'grok', label: 'Grok', authKind: 'api_key', connected: false },
 ];
 
 type ProviderSnapshot = {
@@ -40,9 +40,10 @@ type ProviderSnapshot = {
   statusLoadFailed?: boolean;
   config?: { ollama: string; lmstudio: string };
   models?: ModelRef[];
+  cliOverrides?: Record<'claude' | 'grok', { path: string } | null>;
 };
 
-type ProviderSnapshotPatch = Pick<ProviderSnapshot, 'statuses' | 'statusLoadFailed' | 'config' | 'models'>;
+type ProviderSnapshotPatch = Pick<ProviderSnapshot, 'statuses' | 'statusLoadFailed' | 'config' | 'models' | 'cliOverrides'>;
 
 function reconcile(snapshot: ProviderSnapshot, patch: ProviderSnapshotPatch): ProviderSnapshot {
   return { ...snapshot, ...patch };
@@ -53,6 +54,8 @@ export type SettingsModalDeps = {
   onAfterAuthChange?: () => void;
   /** Persist a chosen provider+model selection. */
   onSetCustomModel: (provider: AiProviderId, modelId: string) => void;
+  /** Existing selections keep legacy providers manageable without exposing them to new users. */
+  currentSelections?: Array<{ provider: AiProviderId; id: string } | undefined>;
 };
 let cliOnboardingPrompted = false;
 
@@ -76,7 +79,11 @@ function localizedProviderStatusError(s: ProviderAuthStatus): string | undefined
   return s.error ? t('settings.prov.error.unknown') : undefined;
 }
 
-export function toView(s: ProviderAuthStatus, local: LocalViewContext): ProviderStatusView | null {
+export function toView(
+  s: ProviderAuthStatus,
+  local: LocalViewContext,
+  cliOverrides?: Record<'claude' | 'grok', { path: string } | null>,
+): ProviderStatusView | null {
   if (s.authKind === 'local' && (s.provider === 'ollama' || s.provider === 'lmstudio')) {
     // Local servers are discovery, not auth: render a URL row + run-server hint.
     return {
@@ -93,8 +100,25 @@ export function toView(s: ProviderAuthStatus, local: LocalViewContext): Provider
       localModelCount: local.modelCount(s.provider),
     };
   }
-  if (s.authKind === 'cli') {
-    // CLI providers (grok): status + install/login guidance row, no key/URL input.
+  if (s.provider === 'grok' && s.authKind === 'api_key') {
+    return {
+      provider: s.provider,
+      label: s.label,
+      authKind: 'api_key',
+      connected: s.connected,
+      connectionSource: s.connectionSource,
+      keyLast4: s.keyLast4,
+      error: localizedProviderStatusError(s),
+      errorCode: s.errorCode,
+      errorDetail: s.error,
+      cliStatus: s.cliStatus,
+      hint: t('settings.prov.grokApiHint'),
+      cliOverridePath: cliOverrides?.grok?.path,
+    };
+  }
+  // Kept for a stale status response during an app update; production Grok
+  // composition reports api_key plus cliStatus.
+  if (s.provider === 'grok' && s.authKind === 'cli') {
     return {
       provider: s.provider,
       label: s.label,
@@ -106,6 +130,7 @@ export function toView(s: ProviderAuthStatus, local: LocalViewContext): Provider
       error: localizedProviderStatusError(s),
       errorCode: s.errorCode,
       errorDetail: s.error,
+      cliOverridePath: cliOverrides?.grok?.path,
     };
   }
   if (s.provider !== 'chatgpt' && s.provider !== 'claude' && s.provider !== 'openrouter') return null;
@@ -124,6 +149,7 @@ export function toView(s: ProviderAuthStatus, local: LocalViewContext): Provider
     // Claude uses the local `claude` CLI first (free); the API key is an optional fallback.
     cliStatus: s.cliStatus,
     hint: s.provider === 'claude' && !s.errorCode ? t('settings.prov.claudeCliHint') : undefined,
+    cliOverridePath: s.provider === 'claude' ? cliOverrides?.claude?.path : undefined,
   };
 }
 
@@ -154,12 +180,21 @@ export function openSettingsModal(deps: SettingsModalDeps): void {
   let generation = 0;
   const snapshots = new Map<number, ProviderSnapshot>();
 
+  const hasOpenRouterManagement = (snapshot: ProviderSnapshot): boolean =>
+    snapshot.statuses?.some((status) => status.provider === 'openrouter' && status.connected) === true
+    || deps.currentSelections?.some((selection) => selection?.provider === 'openrouter') === true;
+
+  const visibleRows = (snapshot: ProviderSnapshot): readonly ProviderStatusView[] =>
+    KNOWN_PROVIDER_ROWS.filter(
+      (row) => row.provider !== 'openrouter' || hasOpenRouterManagement(snapshot),
+    );
+
   const viewsFor = (snapshot: ProviderSnapshot): ProviderStatusView[] => {
     if (!snapshot.statuses && !snapshot.statusLoadFailed) {
-      return KNOWN_PROVIDER_ROWS.map((row) => ({ ...row, loading: true }));
+      return visibleRows(snapshot).map((row) => ({ ...row, loading: true }));
     }
     if (snapshot.statusLoadFailed) {
-      return KNOWN_PROVIDER_ROWS.map((row) => ({ ...row, loading: true }));
+      return visibleRows(snapshot).map((row) => ({ ...row, loading: true }));
     }
     const local: LocalViewContext = {
       config: snapshot.config ?? {
@@ -170,10 +205,10 @@ export function openSettingsModal(deps: SettingsModalDeps): void {
     };
     const statusesByProvider = new Map(snapshot.statuses!.map((status) => [status.provider, status]));
     const statusResultWasEmpty = snapshot.statuses!.length === 0;
-    return KNOWN_PROVIDER_ROWS.map((row) => {
+    return visibleRows(snapshot).map((row) => {
       const status = statusesByProvider.get(row.provider);
       if (!status) return { ...row, loading: !statusResultWasEmpty };
-      return toView(status, local) ?? { ...row, loading: true };
+      return toView(status, local, snapshot.cliOverrides) ?? { ...row, loading: true };
     });
   };
 
@@ -195,6 +230,7 @@ export function openSettingsModal(deps: SettingsModalDeps): void {
     let statusRequest: Promise<ProviderAuthStatus[]>;
     let configRequest: Promise<{ ollama: string; lmstudio: string }>;
     let modelsRequest: Promise<ModelRef[]>;
+    let cliOverridesRequest: Promise<Record<'claude' | 'grok', { path: string } | null>>;
     try {
       statusRequest = window.api.aiProvidersStatus();
     } catch {
@@ -210,6 +246,11 @@ export function openSettingsModal(deps: SettingsModalDeps): void {
     } catch {
       modelsRequest = Promise.reject();
     }
+    try {
+      cliOverridesRequest = window.api.cliOverrides();
+    } catch {
+      cliOverridesRequest = Promise.reject();
+    }
     const statusDone = statusRequest.then(
       (statuses) => patchFromSnapshot(gen, { statuses, statusLoadFailed: false }),
       () => patchFromSnapshot(gen, { statusLoadFailed: true }),
@@ -220,6 +261,10 @@ export function openSettingsModal(deps: SettingsModalDeps): void {
     );
     void modelsRequest.then(
       (models) => patchFromSnapshot(gen, { models }),
+      () => patchFromSnapshot(gen, {}),
+    );
+    void cliOverridesRequest.then(
+      (cliOverrides) => patchFromSnapshot(gen, { cliOverrides }),
       () => patchFromSnapshot(gen, {}),
     );
     return statusDone;
@@ -243,7 +288,7 @@ export function openSettingsModal(deps: SettingsModalDeps): void {
   });
 
   provHandle = mountProviderSettingsPanel(provHost, {
-    statuses: KNOWN_PROVIDER_ROWS.map((row) => ({ ...row, loading: true })),
+    statuses: visibleRows({}).map((row) => ({ ...row, loading: true })),
     onRetryStatus: () => void loadProviders(),
     onChatgptSignIn: () =>
       openLoginModal({
@@ -288,6 +333,14 @@ export function openSettingsModal(deps: SettingsModalDeps): void {
         /* ignore */
       }
       deps.onAfterAuthChange?.();
+      await loadProviders();
+    },
+    onSelectCliOverride: async (provider) => {
+      await window.api.cliSelectOverride(provider);
+      await loadProviders();
+    },
+    onClearCliOverride: async (provider) => {
+      await window.api.cliClearOverride(provider);
       await loadProviders();
     },
   });

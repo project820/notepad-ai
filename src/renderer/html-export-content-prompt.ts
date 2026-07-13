@@ -15,6 +15,7 @@ import {
   resolveSummaryChartPolicy,
   type HtmlExportRequest,
 } from './html-export-model';
+import { HTML_EXPORT_DESIGN_KNOWLEDGE } from './html-export-design-knowledge';
 
 /** design.md is clamped so the prompt stays bounded. */
 const DESIGN_CHARS = 8000;
@@ -112,6 +113,9 @@ export function buildHtmlExportContentPrompt(
     `- summary/chart mode: ${policy.mode} (${policy.label})`,
     `  - summarization: ${policy.summarization}`,
     `  - charts: ${policy.chartPolicy}`,
+    '',
+    '=== CONTENT DESIGN KNOWLEDGE ===',
+    HTML_EXPORT_DESIGN_KNOWLEDGE,
     '',
     'CONTENT RULES:',
     '- Output ONLY the JSON object. No HTML, CSS, JS, Markdown, prose, or code fences.',

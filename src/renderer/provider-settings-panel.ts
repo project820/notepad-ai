@@ -55,6 +55,8 @@ export type ProviderStatusView = {
   hint?: string;
   /** Claude's CLI transport state, distinct from this row's API-key status. */
   cliStatus?: ProviderAuthStatus['cliStatus'];
+  /** User-approved executable path for CLI transport, if one is configured. */
+  cliOverridePath?: string;
 };
 
 export type ProviderSettingsRenderOptions = {
@@ -66,14 +68,16 @@ export type ProviderSettingsRenderOptions = {
 export type ProviderSettingsOptions = ProviderSettingsRenderOptions & {
   onChatgptSignIn: () => void;
   onChatgptSignOut: () => Promise<void> | void;
-  onSaveKey: (provider: 'claude' | 'openrouter', key: string) => Promise<void> | void;
-  onDeleteKey: (provider: 'claude' | 'openrouter') => Promise<void> | void;
+  onSaveKey: (provider: 'claude' | 'openrouter' | 'grok', key: string) => Promise<void> | void;
+  onDeleteKey: (provider: 'claude' | 'openrouter' | 'grok') => Promise<void> | void;
   onSetCustomModel: (provider: AiProviderId, modelId: string) => void;
   /** Persist a local provider's server URL (validated localhost in main). */
   onSaveLocalUrl?: (provider: 'ollama' | 'lmstudio', url: string) => Promise<void> | void;
   /** Reset a local provider's server URL to its default. */
   onResetLocalUrl?: (provider: 'ollama' | 'lmstudio') => Promise<void> | void;
   onRetryStatus?: () => void;
+  onSelectCliOverride?: (provider: 'claude' | 'grok') => Promise<void> | void;
+  onClearCliOverride?: (provider: 'claude' | 'grok') => Promise<void> | void;
 };
 
 export type ProviderSettingsHandle = {
@@ -201,7 +205,7 @@ function providerControls(s: ProviderStatusView): string {
     // subscription CLI. Guidance is shown via the error line + cliHint footer.
     return '';
   }
-  // API-key providers (claude, openrouter)
+  // API-key providers (Claude, OpenRouter, xAI/Grok).
   return `
     <input class="prov-key-input" data-prov-key="${s.provider}" type="password"${disabled}
       placeholder="${escapeHTML(t('settings.prov.apiKeyPlaceholder'))}" aria-label="${escapeHTML(`${s.label} ${t('settings.prov.apiKeyLabel')}`)}" />
@@ -221,6 +225,19 @@ function cliHint(s: ProviderStatusView): string {
     ? t('settings.prov.cliConnectedHint')
     : t('settings.prov.cliDisconnectedHint');
   return `<div class="prov-local-note">${escapeHTML(msg)}</div>`;
+}
+function cliOverrideControl(s: ProviderStatusView): string {
+  if (s.loading || (s.provider !== 'claude' && s.provider !== 'grok')) return '';
+  const disabled = s.busy ? ' disabled' : '';
+  const selected = s.cliOverridePath
+    ? `<div class="prov-local-note" data-cli-override-path="${s.provider}">${escapeHTML(s.cliOverridePath)}</div>
+       <button class="prov-btn" data-prov-action="clear-cli-override" data-prov="${s.provider}" type="button"${disabled}>${escapeHTML(t('settings.prov.cliOverrideClear'))}</button>`
+    : '';
+  return `<div class="prov-cli-override">
+    <button class="prov-btn" data-prov-action="select-cli-override" data-prov="${s.provider}" type="button"${disabled}>${escapeHTML(t('settings.prov.cliOverrideSelect'))}</button>
+    ${selected}
+    <div class="prov-cli-warning">${escapeHTML(t('settings.prov.cliOverrideWarning'))}</div>
+  </div>`;
 }
 
 /** Cloud provider footer: a custom model-ID input (mitigates catalog staleness). */
@@ -270,6 +287,7 @@ function renderProviderRowContent(s: ProviderStatusView): string {
     ${s.error ? `<div class="prov-error" role="alert">${escapeHTML(s.error)}</div>` : ''}
     ${s.errorDetail ? `<div class="prov-error-detail">${escapeHTML(s.errorDetail)}</div>` : ''}
     <div class="prov-controls">${providerControls(s)}</div>
+    ${cliOverrideControl(s)}
     ${s.hint ? `<div class="prov-local-note">${escapeHTML(s.hint)}</div>` : ''}
     ${footer}
     ${cliOnboardingCard(s)}`;
@@ -355,6 +373,10 @@ export function mountProviderSettingsPanel(
     const saved = captureFocus(parent);
     const root = parent.querySelector<HTMLElement>('.prov-root');
     if (!root) return;
+    const desiredProviders = new Set(current.statuses.map((view) => view.provider));
+    root.querySelectorAll<HTMLElement>('[data-prov-row]').forEach((row) => {
+      if (!desiredProviders.has(row.dataset.provRow as AiProviderId)) row.remove();
+    });
     const notice = renderPanelNotice(current);
     if (notice !== renderedNotice) {
       root.querySelector('.prov-load-error, .prov-zero-auth')?.remove();
@@ -395,7 +417,7 @@ export function mountProviderSettingsPanel(
     }
     if (action === 'signin') return opts.onChatgptSignIn();
     if (action === 'signout' && prov === 'chatgpt') return runRowAction(prov, opts.onChatgptSignOut);
-    if (action === 'save-key' && (prov === 'claude' || prov === 'openrouter')) {
+    if (action === 'save-key' && (prov === 'claude' || prov === 'openrouter' || prov === 'grok')) {
       const input = parent.querySelector<HTMLInputElement>(`input[data-prov-key="${prov}"]`);
       const key = input?.value.trim() ?? '';
       if (!key || !input) return;
@@ -417,7 +439,7 @@ export function mountProviderSettingsPanel(
         .finally(() => setRowBusy(prov, false));
       return;
     }
-    if (action === 'delete-key' && (prov === 'claude' || prov === 'openrouter')) {
+    if (action === 'delete-key' && (prov === 'claude' || prov === 'openrouter' || prov === 'grok')) {
       return runRowAction(prov, () => opts.onDeleteKey(prov));
     }
     if (action === 'save-url' && (prov === 'ollama' || prov === 'lmstudio')) {
@@ -428,6 +450,12 @@ export function mountProviderSettingsPanel(
     }
     if (action === 'reset-url' && (prov === 'ollama' || prov === 'lmstudio')) {
       return runRowAction(prov, () => opts.onResetLocalUrl?.(prov));
+    }
+    if (action === 'select-cli-override' && (prov === 'claude' || prov === 'grok')) {
+      return runRowAction(prov, () => opts.onSelectCliOverride?.(prov));
+    }
+    if (action === 'clear-cli-override' && (prov === 'claude' || prov === 'grok')) {
+      return runRowAction(prov, () => opts.onClearCliOverride?.(prov));
     }
     if (action === 'set-custom' && prov) {
       const input = parent.querySelector<HTMLInputElement>(`input[data-prov-custom="${prov}"]`);

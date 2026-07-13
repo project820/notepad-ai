@@ -81,6 +81,23 @@ describe('ProviderRegistry.hasAnyAuth — local is discovery, not auth', () => {
     expect(await reg.hasAnyAuth()).toBe(false);
   });
 });
+describe('ProviderRegistry model aggregation', () => {
+  it('includes models listed by Grok rather than only ChatGPT live models', async () => {
+    const grok = provider('grok', 'api_key', false);
+    grok.listModels = async () => [{
+      provider: 'grok',
+      id: 'grok-4.5',
+      label: 'Grok live',
+      humanizeEngineId: 'openai',
+      requiresAuth: true,
+    }];
+    const registry = new ProviderRegistry(noKeys, { grok }, cacheWith([]));
+
+    await expect(registry.getAvailableModels()).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ provider: 'grok', id: 'grok-4.5' }),
+    ]));
+  });
+});
 class FakeChild implements CliProcess {
   private out: Array<(chunk: string) => void> = [];
   private closeCallbacks: Array<(code: number | null) => void> = [];

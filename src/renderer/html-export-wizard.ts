@@ -33,6 +33,8 @@ import {
 } from './html-export-model';
 
 import { formatContextWindow } from '../main/ai/output-budget';
+import { applyModelDisplayPolicy } from '../main/ai/model-display-policy';
+import { isAiProviderId, type ModelRef } from '../main/ai/types';
 import { modelKey, parseModelKey } from './model-key';
 import { planSlides, type PlannedSlide } from './html-export-layout';
 import { createDomMeasure, domFontsReady } from './html-export-measure-dom';
@@ -134,7 +136,15 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
       .listHtmlModels()
       .then((ms) => {
         if (disposed) return;
-        htmlModels = Array.isArray(ms) ? ms : [];
+        const current = deps.getDefaultModel?.();
+        const currentSelection = current
+          ? typeof current === 'string'
+            ? { provider: 'chatgpt' as const, id: current }
+            : isAiProviderId(current.provider)
+              ? { provider: current.provider, id: current.id }
+              : undefined
+          : undefined;
+        htmlModels = applyModelDisplayPolicy((Array.isArray(ms) ? ms : []) as ModelRef[], { currentSelection });
         if (state.step === 'summary-requirement') render();
       })
       .catch(() => {

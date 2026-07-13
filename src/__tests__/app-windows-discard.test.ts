@@ -399,4 +399,25 @@ describe('discard close IPC waiters', () => {
     expect(rollbackTargets).toEqual([1]);
     expect(appWindows.isSessionWriteFenced('window-1')).toBe(false);
   });
+  it('preserves failed renderer discard compensation as a denied close', async () => {
+    const rollbackResults: boolean[] = [];
+    const commitQuitSession = vi.fn(async () => { throw new Error('disk full'); });
+    const { appWindows } = await setup((win, channel, payload) => {
+      if (channel === 'close:discard') {
+        electron.emitIpc('close:discard-result', win, { requestId: payload.requestId, fenced: true });
+      }
+      if (channel === 'close:consume') {
+        electron.emitIpc('close:consume-result', win, { requestId: payload.requestId, consumed: true });
+      }
+      if (channel === 'close:discard-rollback') {
+        rollbackResults.push(false);
+        electron.emitIpc('close:discard-result', win, { requestId: payload.requestId, fenced: false });
+      }
+    }, async () => 'discard', 1, () => true, commitQuitSession);
+
+    await expect(appWindows.approveAllForQuit('quit')).resolves.toBe(false);
+
+    expect(rollbackResults).toEqual([false]);
+    expect(appWindows.isSessionWriteFenced('window-1')).toBe(false);
+  });
 });

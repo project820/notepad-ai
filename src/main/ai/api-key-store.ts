@@ -1,5 +1,5 @@
 /**
- * API-key storage for BYO-key providers (Claude, OpenRouter).
+ * API-key storage for BYO-key providers (Claude, OpenRouter, xAI/Grok).
  *
  * SECURITY POLICY (locked by ralplan consensus):
  * - Keys are encrypted at rest via Electron safeStorage (Keychain) ONLY.
@@ -33,6 +33,11 @@ export type KeyStatus = {
 export function keyLast4(key: string): string {
   const trimmed = key.trim();
   return trimmed.length <= 4 ? trimmed : trimmed.slice(-4);
+}
+export const API_KEY_PROVIDERS = ['claude', 'openrouter', 'grok'] as const;
+
+function isApiKeyProvider(provider: AiProviderId): boolean {
+  return (API_KEY_PROVIDERS as readonly AiProviderId[]).includes(provider);
 }
 
 type PersistShape = Partial<Record<AiProviderId, string>>;
@@ -85,6 +90,7 @@ export class ApiKeyStore {
    * serialized so two concurrent sets cannot drop each other's key.
    */
   async setApiKey(provider: AiProviderId, key: string): Promise<{ persisted: boolean }> {
+    if (!isApiKeyProvider(provider)) throw new Error(`${provider} does not use an API key.`);
     const trimmed = key.trim();
     if (!trimmed) throw new Error('API key must not be empty.');
     if (!this.backend.isEncryptionAvailable()) {

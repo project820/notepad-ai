@@ -115,6 +115,11 @@ export function initUnifiedChatWiring(ctx: AppContext, deps: UnifiedChatWiringDe
 
   function openSettings() {
     openSettingsModal({
+      currentSelections: [
+        deps.prefs.selectedModel,
+        deps.prefs.blockSelectedModel,
+        deps.prefs.htmlModel,
+      ],
       onAfterAuthChange: () => {
         deps.invalidateModels();
         void deps.loadModelsCached(true);

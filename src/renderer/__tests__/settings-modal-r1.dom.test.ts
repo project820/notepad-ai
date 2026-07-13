@@ -67,18 +67,41 @@ let convergedProviderDom: string | undefined;
 
 
 describe('openSettingsModal R1 reconciliation', () => {
-  it('paints six stable busy skeleton rows before any IPC result and starts all resources in parallel', () => {
+  it('hides the OpenRouter skeleton for a new user while starting all resources in parallel', () => {
     const api = installApi();
     openSettingsModal({ onSetCustomModel: vi.fn() });
 
     const rows = document.querySelectorAll<HTMLElement>('[data-prov-row]');
-    expect(rows).toHaveLength(6);
-    expect([...rows].map((row) => row.dataset.provRow)).toEqual(['chatgpt', 'claude', 'openrouter', 'ollama', 'lmstudio', 'grok']);
+    expect(rows).toHaveLength(5);
+    expect([...rows].map((row) => row.dataset.provRow)).toEqual(['chatgpt', 'claude', 'ollama', 'lmstudio', 'grok']);
     expect([...rows].every((row) => row.getAttribute('aria-busy') === 'true')).toBe(true);
     expect(api.status).toBeDefined();
     expect((window.api.aiProvidersStatus as ReturnType<typeof vi.fn>)).toHaveBeenCalledOnce();
     expect((window.api.localAiGetConfig as ReturnType<typeof vi.fn>)).toHaveBeenCalledOnce();
     expect((window.api.aiModels as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(true);
+  });
+  it('keeps OpenRouter manageable when a saved key or legacy selection exists', async () => {
+    const api = installApi();
+    openSettingsModal({
+      onSetCustomModel: vi.fn(),
+      currentSelections: [{ provider: 'openrouter', id: 'openai/gpt-5.1' }],
+    });
+    expect(document.querySelector('[data-prov-row="openrouter"]')).toBeTruthy();
+
+    api.status.resolve(statuses);
+    await flush();
+    expect(document.querySelector('[data-prov-row="openrouter"]')).toBeTruthy();
+  });
+  it('reveals OpenRouter after a saved-key status arrives', async () => {
+    const api = installApi();
+    openSettingsModal({ onSetCustomModel: vi.fn() });
+    expect(document.querySelector('[data-prov-row="openrouter"]')).toBeNull();
+
+    api.status.resolve(statuses.map((status) =>
+      status.provider === 'openrouter' ? { ...status, connected: true, keyLast4: '1234' } : status,
+    ));
+    await flush();
+    expect(document.querySelector('[data-prov-row="openrouter"]')).toBeTruthy();
   });
   it('records emptyPanelFrames=0 at the synchronous first paint', () => {
     installApi();
@@ -88,7 +111,7 @@ describe('openSettingsModal R1 reconciliation', () => {
     if (document.querySelectorAll('#settings-providers [data-prov-row]').length === 0) emptyPanelFrames += 1;
 
     expect(emptyPanelFrames).toBe(0);
-    expect(document.querySelectorAll('#settings-providers [data-prov-row]')).toHaveLength(6);
+    expect(document.querySelectorAll('#settings-providers [data-prov-row]')).toHaveLength(5);
   });
 
   it('records awaitedModelsBeforePaint=false while aiModels remains pending', () => {
@@ -96,12 +119,12 @@ describe('openSettingsModal R1 reconciliation', () => {
     let awaitedModelsBeforePaint = true;
 
     openSettingsModal({ onSetCustomModel: vi.fn() });
-    if (document.querySelectorAll('#settings-providers [data-prov-row]').length === 6) {
+    if (document.querySelectorAll('#settings-providers [data-prov-row]').length === 5) {
       awaitedModelsBeforePaint = false;
     }
 
     expect(awaitedModelsBeforePaint).toBe(false);
-    expect(document.querySelectorAll('#settings-providers [data-prov-row][aria-busy="true"]')).toHaveLength(6);
+    expect(document.querySelectorAll('#settings-providers [data-prov-row][aria-busy="true"]')).toHaveLength(5);
   });
 
   it('records fullRemountCountPerAction=0 while an auth action preserves panel and row identities', async () => {

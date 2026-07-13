@@ -12,6 +12,7 @@ import { ClaudeProvider } from './claude-provider';
 import { ClaudeCliProvider } from './claude-cli-provider';
 import { FallbackProvider } from './fallback-provider';
 import type { CliSpawn } from './cli-runner';
+import type { TrustedCliResult } from './cli-trust';
 import type { AiChatEvent, AiChatRequest, AiProvider, ModelRef, ProviderAuthStatus } from './types';
 
 export class ComposedClaudeProvider implements AiProvider {
@@ -22,9 +23,9 @@ export class ComposedClaudeProvider implements AiProvider {
   private readonly fallback: FallbackProvider;
   private claudeAuthState: 'unknown' | 'succeeded' | 'auth_failed' = 'unknown';
 
-  constructor(keys: ApiKeyStore, spawn: CliSpawn) {
+  constructor(keys: ApiKeyStore, spawn: CliSpawn, resolveCommand?: () => Promise<TrustedCliResult>) {
     this.api = new ClaudeProvider(keys);
-    this.cli = new ClaudeCliProvider({ spawn });
+    this.cli = new ClaudeCliProvider({ spawn, resolveCommand });
     this.fallback = new FallbackProvider(this.cli, this.api, {
       onPrimaryError: (event) => {
         if (event.errorKind === 'auth') this.claudeAuthState = 'auth_failed';

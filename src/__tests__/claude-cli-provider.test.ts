@@ -68,7 +68,7 @@ describe('ClaudeCliProvider', () => {
     let child: FakeChild | undefined;
     let args: string[] = [];
     const spawn = (_c: string, a: string[]) => { args = a; child = new FakeChild(); return child; };
-    const provider = new ClaudeCliProvider({ spawn });
+    const provider = new ClaudeCliProvider({ spawn, resolveCommand: async () => ({ command: '/trusted/claude' }) });
     const events: AiChatEvent[] = [];
     const promise = provider.streamChat(req, (e) => events.push(e));
     return { promise, getChild: () => child!, getArgs: () => args, events };
