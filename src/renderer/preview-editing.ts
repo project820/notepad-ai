@@ -13,6 +13,8 @@ type PreviewEditingDeps = {
   onSuppressedEditorChange: (doc: string, syncPreview?: boolean, mutationAlreadyRecorded?: boolean) => void;
   tryMutateDocument: () => boolean;
   recordPreviewInput: () => boolean;
+  onPreviewSyncFailed?: () => void;
+  retryPreviewSync?: (flush: () => void) => boolean;
   onCommitPath?: (path: 'journal' | 'full') => void;
 };
 
@@ -269,6 +271,21 @@ export function initPreviewEditing(ctx: AppContext, deps: PreviewEditingDeps) {
     previewSyncTimer = null;
     return flushPreviewToSource();
   }
+  function retryPendingPreviewSync(): boolean {
+    if (!previewEditPending) return false;
+    if (deps.tryMutateDocument()) {
+      try {
+        return flushPendingPreviewToSource();
+      } catch (error) {
+        console.warn('preview sync retry failed:', error);
+        deps.onPreviewSyncFailed?.();
+        return false;
+      }
+    }
+    deps.onPreviewSyncFailed?.();
+    return deps.retryPreviewSync?.(flushPendingPreviewToSource) ?? false;
+  }
+
   // Close compensation captures and restores the debounce rather than leaving a
   // surviving renderer with a permanently cancelled preview flush.
   function pausePreviewSyncTimer(): boolean {
@@ -287,12 +304,20 @@ export function initPreviewEditing(ctx: AppContext, deps: PreviewEditingDeps) {
     previewSyncTimer = setTimeout(() => {
       previewSyncTimer = null;
       if (!ctx.editingInPreview) return;
-      flushPreviewToSource();
+      retryPendingPreviewSync();
     }, 350);
   }
 
   function beginPreviewInput(event?: Event): void {
-    if (!deps.tryMutateDocument() || (!previewEditPending && !deps.recordPreviewInput())) {
+    if (!deps.tryMutateDocument()) {
+      if (previewEditPending) {
+        retryPendingPreviewSync();
+      } else {
+        restorePreviewFromSource();
+      }
+      return;
+    }
+    if (!previewEditPending && !deps.recordPreviewInput()) {
       restorePreviewFromSource();
       return;
     }
@@ -322,7 +347,11 @@ export function initPreviewEditing(ctx: AppContext, deps: PreviewEditingDeps) {
   ctx.preview.el.addEventListener('beforeinput', (e) => {
     if (!deps.tryMutateDocument()) {
       e.preventDefault();
-      restorePreviewFromSource();
+      if (previewEditPending) {
+        retryPendingPreviewSync();
+      } else {
+        restorePreviewFromSource();
+      }
       return;
     }
     captureEdit(e as InputEvent);
@@ -345,7 +374,7 @@ export function initPreviewEditing(ctx: AppContext, deps: PreviewEditingDeps) {
         ctx.editingInPreview = false;
         if (previewSyncTimer) clearTimeout(previewSyncTimer);
         previewSyncTimer = null;
-        flushPreviewToSource();
+        retryPendingPreviewSync();
         if (previewEditPending) return;
         ctx.preview.setDoc(ctx.editor.getDoc());
       }

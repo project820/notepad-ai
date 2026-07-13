@@ -47,6 +47,7 @@ export class ComposedGrokProvider implements AiProvider {
   private cliInstalled = false;
   private cliStatusCheckedAt = 0;
   private cliStatusProbe: Promise<CliAuthProbe> | null = null;
+  private cliAuthGeneration = 0;
   private readonly hasInjectedCli: boolean;
 
   constructor(
@@ -71,6 +72,7 @@ export class ComposedGrokProvider implements AiProvider {
 
   /** Login lifecycle results update the bounded status cache until the next re-probe. */
   recordCliAuthResult(state: 'succeeded' | 'unknown' | 'auth_failed'): void {
+    this.cliAuthGeneration++;
     this.cacheCliAuthState(state, state !== 'unknown' || this.cliInstalled);
   }
 
@@ -134,11 +136,14 @@ export class ComposedGrokProvider implements AiProvider {
     if (Date.now() - this.cliStatusCheckedAt < CLI_AUTH_PROBE_CACHE_MS) {
       return { installed: this.cliInstalled, state: this.cliAuthState };
     }
+    const generation = this.cliAuthGeneration;
     this.cliStatusProbe = this.probeCliAuthStatus();
     try {
       const probe = await this.cliStatusProbe;
-      this.cacheCliAuthState(probe.state, probe.installed);
-      return probe;
+      if (generation === this.cliAuthGeneration) this.cacheCliAuthState(probe.state, probe.installed);
+      return generation === this.cliAuthGeneration
+        ? probe
+        : { installed: this.cliInstalled, state: this.cliAuthState };
     } finally {
       this.cliStatusProbe = null;
     }

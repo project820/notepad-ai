@@ -88,6 +88,21 @@ describe('document close lease and replacement lifecycle', () => {
     expect(saveFile).toHaveBeenCalledWith('/tmp/draft.md', 'preview edit');
     expect(ctx.dirty).toBe(false);
   });
+  it('retries a failed preview sync and saves the latest source instead of retaining a permanent fence', async () => {
+    const { ctx, lifecycle, saveFile, getDoc } = setup();
+    ctx.currentPath = '/tmp/draft.md';
+    ctx.dirty = true;
+    ctx.docRevision = 1;
+    lifecycle.markPreviewSyncFailed();
+
+    expect(lifecycle.retryPreviewSync(() => ctx.editor.setDoc('recovered preview edit'))).toBe(true);
+    expect(lifecycle.isSaveFenced()).toBe(false);
+
+    await expect(lifecycle.save()).resolves.toBe(1);
+    expect(getDoc()).toBe('recovered preview edit');
+    expect(saveFile).toHaveBeenCalledWith('/tmp/draft.md', 'recovered preview edit');
+    expect(ctx.dirty).toBe(false);
+  });
 
   it('cancels an armed autosave and fences future document saves on discard', async () => {
     vi.useFakeTimers();

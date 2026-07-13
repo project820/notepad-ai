@@ -27,6 +27,7 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
   let saveTail = Promise.resolve();
   let flushPendingPreview: (() => void) | null = null;
   let allowingCloseFlush = false;
+  let allowingPreviewRecovery = false;
   let quiesce: { id: string; expiry: ReturnType<typeof setTimeout> | null; autosavePending: boolean; previewPending: boolean } | null = null;
   let quiescePreview: { pause: () => boolean; resume: (wasPending: boolean) => void } | null = null;
   let previewSyncFailed = false;
@@ -51,7 +52,8 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
   }
 
   function tryMutateDocument(): boolean {
-    return allowingCloseFlush || ((!savesFenced && !previewSyncFailed) && !quiesce && !closeLease?.consumed);
+    return allowingCloseFlush || allowingPreviewRecovery ||
+      ((!savesFenced && !previewSyncFailed) && !quiesce && !closeLease?.consumed);
   }
 
   function recordDocumentMutation(): boolean {
@@ -444,6 +446,21 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
     if (!discardFenced && !quiesce) savesFenced = false;
     reconcileMutationFence();
   }
+  function retryPreviewSync(flush: () => void): boolean {
+    if (!previewSyncFailed || discardFenced || !!quiesce || closeLease?.consumed) return false;
+    try {
+      allowingPreviewRecovery = true;
+      flush();
+      markPreviewSyncRecovered();
+      return true;
+    } catch (error) {
+      console.warn('[preview] retry failed; keeping save fenced:', error);
+      markPreviewSyncFailed();
+      return false;
+    } finally {
+      allowingPreviewRecovery = false;
+    }
+  }
 
 
   function setPreviewQuiesceHooks(hooks: { pause: () => boolean; resume: (wasPending: boolean) => void }): void {
@@ -520,6 +537,7 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
     hasPreviewSyncFailure,
     markPreviewSyncFailed,
     markPreviewSyncRecovered,
+    retryPreviewSync,
     setPreviewQuiesceHooks,
     prepareCloseQuiesce,
     heartbeatCloseQuiesce,

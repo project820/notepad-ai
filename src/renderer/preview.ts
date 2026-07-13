@@ -48,14 +48,33 @@ function ownerSelector(subtype: RunTable['runs'][number]['subtype']): string {
   }
 }
 
-function bookmark(root: HTMLElement): { runId: string | null; offset: number } | null {
+export type PreviewBookmark = { runId: string | null; offset: number; path: number[] };
+
+function nodePath(owner: Node, node: Node): number[] | null {
+  const path: number[] = [];
+  let current: Node | null = node;
+  while (current && current !== owner) {
+    const parent: Node | null = current.parentNode;
+    if (!parent) return null;
+    const index = Array.prototype.indexOf.call(parent.childNodes, current) as number;
+    if (index < 0) return null;
+    path.unshift(index);
+    current = parent;
+  }
+  return current === owner ? path : null;
+}
+
+export function bookmark(root: HTMLElement): PreviewBookmark | null {
   const selection = window.getSelection();
   const anchor = selection?.rangeCount ? selection.anchorNode : null;
   if (!selection || !anchor || !root.contains(anchor)) return null;
   const owner = (anchor.nodeType === Node.ELEMENT_NODE ? anchor as Element : anchor.parentElement)?.closest('[data-run-id]');
   if (!owner) return null;
-  return { runId: owner.getAttribute('data-run-id'), offset: selection.anchorOffset };
+  const path = nodePath(owner, anchor);
+  if (!path) return null;
+  return { runId: owner.getAttribute('data-run-id'), offset: selection.anchorOffset, path };
 }
+
 function firstTextNode(node: Node): Text | null {
   for (const child of Array.from(node.childNodes)) {
     if (child.nodeType === Node.TEXT_NODE) return child as Text;
@@ -65,18 +84,26 @@ function firstTextNode(node: Node): Text | null {
   return null;
 }
 
+function nodeAtPath(owner: Node, path: readonly number[]): Node | null {
+  let node: Node = owner;
+  for (const index of path) {
+    const child = node.childNodes[index];
+    if (!child) return null;
+    node = child;
+  }
+  return node;
+}
 
-export function restoreBookmark(root: HTMLElement, value: ReturnType<typeof bookmark>): void {
+export function restoreBookmark(root: HTMLElement, value: PreviewBookmark | null): void {
   if (!value?.runId) return;
   const owner = root.querySelector<HTMLElement>(`[data-run-id="${value.runId}"]`);
   if (!owner) return;
-  const text = firstTextNode(owner);
+  const anchor = nodeAtPath(owner, value.path) ?? firstTextNode(owner) ?? owner;
   const range = document.createRange();
-  if (text) {
-    range.setStart(text, Math.min(value.offset, text.data.length));
-  } else {
-    range.setStart(owner, Math.min(value.offset, owner.childNodes.length));
-  }
+  const limit = anchor.nodeType === Node.TEXT_NODE
+    ? (anchor as Text).data.length
+    : anchor.childNodes.length;
+  range.setStart(anchor, Math.min(value.offset, limit));
   range.collapse(true);
   const selection = window.getSelection();
   selection?.removeAllRanges();

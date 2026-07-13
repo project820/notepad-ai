@@ -176,6 +176,8 @@ const {
   onSuppressedEditorChange: docLifecycle.onSuppressedEditorChange,
   tryMutateDocument: docLifecycle.tryMutateDocument,
   recordPreviewInput: docLifecycle.recordPreviewInput,
+  onPreviewSyncFailed: docLifecycle.markPreviewSyncFailed,
+  retryPreviewSync: docLifecycle.retryPreviewSync,
 });
 docLifecycle.setPreviewFlushGate(flushPendingPreviewToSource);
 docLifecycle.setPreviewQuiesceHooks({

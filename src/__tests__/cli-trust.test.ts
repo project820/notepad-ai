@@ -143,4 +143,20 @@ describe('trusted CLI override', () => {
     expect(approved).toHaveProperty('command');
     expect(await fs.readFile(marker, 'utf-8')).toBe(`${await fs.realpath((approved as { command: string }).command)}\n`);
   });
+  it('approves a NVM-style node shim using the enriched login-shell PATH', async () => {
+    const f = await fixture();
+    const node = path.join(f.root, 'node');
+    const shim = path.join(f.root, 'agy');
+    await fs.writeFile(node, '#!/bin/sh\nexec /bin/sh "$@"\n', { mode: 0o700 });
+    await fs.writeFile(shim, '#!/usr/bin/env node\necho version\n', { mode: 0o700 });
+    __resetCliSpawnPathForTests();
+    __setShellExecForTests(async () => `GJC_PATH=${f.root}`);
+    __setCliProbeForTests(() => true);
+
+    try {
+      await expect(new AtomicCliOverrideStore(f.backend).approve('agy', shim)).resolves.toHaveProperty('command');
+    } finally {
+      __resetCliSpawnPathForTests();
+    }
+  });
 });

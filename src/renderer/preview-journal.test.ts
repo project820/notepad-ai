@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from 'vitest';
 
-import { createPreview, restoreBookmark } from './preview';
+import { bookmark, createPreview, restoreBookmark } from './preview';
 
 type Golden = { source: string; edit: { runId: number; segments: string[] }; expected: string };
 const goldenModules = import.meta.glob('./__fixtures__/preview-roundtrip/*.json', { eager: true }) as Record<string, { default: Golden }>;
@@ -36,13 +36,38 @@ describe('preview source patch', () => {
     const source = '- [ ] task text';
     const preview = createPreview(document.createElement('div'));
     preview.setDoc(source);
-    const owner = preview.el.querySelector<HTMLElement>('[data-run-id="0"]')!;
-    expect(owner.querySelector('label input[type="checkbox"]')).not.toBeNull();
-
-    expect(() => restoreBookmark(preview.el, { runId: '0', offset: 4 })).not.toThrow();
+    const text = preview.el.querySelector('label')!.lastChild as Text;
+    const range = document.createRange();
+    range.setStart(text, 4);
+    range.collapse(true);
     const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+
+    const saved = bookmark(preview.el);
+    preview.setDoc(source);
+    expect(() => restoreBookmark(preview.el, saved)).not.toThrow();
     expect(selection.anchorNode?.nodeType).toBe(Node.TEXT_NODE);
-    expect(selection.anchorOffset).toBeLessThanOrEqual(selection.anchorNode?.textContent?.length ?? 0);
+    expect(selection.anchorOffset).toBe(4);
+  });
+  it('restores a caret in a later inline node without moving it to the first text node', () => {
+    const source = 'foo **bar** baz';
+    const preview = createPreview(document.createElement('div'));
+    preview.setDoc(source);
+    const text = preview.el.querySelector('strong')!.firstChild as Text;
+    const range = document.createRange();
+    range.setStart(text, 3);
+    range.collapse(true);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+
+    const saved = bookmark(preview.el);
+    preview.setDoc(source);
+    restoreBookmark(preview.el, saved);
+
+    expect(selection.anchorNode?.textContent).toBe('bar');
+    expect(selection.anchorOffset).toBe(3);
   });
   it.each([
     ['# not a heading', '\\# not a heading'],

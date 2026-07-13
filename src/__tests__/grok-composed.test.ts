@@ -58,6 +58,23 @@ function authProbeChild(output: string): CliProcess {
   });
   return child;
 }
+function delayedAuthProbeChild(): CliProcess & { complete(output: string): void } {
+  let onOutput: ((chunk: string) => void) | undefined;
+  let onClose: ((code: number | null) => void) | undefined;
+  return {
+    stdin: { write: () => {}, end: () => {}, on: () => {} },
+    stdout: { on: (_event, callback) => { onOutput = callback; } },
+    stderr: { on: () => {} },
+    on: (event, callback) => {
+      if (event === 'close') onClose = callback as (code: number | null) => void;
+    },
+    kill: () => {},
+    complete: (output) => {
+      onOutput?.(output);
+      onClose?.(0);
+    },
+  };
+}
 
 describe('ApiKeyStore Grok allowlist', () => {
   it('allows a Grok key to be stored', async () => {
@@ -156,6 +173,19 @@ describe('ComposedGrokProvider restricted transport routing', () => {
       connected: false,
       cliStatus: { installed: true, authState: 'auth_failed' },
     });
+  });
+  it('does not let an earlier status probe overwrite a confirmed logout', async () => {
+    const child = delayedAuthProbeChild();
+    const spawn = vi.fn(() => child);
+    const provider = new ComposedGrokProvider(keyStore(), spawn, async () => ({ command: '/trusted/grok' }));
+
+    const pending = provider.getAuthStatus();
+    for (let i = 0; i < 50 && spawn.mock.calls.length === 0; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+    provider.recordCliAuthResult('auth_failed');
+    child.complete('You are logged in with grok.com.\n');
+
+    await expect(pending).resolves.toMatchObject({ cliStatus: { authState: 'auth_failed' } });
+    await expect(provider.getAuthStatus()).resolves.toMatchObject({ cliStatus: { authState: 'auth_failed' } });
   });
   it('re-probes a persisted Grok CLI session in a fresh provider instance', async () => {
     const spawn = vi.fn(() => authProbeChild('You are logged in with grok.com.\n\nAvailable models:\n'));

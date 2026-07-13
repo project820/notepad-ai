@@ -69,20 +69,12 @@ async function assertSafeParents(filePath: string): Promise<void> {
     if (parent === dir) return;
   }
 }
-function minimalCliEnv(): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const key of ['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'TMPDIR']) {
-    const value = process.env[key];
-    if (typeof value === 'string') out[key] = value;
-  }
-  return out;
-}
 
 /** Approval-time liveness check: only a selected, already-validated path is executed. */
-async function verifyCliVersion(command: string): Promise<void> {
+async function verifyCliVersion(command: string, env: Record<string, string>): Promise<void> {
   const { execFile } = require('node:child_process') as typeof import('node:child_process');
   await new Promise<void>((resolve, reject) => {
-    execFile(command, ['--version'], { env: minimalCliEnv(), timeout: 5_000 }, (error) => error ? reject(error) : resolve());
+    execFile(command, ['--version'], { env, timeout: 5_000 }, (error) => error ? reject(error) : resolve());
   });
 }
 
@@ -173,7 +165,7 @@ export class AtomicCliOverrideStore implements CliOverrideStore {
       if (staged.identity.sizeBytes !== source.identity.sizeBytes || staged.identity.sha256 !== source.identity.sha256) {
         throw new Error('Trusted CLI staging artifact does not match the selected executable.');
       }
-      await verifyCliVersion(staged.identity.realpath);
+      await verifyCliVersion(staged.identity.realpath, await buildMinimalEnv());
       const next = { ...this.overrides, [cli]: { identity: source.identity, stagedPath, stagedIdentity: staged.identity } };
       await this.backend.writeFile(JSON.stringify({ version: 1, overrides: next }));
       this.overrides = next;

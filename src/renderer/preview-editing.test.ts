@@ -42,12 +42,14 @@ function setupPreviewEditing(initialDoc = 'original') {
     },
   } as unknown as AppContext;
   const htmlToMarkdown = vi.fn((html: string) => html.replace(/<[^>]+>/g, ''));
+  const onPreviewSyncFailed = vi.fn();
   const editing = initPreviewEditing(ctx, {
     htmlToMarkdown: htmlToMarkdown as never,
     t: vi.fn() as never,
     onSuppressedEditorChange: lifecycle,
     tryMutateDocument: () => mayMutate,
     recordPreviewInput,
+    onPreviewSyncFailed,
   });
 
   return {
@@ -61,6 +63,7 @@ function setupPreviewEditing(initialDoc = 'original') {
     setDoc,
     setMayMutate: (allowed: boolean) => { mayMutate = allowed; },
     setPreviewDoc,
+    onPreviewSyncFailed,
   };
 }
 
@@ -178,6 +181,21 @@ describe('initPreviewEditing close flush', () => {
     setMayMutate(true);
     expect(editing.flushPendingPreviewToSource()).toBe(true);
     expect(doc()).toBe('latest preview edit');
+  });
+  it('keeps an accepted pending edit when a fenced late input arrives', () => {
+    const { editing, previewEl, setMayMutate, setPreviewDoc, onPreviewSyncFailed } = setupPreviewEditing();
+    previewEl.innerHTML = '<p>accepted preview edit</p>';
+    previewEl.dispatchEvent(new Event('input'));
+    setMayMutate(false);
+
+    const lateInput = new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'insertText' });
+    previewEl.dispatchEvent(lateInput);
+
+    expect(lateInput.defaultPrevented).toBe(true);
+    expect(onPreviewSyncFailed).toHaveBeenCalledOnce();
+    expect(previewEl.textContent).toBe('accepted preview edit');
+    expect(setPreviewDoc).not.toHaveBeenCalled();
+    expect(() => editing.flushPendingPreviewToSource()).toThrow('preview sync is fenced while an edit is pending');
   });
 });
 describe('preview checkbox changes', () => {
