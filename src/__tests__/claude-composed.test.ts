@@ -18,17 +18,24 @@ class FakeChild implements CliProcess {
   private errCb: Array<(c: string) => void> = [];
   private closeCbs: Array<(c: number | null) => void> = [];
   private errorCbs: Array<(e: Error) => void> = [];
+  // Buffer stdout/close so a listener attached a tick later (slow/loaded CI)
+  // still receives them instead of dropping the event and hanging the probe.
+  private bufferedOut: string[] = [];
+  private bufferedClose: number | null | undefined;
   stdin = { write: (c: string) => this.stdinChunks.push(c), end: () => {} };
-  stdout = { on: (_e: 'data', cb: (c: string) => void) => { this.out.push(cb); } };
+  stdout = { on: (_e: 'data', cb: (c: string) => void) => { this.out.push(cb); this.bufferedOut.forEach((s) => cb(s)); } };
   stderr = { on: (_e: 'data', cb: (c: string) => void) => { this.errCb.push(cb); } };
   on(ev: 'error' | 'close', cb: (...a: never[]) => void) {
-    if (ev === 'close') this.closeCbs.push(cb as (c: number | null) => void);
+    if (ev === 'close') {
+      this.closeCbs.push(cb as (c: number | null) => void);
+      if (this.bufferedClose !== undefined) (cb as (c: number | null) => void)(this.bufferedClose);
+    }
     if (ev === 'error') this.errorCbs.push(cb as (e: Error) => void);
   }
   kill() { this.killed = true; }
-  emitOut(s: string) { this.out.forEach((cb) => cb(s)); }
+  emitOut(s: string) { this.bufferedOut.push(s); this.out.forEach((cb) => cb(s)); }
   emitErr(s: string) { this.errCb.forEach((cb) => cb(s)); }
-  doClose(code: number | null) { this.closeCbs.forEach((cb) => cb(code)); }
+  doClose(code: number | null) { this.bufferedClose = code; this.closeCbs.forEach((cb) => cb(code)); }
 }
 
 // No API key => the inner ClaudeProvider (API fallback) emits an auth error
@@ -133,7 +140,7 @@ describe('ComposedClaudeProvider (CLI-first + API fallback)', () => {
     const provider = new ComposedClaudeProvider(noKeyStore, spawn, trustedClaude);
 
     const pending = provider.getAuthStatus();
-    for (let i = 0; i < 50 && spawn.mock.calls.length === 0; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+    await vi.waitFor(() => expect(spawn).toHaveBeenCalled());
     provider.recordCliAuthResult('auth_failed');
     const joined = provider.getAuthStatus();
     status.emitOut('{"loggedIn":true}');

@@ -61,17 +61,31 @@ function authProbeChild(output: string): CliProcess {
 function delayedAuthProbeChild(): CliProcess & { complete(output: string): void } {
   let onOutput: ((chunk: string) => void) | undefined;
   let onClose: ((code: number | null) => void) | undefined;
+  let completed = false;
+  let bufferedOutput: string | undefined;
+  // Buffer completion so listener-attach vs compl() ordering can never race:
+  // on slow/loaded CI runners the probe may wire stdout/close listeners a tick
+  // after complete() fires, which would otherwise drop the event and hang.
+  const flush = () => {
+    if (!completed) return;
+    if (onOutput && bufferedOutput !== undefined) {
+      onOutput(bufferedOutput);
+      bufferedOutput = undefined;
+    }
+    onClose?.(0);
+  };
   return {
     stdin: { write: () => {}, end: () => {}, on: () => {} },
-    stdout: { on: (_event, callback) => { onOutput = callback; } },
+    stdout: { on: (_event, callback) => { onOutput = callback; flush(); } },
     stderr: { on: () => {} },
     on: (event, callback) => {
-      if (event === 'close') onClose = callback as (code: number | null) => void;
+      if (event === 'close') { onClose = callback as (code: number | null) => void; flush(); }
     },
     kill: () => {},
     complete: (output) => {
-      onOutput?.(output);
-      onClose?.(0);
+      completed = true;
+      bufferedOutput = output;
+      flush();
     },
   };
 }
@@ -180,7 +194,7 @@ describe('ComposedGrokProvider restricted transport routing', () => {
     const provider = new ComposedGrokProvider(keyStore(), spawn, async () => ({ command: '/trusted/grok' }));
 
     const pending = provider.getAuthStatus();
-    for (let i = 0; i < 50 && spawn.mock.calls.length === 0; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+    await vi.waitFor(() => expect(spawn).toHaveBeenCalled());
     provider.recordCliAuthResult('auth_failed');
     const joined = provider.getAuthStatus();
     child.complete('You are logged in with grok.com.\n');
