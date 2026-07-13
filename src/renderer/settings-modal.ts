@@ -271,10 +271,13 @@ export function openSettingsModal(deps: SettingsModalDeps): void {
   };
 
   let releaseFocusTrap: (() => void) | null = null;
+  let releaseSubscriptionProgress: (() => void) | null = null;
   const close = () => {
     generation += 1;
     releaseFocusTrap?.();
     releaseFocusTrap = null;
+    releaseSubscriptionProgress?.();
+    releaseSubscriptionProgress = null;
     provHandle?.destroy();
     root.remove();
   };
@@ -343,7 +346,24 @@ export function openSettingsModal(deps: SettingsModalDeps): void {
       await window.api.cliClearOverride(provider);
       await loadProviders();
     },
+    onSubscriptionLogin: (provider) => window.api.subscriptionLogin(provider),
+    onSubscriptionLogout: async (provider) => {
+      await window.api.subscriptionLogout(provider);
+      deps.onAfterAuthChange?.();
+      await loadProviders();
+    },
+    onSubscriptionCode: (provider, code) => window.api.subscriptionSubmitLoginCode(provider, code),
+    onSubscriptionCancel: (provider) => window.api.subscriptionCancelLogin(provider),
   });
+  if (typeof window.api?.onSubscriptionLoginProgress === 'function') {
+    releaseSubscriptionProgress = window.api.onSubscriptionLoginProgress((update) => {
+      provHandle?.setSubscriptionProgress(update);
+      if (update.kind === 'success' || update.kind === 'error' || update.kind === 'cancelled') {
+        deps.onAfterAuthChange?.();
+        void loadProviders();
+      }
+    });
+  }
   mountMdHandlerSection(mdHandlerHost);
   void loadProviders();
 }

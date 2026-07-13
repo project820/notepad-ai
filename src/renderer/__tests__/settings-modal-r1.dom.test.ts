@@ -190,6 +190,9 @@ describe('openSettingsModal R1 reconciliation', () => {
 
     api.status.resolve(statuses);
     await flush();
+    const advanced = document.querySelector<HTMLDetailsElement>('details[data-prov-advanced="claude"]')!;
+    advanced.open = true;
+    advanced.dispatchEvent(new Event('toggle', { bubbles: true }));
     const input = document.querySelector<HTMLInputElement>('input[data-prov-key="claude"]')!;
     input.value = 'typed key';
     input.focus();
@@ -219,6 +222,9 @@ describe('openSettingsModal R1 reconciliation', () => {
       onSetCustomModel: vi.fn(),
     });
     const row = parent.querySelector<HTMLElement>('[data-prov-row="claude"]')!;
+    const advanced = parent.querySelector<HTMLDetailsElement>('details[data-prov-advanced="claude"]')!;
+    advanced.open = true;
+    advanced.dispatchEvent(new Event('toggle', { bubbles: true }));
     const input = parent.querySelector<HTMLInputElement>('input[data-prov-key="claude"]')!;
     input.value = 'preserve me';
     input.focus();

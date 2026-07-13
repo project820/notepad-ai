@@ -123,6 +123,7 @@ export function buildHtmlExportContentPrompt(
     '- Preserve critical facts, numbers, names, quotes, and code per the summary mode. The original document is the source of truth; the HTML is a readable, summarized/visualized view.',
     '- Convert data-bearing tables/series into chart blocks per the chart policy; keep tables when a chart would lose fidelity.',
     '- Group related content into sections with optional kicker/title.',
+    '- Let design.md guide hierarchy and grouping: preserve its signature cues through kickers, section headers, repeated cards, and restrained callouts only when those structures improve comprehension. Keep a single dominant claim per slide and a readable lead plus predictable sections in scroll.',
   ];
 
   if (freeRequirement) {

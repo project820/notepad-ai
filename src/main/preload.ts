@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { AiProviderErrorKind, AiProviderId, ModelRef, ProviderAuthStatus, ReasoningEffort } from './ai/types';
 import type { FileTreeEntry } from '../shared/file-types';
-import type { AuthSnapshot, LoginUpdate } from '../shared/auth-protocol';
+import type { AuthSnapshot, LoginUpdate, SubscriptionLoginUpdate, SubscriptionProvider } from '../shared/auth-protocol';
 
 type OpenedFile = {
   filePath: string | null;
@@ -109,6 +109,19 @@ const api = {
     const listener = (_e: unknown, u: LoginUpdate) => cb(u);
     ipcRenderer.on('auth:login-update', listener);
     return () => ipcRenderer.removeListener('auth:login-update', listener);
+  },
+  // Subscription CLI login (Claude / Grok)
+  subscriptionLogin: (provider: SubscriptionProvider): Promise<void> => ipcRenderer.invoke('auth:provider-login', provider),
+  subscriptionSubmitLoginCode: (provider: SubscriptionProvider, code: string): Promise<void> =>
+    ipcRenderer.invoke('auth:provider-submit-code', { provider, code }),
+  subscriptionCancelLogin: (provider: SubscriptionProvider): Promise<void> =>
+    ipcRenderer.invoke('auth:provider-cancel-login', provider),
+  subscriptionLogout: (provider: SubscriptionProvider): Promise<void> =>
+    ipcRenderer.invoke('auth:provider-logout', provider),
+  onSubscriptionLoginProgress: (cb: (u: SubscriptionLoginUpdate) => void): (() => void) => {
+    const listener = (_e: unknown, u: SubscriptionLoginUpdate) => cb(u);
+    ipcRenderer.on('auth:provider-login-update', listener);
+    return () => ipcRenderer.removeListener('auth:provider-login-update', listener);
   },
 
   // AI Chat — streaming

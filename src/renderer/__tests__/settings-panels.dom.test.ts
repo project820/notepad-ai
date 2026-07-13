@@ -138,6 +138,11 @@ function mountProviders(over: Partial<Parameters<typeof mountProviderSettingsPan
   mountProviderSettingsPanel(parent, handlers);
   return { parent, handlers };
 }
+function openAdvanced(parent: HTMLElement, provider: 'claude' | 'grok'): void {
+  const details = parent.querySelector<HTMLDetailsElement>(`details[data-prov-advanced="${provider}"]`)!;
+  details.open = true;
+  details.dispatchEvent(new Event('toggle', { bubbles: true }));
+}
 
 describe('mountProviderSettingsPanel — interactions', () => {
   it('ChatGPT sign-out fires when connected', () => {
@@ -148,6 +153,7 @@ describe('mountProviderSettingsPanel — interactions', () => {
 
   it('saves a Claude API key from its input and clears the field after a successful save', async () => {
     const { parent, handlers } = mountProviders();
+    openAdvanced(parent, 'claude');
     const input = parent.querySelector<HTMLInputElement>('input[data-prov-key="claude"]')!;
     input.value = 'sk-claude-key';
     parent.querySelector<HTMLButtonElement>('[data-prov-action="save-key"][data-prov="claude"]')!.click();
@@ -166,6 +172,7 @@ describe('mountProviderSettingsPanel — interactions', () => {
         cliStatus: { installed: true, authState: 'unknown', errorCode: 'grok_cli_auth_unknown' },
       }],
     });
+    openAdvanced(parent, 'grok');
     const input = parent.querySelector<HTMLInputElement>('input[data-prov-key="grok"]');
     expect(input).not.toBeNull();
     expect(parent.querySelector('[data-prov-cli-status="grok"]')?.textContent).toContain('CLI status unverified');
@@ -183,6 +190,7 @@ describe('mountProviderSettingsPanel — interactions', () => {
     const { parent } = mountProviders({
       onSaveKey: vi.fn(() => Promise.reject(new Error('fsync failed'))),
     });
+    openAdvanced(parent, 'claude');
     const input = parent.querySelector<HTMLInputElement>('input[data-prov-key="claude"]')!;
     input.value = 'sk-claude-key';
     parent.querySelector<HTMLButtonElement>('[data-prov-action="save-key"][data-prov="claude"]')!.click();

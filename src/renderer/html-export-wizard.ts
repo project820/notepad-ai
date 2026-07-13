@@ -15,12 +15,14 @@
 import {
   htmlExportReducer,
   initialHtmlExportState,
+  resolvePurposeConfig,
   type HtmlExportEvent,
   type HtmlExportState,
   type HtmlPurpose,
   type Density,
   type ReadableWidth,
 } from './html-export-state';
+
 import {
   buildHtmlExportContentPrompt,
 } from './html-export-content-prompt';
@@ -370,16 +372,25 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
       const summaryChartMode = state.summaryChartMode ?? DEFAULT_SUMMARY_MODE;
       const freeRequirement = state.freeRequirement ?? '';
       const theme = parseDesignTheme(designMd);
-      const themeCss = toCssVariables(theme);
+      const presentation = resolvePurposeConfig({
+        purpose: state.purpose,
+        customPurpose: state.customPurpose,
+        density: state.density,
+        readableWidth: state.readableWidth,
+        interactive: state.interactive,
+      });
+      const themeCss = toCssVariables(theme, presentation);
       const componentCss = themeComponentClasses(theme);
       const checklist = evaluateDesignChecklist({ designMd, theme, css: `${themeCss}\n${componentCss}` });
+
 
       let plan: readonly PlannedSlide[] | undefined;
       if (layout === 'slides') {
         const res = await planSlides({
           model,
           orientation,
-          measure: createDomMeasure({ doc: document, styleCss: buildExportStyle(theme, orientation, layout) }),
+          measure: createDomMeasure({ doc: document, styleCss: buildExportStyle(theme, orientation, layout, presentation) }),
+
           fontsReady: domFontsReady(document),
         });
         if (disposed) return;
@@ -403,6 +414,7 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
         freeRequirement,
         checklist,
         plan,
+        presentation,
       });
       const verdict = validateSelfContainedHtml(html);
       // Structural allowlist pass (G006): the regex denylist above plus a DOM

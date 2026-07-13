@@ -99,6 +99,12 @@ export type DesignTheme = {
 };
 
 export type ChecklistItem = { id: string; label: string; ok: boolean; detail: string };
+/** User-selected presentation controls. They override design tone where applicable. */
+export type HtmlExportPresentation = {
+  density?: 'compact' | 'normal' | 'roomy';
+  readableWidth?: 'narrow' | 'normal' | 'wide';
+};
+
 export type ChecklistResult = { passed: boolean; items: ChecklistItem[] };
 
 // ---------------------------------------------------------------------------
@@ -600,8 +606,31 @@ export function parseDesignTheme(designMd: string): DesignTheme {
 // toCssVariables
 // ---------------------------------------------------------------------------
 
-function densityFactor(d: DesignDensity): number {
-  return d === 'compact' ? 0.6 : d === 'spacious' ? 1 : 0.8;
+function densityFactor(density: DesignDensity, presentation?: HtmlExportPresentation): number {
+  const userDensity = presentation?.density;
+  if (userDensity === 'compact') return 0.6;
+  if (userDensity === 'normal') return 0.8;
+  if (userDensity === 'roomy') return 1;
+  return density === 'compact' ? 0.6 : density === 'spacious' ? 1 : 0.8;
+}
+
+function readableWidth(width: HtmlExportPresentation['readableWidth']): string {
+  if (width === 'narrow') return 'clamp(640px, 72vw, 860px)';
+  if (width === 'wide') return 'clamp(820px, 88vw, 1280px)';
+  return 'clamp(720px, 80vw, 1040px)';
+}
+
+function resolvedShadow(theme: DesignTheme): string {
+  if (theme.shadows.length) return theme.shadows[0];
+  if (theme.tone.dark) return '0 8px 24px rgba(0, 0, 0, 0.32)';
+  if (theme.tone.contrast === 'high') return '0 2px 0 rgba(24, 24, 27, 0.18)';
+  return '0 8px 24px rgba(24, 24, 27, 0.12)';
+}
+
+function headingUsesAccent(theme: DesignTheme): boolean {
+  const bgContrast = contrastRatio(theme.colors.accent, theme.colors.bg);
+  const surfaceContrast = contrastRatio(theme.colors.accent, theme.colors.surface);
+  return bgContrast !== null && surfaceContrast !== null && bgContrast >= HEADING_ACCENT_CONTRAST_MIN && surfaceContrast >= HEADING_ACCENT_CONTRAST_MIN;
 }
 
 function toneRadius(theme: DesignTheme): number {
@@ -623,12 +652,15 @@ function dividerWidth(theme: DesignTheme): number {
  * emitted here — never `width`/`height` declarations — so this can never cause
  * slide overflow. Identical theme → identical string.
  */
-export function toCssVariables(theme: DesignTheme): string {
+export function toCssVariables(theme: DesignTheme, presentation?: HtmlExportPresentation): string {
   const c = theme.colors;
   const t = theme.type;
-  const rhythm = Math.round(clamp(theme.spacing.rhythm * densityFactor(theme.tone.density), RHYTHM_MIN, RHYTHM_MAX));
+  const rhythm = Math.round(clamp(theme.spacing.rhythm * densityFactor(theme.tone.density, presentation), RHYTHM_MIN, RHYTHM_MAX));
   const radius = toneRadius(theme);
   const bw = dividerWidth(theme);
+  const headingWeight = theme.tone.contrast === 'high' ? Math.min(900, t.titleWeight + 100) : t.titleWeight;
+  const headingTracking = theme.tone.contrast === 'high' ? '-0.02em' : theme.tone.contrast === 'low' ? '0.01em' : '0';
+  const headingColor = headingUsesAccent(theme) ? c.accent : c.ink;
 
   const out: string[] = [];
   out.push(':root {');
@@ -641,12 +673,17 @@ export function toCssVariables(theme: DesignTheme): string {
   out.push(`  --he-border: ${c.border};`);
   out.push(`  --he-accent: ${c.accent};`);
   out.push(`  --he-on-accent: ${c.onAccent};`);
+  out.push(`  --he-accent-tint: color-mix(in srgb, ${c.accent} 12%, ${c.surface});`);
+  out.push(`  --he-heading-color: ${headingColor};`);
+  out.push(`  --he-shadow: ${resolvedShadow(theme)};`);
   out.push('  /* type scale */');
   out.push(`  --he-title-size: ${cssNum(t.titleSize)}px;`);
   out.push(`  --he-heading-size: ${cssNum(t.headingSize)}px;`);
   out.push(`  --he-body-size: ${cssNum(t.bodySize)}px;`);
   out.push(`  --he-caption-size: ${cssNum(t.captionSize)}px;`);
   out.push(`  --he-title-weight: ${cssNum(t.titleWeight)};`);
+  out.push(`  --he-heading-weight: ${cssNum(headingWeight)};`);
+  out.push(`  --he-heading-tracking: ${headingTracking};`);
   out.push(`  --he-body-weight: ${cssNum(t.bodyWeight)};`);
   out.push(`  --he-line-height: ${cssNum(t.lineHeight)};`);
   out.push('  /* spacing scale */');
@@ -656,6 +693,8 @@ export function toCssVariables(theme: DesignTheme): string {
   out.push(`  --he-rhythm: ${cssNum(rhythm)}px;`);
   out.push(`  --he-rhythm-sm: ${cssNum(Math.round(rhythm / 2))}px;`);
   out.push(`  --he-rhythm-lg: ${cssNum(Math.round(rhythm * 1.5))}px;`);
+  out.push(`  --he-component-padding: ${cssNum(Math.round(rhythm / 3))}px;`);
+  out.push(`  --he-readable-width: ${readableWidth(presentation?.readableWidth)};`);
   out.push('  /* shape + tone */');
   out.push(`  --he-radius: ${cssNum(radius)}px;`);
   out.push(`  --he-radius-sm: ${cssNum(theme.radii.sm)}px;`);
@@ -666,6 +705,7 @@ export function toCssVariables(theme: DesignTheme): string {
   out.push('}');
   return out.join('\n');
 }
+
 
 // ---------------------------------------------------------------------------
 // themeComponentClasses
@@ -678,30 +718,30 @@ export function toCssVariables(theme: DesignTheme): string {
  * containment-safe and cannot overflow a slide.
  */
 export function themeComponentClasses(theme: DesignTheme): string {
-  // `theme` is accepted for symmetry + future tone-specific tweaks; the classes
-  // are fully variable-driven so the output stays deterministic.
-  void theme;
+  const dividerStyle = theme.tone.divider === 'none' ? 'none' : theme.borders.style;
+  const kickerWeight = theme.tone.contrast === 'high' ? 700 : 600;
   return [
     '.he-kicker {',
     '  display: inline-block;',
     '  font-size: var(--he-caption-size);',
-    '  font-weight: 600;',
-    '  letter-spacing: 0.08em;',
+    `  font-weight: ${kickerWeight};`,
+    '  letter-spacing: var(--he-heading-tracking);',
     '  text-transform: uppercase;',
     '  color: var(--he-muted);',
     '  margin-bottom: var(--he-rhythm-sm);',
     '}',
     '.he-divider {',
     '  border: 0;',
-    '  border-top: var(--he-border-width) solid var(--he-border);',
+    `  border-top: var(--he-border-width) ${dividerStyle} var(--he-border);`,
     '  margin: var(--he-rhythm-sm) 0;',
     '  max-width: 100%;',
     '}',
     '.he-section-header {',
     '  font-size: var(--he-heading-size);',
-    '  font-weight: var(--he-title-weight);',
+    '  font-weight: var(--he-heading-weight);',
+    '  letter-spacing: var(--he-heading-tracking);',
     '  line-height: var(--he-line-height);',
-    '  color: var(--he-ink);',
+    '  color: var(--he-heading-color);',
     '  margin-bottom: var(--he-rhythm-sm);',
     '  max-width: 100%;',
     '}',
@@ -710,16 +750,19 @@ export function themeComponentClasses(theme: DesignTheme): string {
     '  color: var(--he-body);',
     '  border: var(--he-border-width) solid var(--he-border);',
     '  border-radius: var(--he-radius);',
-    '  padding: var(--he-space-3, 16px);',
+    '  box-shadow: var(--he-shadow);',
+    '  padding: var(--he-component-padding);',
     '  max-width: 100%;',
     '  box-sizing: border-box;',
     '}',
     '.he-callout {',
     '  background: var(--he-surface);',
+    '  background: var(--he-accent-tint);',
     '  color: var(--he-body);',
     '  border-left: 3px solid var(--he-accent);',
     '  border-radius: var(--he-radius-sm);',
-    '  padding: var(--he-space-3, 16px);',
+    '  box-shadow: var(--he-shadow);',
+    '  padding: var(--he-component-padding);',
     '  max-width: 100%;',
     '  box-sizing: border-box;',
     '}',
@@ -753,9 +796,12 @@ const SIGNATURE_CLASS: Record<keyof DesignSignature, string> = {
   footerCounter: '.he-footer-counter',
 };
 
-// AA normal-text contrast for body, UI-component contrast for the accent chip.
+// AA normal-text contrast for body, UI-component contrast for the accent chip,
+// and accent-colored headings against every surface they can occupy.
 const BODY_CONTRAST_MIN = 4.5;
 const ACCENT_CONTRAST_MIN = 3;
+const HEADING_ACCENT_CONTRAST_MIN = 4.5;
+
 
 // A slide is at most this big; a fixed px width/height beyond it overflows.
 const SLIDE_MAX_W = 1280;
@@ -832,8 +878,31 @@ export function evaluateDesignChecklist(args: {
         ? `unmapped vars: ${varsMapped.join(', ')}`
         : `body/bg ${bodyContrast ?? '?'} (≥${BODY_CONTRAST_MIN}), on-accent/accent ${accentContrast ?? '?'} (≥${ACCENT_CONTRAST_MIN})`,
   });
+  // 3 — heading accent is usable on both canvas and component surfaces, or falls back to ink.
+  const headingUsesThemeAccent = headingUsesAccent(theme);
+  const headingColor = headingUsesThemeAccent ? theme.colors.accent : theme.colors.ink;
+  const headingColorMapped = css.includes(`--he-heading-color: ${headingColor};`);
+  const headingBgContrast = contrastRatio(theme.colors.accent, theme.colors.bg);
+  const headingSurfaceContrast = contrastRatio(theme.colors.accent, theme.colors.surface);
+  const headingContrastOk =
+    headingColorMapped &&
+    (!headingUsesThemeAccent ||
+      (headingBgContrast !== null &&
+        headingSurfaceContrast !== null &&
+        headingBgContrast >= HEADING_ACCENT_CONTRAST_MIN &&
+        headingSurfaceContrast >= HEADING_ACCENT_CONTRAST_MIN));
+  items.push({
+    id: 'heading-accent-contrast',
+    label: 'Heading accent contrast or ink fallback',
+    ok: headingContrastOk,
+    detail: headingUsesThemeAccent
+      ? `accent/bg ${headingBgContrast ?? '?'} and accent/surface ${headingSurfaceContrast ?? '?'} (≥${HEADING_ACCENT_CONTRAST_MIN})`
+      : `ink fallback (accent/bg ${headingBgContrast ?? '?'}, accent/surface ${headingSurfaceContrast ?? '?'})`,
+  });
 
-  // 3 — type scale applied to title/heading/body/caption.
+
+  // 4 — type scale applied to title/heading/body/caption.
+
   const typeVars = ['--he-title-size', '--he-heading-size', '--he-body-size', '--he-caption-size'];
   const missingType = typeVars.filter((v) => !css.includes(v));
   const monotonic =
@@ -850,7 +919,8 @@ export function evaluateDesignChecklist(args: {
       : `${theme.type.titleSize}/${theme.type.headingSize}/${theme.type.bodySize}/${theme.type.captionSize}px${monotonic ? '' : ' (not monotonic)'}`,
   });
 
-  // 4 — spacing scale applied.
+  // 5 — spacing scale applied.
+
   const spacingOk = /--he-space-1\b/.test(css) && css.includes('--he-rhythm');
   items.push({
     id: 'spacing-scale',
@@ -859,7 +929,8 @@ export function evaluateDesignChecklist(args: {
     detail: spacingOk ? `unit ${theme.spacing.unit}px, rhythm ${theme.spacing.rhythm}px` : 'missing --he-space-*/--he-rhythm',
   });
 
-  // 5 — required signature elements present when design.md mentions them.
+  // 6 — required signature elements present when design.md mentions them.
+
   const sig = theme.signature;
   const required = (Object.keys(SIGNATURE_CLASS) as (keyof DesignSignature)[]).filter((k) => sig[k]);
   const missingSig = required.filter((k) => !css.includes(SIGNATURE_CLASS[k]));
@@ -875,7 +946,8 @@ export function evaluateDesignChecklist(args: {
         : 'none mentioned',
   });
 
-  // 6 — tone traits mapped to concrete vars/classes.
+  // 7 — tone traits mapped to concrete vars/classes.
+
   const toneVars = ['--he-radius', '--he-rhythm', '--he-border-width'];
   const missingTone = toneVars.filter((v) => !css.includes(v));
   const toneOk = missingTone.length === 0;
@@ -888,7 +960,8 @@ export function evaluateDesignChecklist(args: {
       : `missing vars: ${missingTone.join(', ')}`,
   });
 
-  // 7 — no theme rule can cause overflow (no oversize fixed px dims).
+  // 8 — no theme rule can cause overflow (no oversize fixed px dims).
+
   const overflow = findOverflowDims(css);
   const overflowOk = overflow.length === 0;
   items.push({
@@ -898,7 +971,7 @@ export function evaluateDesignChecklist(args: {
     detail: overflowOk ? 'no fixed oversize dimensions' : `offending: ${overflow.join(', ')}`,
   });
 
-  // 8 — no external fonts/assets referenced.
+  // 9 — no external fonts/assets referenced.
   const external = findExternalAssets(css);
   const externalOk = external.length === 0;
   items.push({

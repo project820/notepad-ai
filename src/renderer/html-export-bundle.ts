@@ -14,8 +14,9 @@
 
 import type { ContentModel, DesignSource, SummaryChartMode } from './html-export-model';
 import type { LayoutKind, Orientation } from './html-export-state';
-import type { ChecklistResult, DesignTheme } from './html-export-theme';
+import type { ChecklistResult, DesignTheme, HtmlExportPresentation } from './html-export-theme';
 import { stableHash, themeComponentClasses, toCssVariables } from './html-export-theme';
+
 import { renderContent } from './html-export-renderer';
 import type { PlannedSlide } from './html-export-layout';
 import { sha256Base64 } from './sha256';
@@ -58,6 +59,9 @@ export type BundleArgs = {
   plan?: readonly PlannedSlide[];
   /** Inject a fixed timestamp; omit for a deterministic (timestamp-free) document. */
   generatedAt?: string;
+  /** User presentation controls, resolved from purpose defaults plus explicit wizard knobs. */
+  presentation?: HtmlExportPresentation;
+
 };
 
 export type BundleResult = { html: string; manifest: ExportManifest };
@@ -75,8 +79,9 @@ const COMMON_CSS = [
   // scrollbar at narrow widths (hard containment failure). overflow-wrap/word-break
   // inherit, so this covers every title/heading/paragraph/list/cell descendant.
   '.he-doc{overflow-wrap:break-word;word-break:break-word;}',
-  '.he-doc-title{font-size:var(--he-title-size);font-weight:var(--he-title-weight);color:var(--he-ink);line-height:var(--he-line-height);margin:0 0 var(--he-rhythm);}',
-  '.he-heading{color:var(--he-ink);line-height:var(--he-line-height);margin:var(--he-rhythm) 0 var(--he-rhythm-sm);}',
+  '.he-doc-title{font-size:var(--he-title-size);font-weight:var(--he-title-weight);color:var(--he-heading-color,var(--he-ink));line-height:var(--he-line-height);margin:0 0 var(--he-rhythm);}',
+  '.he-heading{color:var(--he-heading-color,var(--he-ink));line-height:var(--he-line-height);margin:var(--he-rhythm) 0 var(--he-rhythm-sm);}',
+
   '.he-paragraph{margin:0 0 var(--he-rhythm-sm);max-width:100%;}',
   '.he-list{margin:0 0 var(--he-rhythm-sm);padding-left:1.4em;}',
   '.he-quote{margin:0 0 var(--he-rhythm-sm);padding-left:var(--he-space-3,16px);border-left:3px solid var(--he-accent);color:var(--he-muted);}',
@@ -116,19 +121,19 @@ const SLIDES_CSS = [
   // (letterbox), so the engine's per-slide plan — computed for THIS canvas — is
   // honored at any window size/orientation without page scroll or clipping.
   '.he-slides{position:fixed;left:50%;top:50%;width:var(--he-canvas-w,1280px);height:var(--he-canvas-h,720px);overflow:hidden;transform:translate(-50%,-50%);transform-origin:center center;}',
-  // Vertically CENTER slide content so a sparse slide shows balanced whitespace
-  // (not an ~80% empty bottom). Containment is unaffected: the engine guarantees
-  // content height <= safe area, so centered content always fits with margin.
-  '.he-slides .slide.active{width:100%;height:100%;padding:var(--he-rhythm);overflow:hidden;align-items:stretch;justify-content:center;gap:var(--he-rhythm-sm);}',
+  // Keep sparse slides anchored to the safe area's top edge rather than floating
+  // in the center of the canvas. The planner still owns containment and scale.
+  '.he-slides .slide.active{width:100%;height:100%;padding:var(--he-rhythm);overflow:hidden;align-items:stretch;justify-content:flex-start;gap:var(--he-rhythm-sm);}',
   // The scale box: the runtime sizes `.he-scale-host` to the slide's SCALED
-  // footprint so flex centering positions it exactly; the scaler carries the
-  // engine's uniform transform (origin top-left, matching the measurement).
-  '.he-scale-host{position:relative;align-self:center;max-width:100%;max-height:100%;}',
+  // footprint. Top alignment keeps the scaled content's first line at the safe
+  // area edge while the scaler carries the engine's uniform transform.
+  '.he-scale-host{position:relative;align-self:flex-start;max-width:100%;max-height:100%;}',
   // flow-root contains child block margins so the runtime's sizeActive() reads a
   // footprint that includes them (matching the containment-gate measurement).
   '.he-scaler{transform-origin:top left;display:flow-root;}',
   '.he-slide-nav{position:fixed;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;gap:var(--he-rhythm-sm);padding:var(--he-rhythm-sm);}',
-  '.he-nav-btn{background:var(--he-surface);color:var(--he-ink);border:var(--he-border-width) solid var(--he-border);border-radius:var(--he-radius-sm);cursor:pointer;}',
+  '.he-nav-btn{min-width:48px;min-height:48px;padding:8px 14px;background:var(--he-surface);color:var(--he-ink);font-size:16px;border:var(--he-border-width) solid var(--he-border);border-radius:var(--he-radius-sm);cursor:pointer;}',
+
 ].join('');
 
 function baseLayoutCss(layout: LayoutKind): string {
@@ -153,9 +158,16 @@ function orientationVars(orientation: Orientation): string {
  * the shipped document — otherwise the engine would measure UNSTYLED DOM and
  * compute a wrong pagination/scale plan.
  */
-export function buildExportStyle(theme: DesignTheme, orientation: Orientation, layout: LayoutKind): string {
+export function buildExportStyle(
+  theme: DesignTheme,
+  orientation: Orientation,
+  layout: LayoutKind,
+  presentation?: HtmlExportPresentation,
+): string {
+
   return [
-    toCssVariables(theme),
+    toCssVariables(theme, presentation),
+
     themeComponentClasses(theme),
     orientationVars(orientation),
     baseLayoutCss(layout),
@@ -227,8 +239,9 @@ function embedManifest(manifest: ExportManifest): string {
 export function bundleHtml(args: BundleArgs): BundleResult {
   // Theme CSS is ALWAYS derived from the trusted, deterministic theme — callers
   // can no longer inject arbitrary themeCss/componentCss into the export (G006).
-  const themeCss = toCssVariables(args.theme);
+  const themeCss = toCssVariables(args.theme, args.presentation);
   const componentCss = themeComponentClasses(args.theme);
+
 
   const minScale =
     args.plan && args.plan.length

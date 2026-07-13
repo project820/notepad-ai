@@ -35,6 +35,10 @@ export class ComposedClaudeProvider implements AiProvider {
       },
     });
   }
+  /** Login lifecycle evidence is process-local; it is deliberately not persisted. */
+  recordCliAuthResult(state: 'succeeded' | 'unknown'): void {
+    this.claudeAuthState = state;
+  }
 
   async getAuthStatus(): Promise<ProviderAuthStatus> {
     const [apiStatus, installed] = await Promise.all([

@@ -1,5 +1,5 @@
 import type { AiProviderId, ModelRef, ProviderAuthStatus, ReasoningEffort } from '../main/ai/types';
-import type { AuthSnapshot, LoginUpdate } from '../shared/auth-protocol';
+import type { AuthSnapshot, LoginUpdate, SubscriptionLoginUpdate, SubscriptionProvider } from '../shared/auth-protocol';
 import type { FileTreeEntry } from '../shared/file-types';
 
 type ProjectWizardSaveApprovedDraftInput = {
@@ -77,6 +77,11 @@ export type Api = {
   aiHasAnyAuth: () => Promise<boolean>;
   aiSetApiKey: (provider: AiProviderId, key: string) => Promise<{ persisted: boolean }>;
   aiDeleteProviderKey: (provider: AiProviderId) => Promise<void>;
+  subscriptionLogin: (provider: SubscriptionProvider) => Promise<void>;
+  subscriptionSubmitLoginCode: (provider: SubscriptionProvider, code: string) => Promise<void>;
+  subscriptionCancelLogin: (provider: SubscriptionProvider) => Promise<void>;
+  subscriptionLogout: (provider: SubscriptionProvider) => Promise<void>;
+  onSubscriptionLoginProgress: (cb: (u: SubscriptionLoginUpdate) => void) => () => void;
   localAiGetConfig: () => Promise<{ ollama: string; lmstudio: string }>;
   localAiSetConfig: (partial: { ollama?: string; lmstudio?: string }) => Promise<{ ollama: string; lmstudio: string }>;
   cliOverrides: () => Promise<Record<'claude' | 'grok', { path: string } | null>>;

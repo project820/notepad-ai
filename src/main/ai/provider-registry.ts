@@ -121,6 +121,11 @@ export class ProviderRegistry {
   getProvider(id: AiProviderId): AiProvider | undefined {
     return this.providers[id];
   }
+  /** Records a locally observed subscription CLI result without changing API-key state. */
+  recordCliAuthResult(provider: 'claude' | 'grok', state: 'succeeded' | 'unknown'): void {
+    const target = this.providers[provider] as { recordCliAuthResult?: (next: 'succeeded' | 'unknown') => void } | undefined;
+    target?.recordCliAuthResult?.(state);
+  }
 
   async getAuthStatuses(): Promise<ProviderAuthStatus[]> {
     const providers = Object.values(this.providers).filter((p): p is AiProvider => p != null);

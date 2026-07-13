@@ -49,6 +49,10 @@ export class ComposedGrokProvider implements AiProvider {
       shouldFallback: (event) => event.errorKind === 'auth' || event.errorKind === 'network',
     });
   }
+  /** Login lifecycle evidence is process-local; it is deliberately not persisted. */
+  recordCliAuthResult(state: 'succeeded' | 'unknown'): void {
+    this.cliAuthState = state;
+  }
 
   private async streamCli(req: AiChatRequest, onEvent: (event: AiChatEvent) => void): Promise<void> {
     await this.cli.streamChat(req, (event) => {

@@ -16,6 +16,7 @@ import { isAllowedExternalUrl } from './safe-external';
 import { checkForUpdate } from './update-check';
 import { abortChatsForWebContents, registerAiIpc } from './ipc/ai-ipc';
 import { registerAuthIpc } from './ipc/auth-ipc';
+import { registerProviderAuthIpc } from './ipc/provider-auth-ipc';
 import { registerFileIpc } from './ipc/file-ipc';
 import { registerHtmlExportIpc } from './ipc/html-export-ipc';
 import { registerOsIpc } from './ipc/os-ipc';
@@ -71,6 +72,7 @@ const windows = createAppWindows({
 registerFileIpc({ registry, fileGrants, identityFs: nodeIdentityFs, saveMutex, backend: documentAtomicBackend, windowFromRecord: windows.windowFromRecord, openFilePath: windows.openFilePath });
 registerAuthIpc({ getRegistry });
 registerAiIpc({ getRegistry });
+registerProviderAuthIpc({ getRegistry });
 registerWizardIpc({ fileGrants, projectWizardRoots, identityFs: nodeIdentityFs });
 registerSessionIpc({ registry, sinkFor: windows.sinkFor, isSessionWriteFenced: windows.isSessionWriteFenced });
 registerConvertIpc({ converterHost });

@@ -232,6 +232,11 @@ async function run() {
             splits: verdict.splits,
             minScale: typeof verdict.minScale === 'number' ? Number(verdict.minScale.toFixed(3)) : null,
             ok,
+            navMinWidth: typeof verdict.navMinWidth === 'number' ? Number(verdict.navMinWidth.toFixed(1)) : null,
+            navMinHeight: typeof verdict.navMinHeight === 'number' ? Number(verdict.navMinHeight.toFixed(1)) : null,
+            maxTopOffset: typeof verdict.maxTopOffset === 'number' ? Number(verdict.maxTopOffset.toFixed(1)) : null,
+            readingWidthRatio: typeof verdict.readingWidthRatio === 'number' ? Number(verdict.readingWidthRatio.toFixed(3)) : null,
+
             failures,
           };
           rows.push(row);
@@ -267,7 +272,8 @@ async function run() {
     const status = r.ok ? 'PASS' : 'FAIL';
     log(
       `[${status}] ${r.fixture.padEnd(15)} ${r.layout.padEnd(6)} ${r.orientation.padEnd(10)} ${r.viewport.padEnd(18)} ` +
-        `slides=${String(r.slides).padStart(3)} splits=${String(r.splits ?? '-').padStart(3)} minScale=${r.minScale ?? '-'}`,
+        `slides=${String(r.slides).padStart(3)} splits=${String(r.splits ?? '-').padStart(3)} minScale=${r.minScale ?? '-'} ` +
+        `nav=${r.navMinWidth ?? '-'}×${r.navMinHeight ?? '-'} topOffset=${r.maxTopOffset ?? '-'} fill=${r.readingWidthRatio ?? '-'}`,
     );
     for (const f of r.failures) log(`        ↳ ${f}`);
   }

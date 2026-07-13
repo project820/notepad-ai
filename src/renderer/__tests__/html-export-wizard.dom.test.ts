@@ -324,6 +324,26 @@ describe('mountHtmlExportWizard — purpose/density/etc are demoted to an option
     expect(host.querySelector('[data-he-field="readable-width"]')).toBeTruthy();
     expect(host.querySelector('[data-he-field="interactive"]')).toBeTruthy();
   });
+  it('passes detail density and readable-width selections through to saved HTML', async () => {
+    let savedHtml = '';
+    const { host } = setup({
+      saveHtml: vi.fn(async ({ html }) => {
+        savedHtml = html;
+        return { saved: true, filePath: '/tmp/export.html' };
+      }),
+    });
+    toSummary(host);
+    click(host, 'mode-detail');
+    setField(host, 'density', 'roomy');
+    setField(host, 'readable-width', 'wide');
+    click(host, 'generate-submit');
+    await flush();
+    click(host, 'save-html');
+    await flush();
+
+    expect(savedHtml).toContain('--he-readable-width: clamp(820px, 88vw, 1280px);');
+    expect(savedHtml).toContain('--he-rhythm: 48px;');
+  });
 });
 
 describe('mountHtmlExportWizard — getdesign list rows', () => {

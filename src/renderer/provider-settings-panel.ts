@@ -23,6 +23,7 @@
 import { t } from './i18n';
 import type { AiProviderId, AuthKind, ProviderAuthStatus, ProviderAuthStatusCode } from '../main/ai/types';
 import { isProviderAuthAttemptable } from '../shared/provider-auth-status';
+import type { SubscriptionLoginUpdate } from '../shared/auth-protocol';
 
 export type ProviderStatusView = {
   provider: AiProviderId;
@@ -57,6 +58,8 @@ export type ProviderStatusView = {
   cliStatus?: ProviderAuthStatus['cliStatus'];
   /** User-approved executable path for CLI transport, if one is configured. */
   cliOverridePath?: string;
+  /** Ephemeral progress for an in-app subscription CLI login. */
+  loginUpdate?: SubscriptionLoginUpdate;
 };
 
 export type ProviderSettingsRenderOptions = {
@@ -78,6 +81,10 @@ export type ProviderSettingsOptions = ProviderSettingsRenderOptions & {
   onRetryStatus?: () => void;
   onSelectCliOverride?: (provider: 'claude' | 'grok') => Promise<void> | void;
   onClearCliOverride?: (provider: 'claude' | 'grok') => Promise<void> | void;
+  onSubscriptionLogin?: (provider: 'claude' | 'grok') => Promise<void> | void;
+  onSubscriptionLogout?: (provider: 'claude' | 'grok') => Promise<void> | void;
+  onSubscriptionCode?: (provider: 'claude', code: string) => Promise<void> | void;
+  onSubscriptionCancel?: (provider: 'claude' | 'grok') => Promise<void> | void;
 };
 
 export type ProviderSettingsHandle = {
@@ -85,6 +92,7 @@ export type ProviderSettingsHandle = {
   patch: (opts: ProviderSettingsRenderOptions) => void;
   /** Marks one row busy while retaining every other row's DOM identity. */
   setRowBusy: (provider: AiProviderId, busy: boolean) => void;
+  setSubscriptionProgress: (update: SubscriptionLoginUpdate) => void;
   destroy: () => void;
 };
 
@@ -200,12 +208,17 @@ function providerControls(s: ProviderStatusView): string {
       ? `<button class="prov-btn" data-prov-action="signout" type="button"${disabled}>${escapeHTML(t('settings.prov.signOut'))}</button>`
       : `<button class="prov-btn prov-btn-primary" data-prov-action="signin" type="button"${disabled}>${escapeHTML(t('settings.prov.signIn'))}</button>`;
   }
-  if (s.authKind === 'cli') {
-    // CLI providers (grok) have no key/URL to configure — they use the local
-    // subscription CLI. Guidance is shown via the error line + cliHint footer.
-    return '';
+  if (s.provider === 'claude' || s.provider === 'grok') {
+    const cliConnected = s.cliStatus?.authState === 'succeeded';
+    return cliConnected
+      ? `<button class="prov-btn" data-prov-action="subscription-logout" data-prov="${s.provider}" type="button"${disabled}>${escapeHTML(t('settings.prov.signOut'))}</button>`
+      : `${s.loginUpdate?.kind === 'awaiting-code'
+        ? `<input class="prov-key-input" data-prov-login-code="claude" type="text" placeholder="${escapeHTML(t('settings.prov.pasteClaudeCode'))}" />
+           <button class="prov-btn prov-btn-primary" data-prov-action="subscription-code" data-prov="claude" type="button">${escapeHTML(t('settings.prov.submitCode'))}</button>`
+        : `<button class="prov-btn prov-btn-primary" data-prov-action="subscription-login" data-prov="${s.provider}" type="button"${disabled}>${escapeHTML(t('settings.prov.subscriptionLogin'))}</button>`}
+         ${s.loginUpdate && s.loginUpdate.kind !== 'success' && s.loginUpdate.kind !== 'error' ? `<button class="prov-btn" data-prov-action="subscription-cancel" data-prov="${s.provider}" type="button">${escapeHTML(t('settings.prov.cancelLogin'))}</button>` : ''}`;
   }
-  // API-key providers (Claude, OpenRouter, xAI/Grok).
+  if (s.authKind === 'cli') return '';
   return `
     <input class="prov-key-input" data-prov-key="${s.provider}" type="password"${disabled}
       placeholder="${escapeHTML(t('settings.prov.apiKeyPlaceholder'))}" aria-label="${escapeHTML(`${s.label} ${t('settings.prov.apiKeyLabel')}`)}" />
@@ -239,6 +252,22 @@ function cliOverrideControl(s: ProviderStatusView): string {
     <div class="prov-cli-warning">${escapeHTML(t('settings.prov.cliOverrideWarning'))}</div>
   </div>`;
 }
+function advancedControl(s: ProviderStatusView): string {
+  if (s.loading || (s.provider !== 'claude' && s.provider !== 'grok')) return '';
+  return `<details class="prov-advanced" data-prov-advanced="${s.provider}">
+    <summary>${escapeHTML(t('settings.prov.advancedOptions'))}</summary>
+  </details>`;
+}
+
+function advancedBody(s: ProviderStatusView): string {
+  const disabled = s.busy ? ' disabled' : '';
+  const key = `<input class="prov-key-input" data-prov-key="${s.provider}" type="password"${disabled}
+    placeholder="${escapeHTML(t('settings.prov.apiKeyPlaceholder'))}" aria-label="${escapeHTML(`${s.label} ${t('settings.prov.apiKeyLabel')}`)}" />
+    <button class="prov-btn prov-btn-primary" data-prov-action="save-key" data-prov="${s.provider}" type="button"${disabled}>${escapeHTML(t('settings.prov.saveKey'))}</button>
+    <button class="prov-btn" data-prov-action="delete-key" data-prov="${s.provider}" type="button"${s.connected && !s.busy ? '' : ' disabled'}>${escapeHTML(t('settings.prov.removeKey'))}</button>`;
+  return `<div class="prov-advanced-body">${key}${cliOverrideControl(s)}</div>`;
+}
+
 
 /** Cloud provider footer: a custom model-ID input (mitigates catalog staleness). */
 function customModelControl(s: ProviderStatusView): string {
@@ -287,7 +316,7 @@ function renderProviderRowContent(s: ProviderStatusView): string {
     ${s.error ? `<div class="prov-error" role="alert">${escapeHTML(s.error)}</div>` : ''}
     ${s.errorDetail ? `<div class="prov-error-detail">${escapeHTML(s.errorDetail)}</div>` : ''}
     <div class="prov-controls">${providerControls(s)}</div>
-    ${cliOverrideControl(s)}
+    ${advancedControl(s)}
     ${s.hint ? `<div class="prov-local-note">${escapeHTML(s.hint)}</div>` : ''}
     ${footer}
     ${cliOnboardingCard(s)}`;
@@ -343,14 +372,30 @@ export function mountProviderSettingsPanel(
 ): ProviderSettingsHandle {
   let current: ProviderSettingsRenderOptions = { statuses: opts.statuses ?? [], loadError: opts.loadError };
   const busyProviders = new Set<AiProviderId>();
+  const loginUpdates = new Map<'claude' | 'grok', SubscriptionLoginUpdate>();
   parent.innerHTML = renderProviderSettingsPanel(current);
   let renderedNotice = renderPanelNotice(current);
   const effective = (view: ProviderStatusView): ProviderStatusView => ({
     ...view,
     busy: busyProviders.has(view.provider),
+    ...(view.provider === 'claude' || view.provider === 'grok'
+      ? { loginUpdate: loginUpdates.get(view.provider) }
+      : {}),
   });
+  const restoreAdvanced = (root: HTMLElement, providers: ReadonlySet<string>) => {
+    for (const provider of providers) {
+      if (provider !== 'claude' && provider !== 'grok') continue;
+      const details = root.querySelector<HTMLDetailsElement>(`details[data-prov-advanced="${provider}"]`);
+      const view = current.statuses.find((candidate) => candidate.provider === provider);
+      if (details && view) {
+        details.open = true;
+        details.insertAdjacentHTML('beforeend', advancedBody(effective(view)));
+      }
+    }
+  };
   const patchRows = (providers?: ReadonlySet<AiProviderId>) => {
     const saved = captureFocus(parent);
+    const openAdvanced = new Set([...parent.querySelectorAll<HTMLDetailsElement>('details[data-prov-advanced][open]')].map((details) => details.dataset.provAdvanced ?? ''));
     const root = parent.querySelector<HTMLElement>('.prov-root');
     if (!root) return;
     for (const view of current.statuses) {
@@ -366,6 +411,7 @@ export function mountProviderSettingsPanel(
       if (row.innerHTML.trim() !== content.trim()) row.innerHTML = content;
       if (row.getAttribute('aria-busy') !== busy) row.setAttribute('aria-busy', busy);
     }
+    restoreAdvanced(root, openAdvanced);
     restoreFocus(parent, saved);
   };
   const patch = (next: ProviderSettingsRenderOptions) => {
@@ -439,6 +485,20 @@ export function mountProviderSettingsPanel(
         .finally(() => setRowBusy(prov, false));
       return;
     }
+    if (action === 'subscription-login' && (prov === 'claude' || prov === 'grok')) {
+      return runRowAction(prov, () => opts.onSubscriptionLogin?.(prov));
+    }
+    if (action === 'subscription-logout' && (prov === 'claude' || prov === 'grok')) {
+      return runRowAction(prov, () => opts.onSubscriptionLogout?.(prov));
+    }
+    if (action === 'subscription-cancel' && (prov === 'claude' || prov === 'grok')) {
+      return runRowAction(prov, () => opts.onSubscriptionCancel?.(prov));
+    }
+    if (action === 'subscription-code' && prov === 'claude') {
+      const input = parent.querySelector<HTMLInputElement>('input[data-prov-login-code="claude"]');
+      if (input?.value.trim()) return runRowAction(prov, () => opts.onSubscriptionCode?.(prov, input.value));
+      return;
+    }
     if (action === 'delete-key' && (prov === 'claude' || prov === 'openrouter' || prov === 'grok')) {
       return runRowAction(prov, () => opts.onDeleteKey(prov));
     }
@@ -463,11 +523,28 @@ export function mountProviderSettingsPanel(
       if (id) opts.onSetCustomModel(prov, id);
     }
   };
+  const onToggle = (e: Event) => {
+    const details = e.target instanceof HTMLDetailsElement ? e.target : null;
+    const provider = details?.dataset.provAdvanced;
+    if (!details || (provider !== 'claude' && provider !== 'grok')) return;
+    if (!details.open) {
+      details.querySelector('.prov-advanced-body')?.remove();
+      return;
+    }
+    const view = current.statuses.find((candidate) => candidate.provider === provider);
+    if (view && !details.querySelector('.prov-advanced-body')) details.insertAdjacentHTML('beforeend', advancedBody(effective(view)));
+  };
+  parent.addEventListener('toggle', onToggle, true);
   parent.addEventListener('click', onClick);
   return {
     patch,
     setRowBusy,
+    setSubscriptionProgress: (update) => {
+      loginUpdates.set(update.provider, update);
+      patchRows(new Set([update.provider]));
+    },
     destroy: () => {
+      parent.removeEventListener('toggle', onToggle, true);
       parent.removeEventListener('click', onClick);
       parent.innerHTML = '';
     },

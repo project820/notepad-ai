@@ -122,6 +122,14 @@ async function assertSlides(md: string, opts: CellOpts) {
   if (!root) {
     return { ok: false, failures: ['no [data-he-reflow-root] in document'], slideCount: plan.slides.length, minScale: plan.diagnostics.minScale, splits: plan.diagnostics.splits, sectionCount: model.sections.length };
   }
+  const navButtons = Array.from(document.querySelectorAll('.he-nav-btn')) as HTMLElement[];
+  const navMinWidth = navButtons.length ? Math.min(...navButtons.map((button) => button.getBoundingClientRect().width)) : 0;
+  const navMinHeight = navButtons.length ? Math.min(...navButtons.map((button) => button.getBoundingClientRect().height)) : 0;
+  if (navMinWidth < 44 - TOL || navMinHeight < 44 - TOL) {
+    failures.push(`navigation controls below 44px (${navMinWidth.toFixed(1)}×${navMinHeight.toFixed(1)})`);
+  }
+  let maxTopOffset = 0;
+
   // Strip the bundle's per-section slides; we render the PLANNED deck instead,
   // reusing the SHIPPED slide CSS so the harness layout cannot drift from what
   // users actually get.
@@ -192,6 +200,12 @@ async function assertSlides(md: string, opts: CellOpts) {
     const safeTop = sr.top + (parseFloat(cs.paddingTop) || 0);
     const safeRight = sr.right - (parseFloat(cs.paddingRight) || 0);
     const safeBottom = sr.bottom - (parseFloat(cs.paddingBottom) || 0);
+    const topOffset = inner.getBoundingClientRect().top - safeTop;
+    maxTopOffset = Math.max(maxTopOffset, topOffset);
+    if (topOffset > TOL) {
+      failures.push(`slide ${idx}: content drifts ${topOffset.toFixed(1)}px below safe-area top`);
+    }
+
 
     // (1) scale floor respected.
     if (slide.scale < MIN_SCALE - 1e-9) failures.push(`slide ${idx}: scale ${slide.scale.toFixed(3)} < MIN_SCALE ${MIN_SCALE.toFixed(3)}`);
@@ -260,6 +274,10 @@ async function assertSlides(md: string, opts: CellOpts) {
     minScale: plan.diagnostics.minScale,
     splits: plan.diagnostics.splits,
     sectionCount: model.sections.length,
+    navMinWidth,
+    navMinHeight,
+    maxTopOffset,
+
   };
 }
 
@@ -282,6 +300,12 @@ async function assertScroll(md: string, opts: CellOpts) {
   const body = document.body;
   const pageW = Math.max(de.scrollWidth, body.scrollWidth);
   if (pageW > vw + TOL) failures.push(`page scrolls horizontally (${pageW} > ${vw})`);
+  const scrollRoot = document.querySelector('.he-scroll') as HTMLElement | null;
+  const readingWidthRatio = scrollRoot ? scrollRoot.getBoundingClientRect().width / vw : 0;
+  if (readingWidthRatio < 0.7) {
+    failures.push(`reading column underfills viewport (${readingWidthRatio.toFixed(3)} < 0.700)`);
+  }
+
 
   const selector = [
     '.he-scroll .he-doc-title',
@@ -312,6 +336,7 @@ async function assertScroll(md: string, opts: CellOpts) {
     contentW: scroll.contentW,
     contentH: scroll.contentH,
     safeW: scroll.safeW,
+    readingWidthRatio,
   };
 }
 

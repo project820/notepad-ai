@@ -34,3 +34,14 @@ export type LoginUpdate =
   | { kind: 'usercode'; userCode: string; verificationUri: string }
   | { kind: 'success'; auth: AuthSnapshot }
   | { kind: 'error'; code: LoginErrorCode; detail?: string };
+
+/** Subscription CLI providers supported by the in-app login flow. */
+export type SubscriptionProvider = 'claude' | 'grok';
+
+/** Renderer-safe progress from a local subscription CLI login. */
+export type SubscriptionLoginUpdate =
+  | { kind: 'opened-url'; provider: SubscriptionProvider; url: string; code?: string }
+  | { kind: 'awaiting-code'; provider: 'claude' }
+  | { kind: 'success'; provider: SubscriptionProvider }
+  | { kind: 'error'; provider: SubscriptionProvider; code: 'cli_unavailable' | 'invalid_login_url' | 'login_failed' | 'timeout'; detail?: string }
+  | { kind: 'cancelled'; provider: SubscriptionProvider };

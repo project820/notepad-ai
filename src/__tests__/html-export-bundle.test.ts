@@ -82,6 +82,25 @@ describe('bundleHtml — single self-contained document', () => {
     expect(html).toContain('.slide.active{display:flex');
     expect(html).toContain('--he-canvas-w'); // orientation-derived var
   });
+  it('wires readable-width and density presentation options into emitted CSS', () => {
+    const narrow = bundle({ layout: 'scroll', presentation: { readableWidth: 'narrow', density: 'compact' } }).html;
+    const wide = bundle({ layout: 'scroll', presentation: { readableWidth: 'wide', density: 'roomy' } }).html;
+
+    expect(narrow).toContain('--he-readable-width: clamp(640px, 72vw, 860px);');
+    expect(wide).toContain('--he-readable-width: clamp(820px, 88vw, 1280px);');
+    expect(narrow.match(/--he-rhythm: (\d+)px;/)?.[1]).not.toBe(wide.match(/--he-rhythm: (\d+)px;/)?.[1]);
+  });
+
+  it('anchors slides at the top and makes navigation controls touch-safe', () => {
+    const { html } = bundle();
+
+    expect(html).toContain('justify-content:flex-start');
+    expect(html).toContain('align-self:flex-start');
+    expect(html).toContain('min-width:48px');
+    expect(html).toContain('min-height:48px');
+    expect(html).toContain('padding:8px 14px');
+    expect(html).toContain('font-size:16px');
+  });
 
   it('embeds the manifest JSON with every required field, correct', () => {
     const { html, manifest } = bundle();

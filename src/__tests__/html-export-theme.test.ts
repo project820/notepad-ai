@@ -177,6 +177,18 @@ describe('toCssVariables — required --he-* vars + determinism', () => {
       expect(css).toContain(v);
     }
   });
+  it('emits presentation-readable width and makes every density selection observable', () => {
+    const narrow = toCssVariables(theme, { readableWidth: 'narrow', density: 'compact' });
+    const normal = toCssVariables(theme, { readableWidth: 'normal', density: 'normal' });
+    const wide = toCssVariables(theme, { readableWidth: 'wide', density: 'roomy' });
+
+    expect(narrow).toContain('--he-readable-width: clamp(640px, 72vw, 860px);');
+    expect(normal).toContain('--he-readable-width: clamp(720px, 80vw, 1040px);');
+    expect(wide).toContain('--he-readable-width: clamp(820px, 88vw, 1280px);');
+    expect(narrow.match(/--he-rhythm: (\d+)px;/)?.[1]).not.toBe(normal.match(/--he-rhythm: (\d+)px;/)?.[1]);
+    expect(normal.match(/--he-rhythm: (\d+)px;/)?.[1]).not.toBe(wide.match(/--he-rhythm: (\d+)px;/)?.[1]);
+  });
+
 
   it('binds variables to the extracted palette + sizes', () => {
     expect(css).toContain('--he-bg: #f8f5ef;');
@@ -221,13 +233,27 @@ describe('themeComponentClasses', () => {
     expect(classes).toContain('max-width: 100%');
     expect(/(?:^|[\s;{])(?:width|height)\s*:\s*\d+px/.test(classes)).toBe(false);
   });
+  it('consumes tone tokens for shadows, tint, and heading hierarchy', () => {
+    const highContrast = parseDesignTheme('bold, brutalist.\nbackground: #ffffff\nsurface: #ffffff\naccent: #111111');
+    const soft = parseDesignTheme('minimal, warm.\nbackground: #ffffff\nsurface: #ffffff\naccent: #111111');
+    const highCss = `${toCssVariables(highContrast)}\n${themeComponentClasses(highContrast)}`;
+    const softCss = `${toCssVariables(soft)}\n${themeComponentClasses(soft)}`;
+
+    expect(highCss).toContain('--he-shadow:');
+    expect(highCss).toContain('--he-accent-tint:');
+    expect(highCss).toContain('box-shadow: var(--he-shadow);');
+    expect(highCss).toContain('color: var(--he-heading-color);');
+    expect(highCss).not.toBe(softCss);
+  });
+
 });
 
 describe('evaluateDesignChecklist', () => {
   it('passes for a compliant design.md', () => {
     const theme = parseDesignTheme(SAMPLE);
     const res = evaluateDesignChecklist({ designMd: SAMPLE, theme, css: compliantCss(theme) });
-    expect(res.items).toHaveLength(8);
+    expect(res.items).toHaveLength(9);
+
     expect(res.passed).toBe(true);
     for (const i of res.items) expect(i.ok).toBe(true);
   });
@@ -263,6 +289,25 @@ describe('evaluateDesignChecklist', () => {
     const res = evaluateDesignChecklist({ designMd: LOW, theme, css: compliantCss(theme) });
     expect(res.passed).toBe(false);
     expect(item(res.items, 'palette-contrast').ok).toBe(false);
+  });
+  it('falls back to ink when accent text lacks canvas or surface contrast', () => {
+    const LOW_HEADING = [
+      'colors:',
+      '  background: #ffffff',
+      '  surface: #fefefe',
+      '  ink: #18181b',
+      '  body: #3f3f46',
+      '  primary: #eeeeee',
+      '  on-primary: #111111',
+      '',
+    ].join('\n');
+    const theme = parseDesignTheme(LOW_HEADING);
+    const css = compliantCss(theme);
+    const res = evaluateDesignChecklist({ designMd: LOW_HEADING, theme, css });
+
+    expect(css).toContain('--he-heading-color: #18181b;');
+    expect(item(res.items, 'heading-accent-contrast').ok).toBe(true);
+    expect(item(res.items, 'heading-accent-contrast').detail).toContain('ink fallback');
   });
 
   it('FAILS when a theme rule introduces a fixed oversize dimension', () => {

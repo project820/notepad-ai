@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest';
+// @vitest-environment happy-dom
+import { describe, expect, it, vi } from 'vitest';
 
 import {
+  mountProviderSettingsPanel,
   renderProviderSettingsPanel,
   type ProviderStatusView,
 } from '../provider-settings-panel';
@@ -38,10 +40,30 @@ describe('renderProviderSettingsPanel', () => {
     expect(chatgptRow).not.toContain('data-prov-key="chatgpt"');
   });
 
-  it('renders API-key inputs for Claude and OpenRouter', () => {
+  it('makes subscription login primary while keeping Claude API-key access in lazy advanced options', () => {
     const html = renderProviderSettingsPanel({ statuses: allOff });
-    expect(html).toContain('data-prov-key="claude"');
+    expect(html).toContain('data-prov-action="subscription-login" data-prov="claude"');
+    expect(html).toContain('data-prov-advanced="claude"');
+    expect(html).not.toContain('data-prov-key="claude"');
+    // OpenRouter remains a direct API-key integration.
     expect(html).toContain('data-prov-key="openrouter"');
+
+    const parent = document.createElement('div');
+    mountProviderSettingsPanel(parent, {
+      statuses: connected,
+      onChatgptSignIn: vi.fn(),
+      onChatgptSignOut: vi.fn(),
+      onSaveKey: vi.fn(),
+      onDeleteKey: vi.fn(),
+      onSetCustomModel: vi.fn(),
+    });
+    const advanced = parent.querySelector<HTMLDetailsElement>('details[data-prov-advanced="claude"]')!;
+    advanced.open = true;
+    advanced.dispatchEvent(new Event('toggle', { bubbles: true }));
+
+    // A legacy saved-key holder can still reach the API-key field through Advanced options.
+    expect(parent.querySelector('[data-prov-key="claude"]')).not.toBeNull();
+    expect(parent.textContent).toContain('••••1234');
   });
 
   it('shows only the last 4 chars of a saved key, never the full key', () => {
@@ -146,16 +168,31 @@ describe('renderProviderSettingsPanel — local providers (G003)', () => {
     expect(renderProviderSettingsPanel({ statuses })).toContain('No AI provider connected');
   });
 
-  it('keeps cloud rows (API key + custom model) intact alongside local rows (no regression)', () => {
+  it('keeps cloud custom-model and lazy API-key access intact alongside local rows (no regression)', () => {
     const statuses: ProviderStatusView[] = [
-      { provider: 'claude', label: 'Claude (API key)', authKind: 'api_key', connected: false },
+      { provider: 'claude', label: 'Claude (API key)', authKind: 'api_key', connected: true, keyLast4: '1234' },
       { provider: 'ollama', label: 'Ollama', authKind: 'local', connected: true, localModelCount: 0 },
     ];
-    const html = renderProviderSettingsPanel({ statuses });
-    expect(html).toContain('data-prov-key="claude"');
-    expect(html).toContain('data-prov-custom="claude"');
+    const parent = document.createElement('div');
+    mountProviderSettingsPanel(parent, {
+      statuses,
+      onChatgptSignIn: vi.fn(),
+      onChatgptSignOut: vi.fn(),
+      onSaveKey: vi.fn(),
+      onDeleteKey: vi.fn(),
+      onSetCustomModel: vi.fn(),
+    });
+
+    expect(parent.querySelector('[data-prov-action="subscription-login"][data-prov="claude"]')).not.toBeNull();
+    expect(parent.querySelector('[data-prov-key="claude"]')).toBeNull();
+    const advanced = parent.querySelector<HTMLDetailsElement>('details[data-prov-advanced="claude"]')!;
+    advanced.open = true;
+    advanced.dispatchEvent(new Event('toggle', { bubbles: true }));
+    expect(parent.querySelector('[data-prov-key="claude"]')).not.toBeNull();
+    expect(parent.textContent).toContain('••••1234');
+    expect(parent.querySelector('[data-prov-custom="claude"]')).not.toBeNull();
     // The local row gets no custom-model input.
-    expect(html).not.toContain('data-prov-custom="ollama"');
+    expect(parent.querySelector('[data-prov-custom="ollama"]')).toBeNull();
   });
 });
 
