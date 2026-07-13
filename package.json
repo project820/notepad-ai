@@ -116,6 +116,7 @@
     ]
   },
   "devDependencies": {
+    "@types/css-tree": "2.3.11",
     "@types/markdown-it": "^14.1.2",
     "@types/node": "^22.9.0",
     "@types/turndown": "^5.0.6",
@@ -139,6 +140,7 @@
     "@codemirror/state": "^6.4.1",
     "@codemirror/view": "^6.35.0",
     "@lezer/highlight": "^1.2.3",
+    "css-tree": "3.2.1",
     "dompurify": "^3.4.11",
     "kordoc": "^2.7.1",
     "markdown-it": "^14.1.0",
@@ -149,6 +151,7 @@
     "markdown-it-mark": "^4.0.0",
     "markdown-it-sup": "^2.0.0",
     "markdown-it-task-lists": "^2.1.1",
+    "parse5": "8.0.1",
     "tesseract.js": "^5.1.1",
     "turndown": "^7.2.4",
     "turndown-plugin-gfm": "^1.0.2"
