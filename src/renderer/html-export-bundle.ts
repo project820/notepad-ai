@@ -204,7 +204,7 @@ const RUNTIME_JS = [
   // inactive slide is display:none → unmeasurable), and uniformly fit the fixed
   // canvas to the viewport. Pure transforms: no remote URL, stays self-contained.
   'function sizeActive(){var a=slides[cur];if(!a)return;var sc=a.querySelector(".he-scaler");if(!sc)return;var h=sc.parentNode;var s=parseFloat(sc.getAttribute("data-he-scale"))||1;h.style.width=(sc.offsetWidth*s)+"px";h.style.height=(sc.offsetHeight*s)+"px";}',
-  'function fitDeck(){if(root.getAttribute("data-he-layout")!=="slides")return;var cw=root.offsetWidth,ch=root.offsetHeight;if(!cw||!ch)return;var f=Math.min(window.innerWidth/cw,(window.innerHeight-56)/ch);if(f>0)root.style.transform="translate(-50%,-50%) scale("+f+")";}',
+  'function fitDeck(){if(root.getAttribute("data-he-layout")!=="slides")return;var cw=root.offsetWidth,ch=root.offsetHeight;if(!cw||!ch)return;var f=Math.min(window.innerWidth/cw,window.innerHeight/ch);if(f>0)root.style.transform="translate(-50%,-50%) scale("+f+")";}',
   'function reflow(){sizeActive();fitDeck();}',
   'var t;window.addEventListener("resize",function(){clearTimeout(t);t=setTimeout(reflow,120);});',
   'fitDeck();',

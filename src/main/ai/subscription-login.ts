@@ -124,8 +124,9 @@ export class SubscriptionLoginService {
   submitCode(provider: SubscriptionProvider, code: string): void {
     if (provider !== 'claude' || !/\S/.test(code)) return;
     const entry = this.active.get(provider);
-    const stdin = entry?.operation === 'login' && entry.phase === 'login' ? entry.process?.stdin : null;
-    if (!stdin || (stdin as { writable?: boolean }).writable === false) return;
+    if (!entry || !this.isCurrent(entry)) return;
+    const stdin = entry.operation === 'login' && entry.phase === 'login' ? entry.process?.stdin : null;
+    if (!stdin || stdin.writable === false) return;
     try {
       stdin.write(`${code.trim()}\n`);
     } catch {
@@ -155,6 +156,7 @@ export class SubscriptionLoginService {
       const child = this.deps.spawn(trusted.command, provider === 'grok' ? ['logout'] : ['auth', 'logout'], { env, cwd: env.HOME || process.cwd() });
       if (!this.isCurrent(entry)) return this.killDetached(child);
       entry.process = child;
+      this.absorbStdinErrors(child);
       child.on('error', () => this.finishLogout(entry));
       child.on('close', () => {
         if (entry.process === child) entry.process = null;
@@ -198,6 +200,7 @@ export class SubscriptionLoginService {
       return;
     }
     entry.process = child;
+    this.absorbStdinErrors(child);
     entry.phase = 'login';
     let output = '';
     const consume = (chunk: Buffer | string) => {
@@ -250,6 +253,7 @@ export class SubscriptionLoginService {
       const child = this.deps.spawn(entry.command, ['auth', 'status'], { env: entry.env, cwd: entry.env.HOME || process.cwd() });
       if (!this.isCurrent(entry)) return this.killDetached(child);
       entry.process = child;
+      this.absorbStdinErrors(child);
       entry.phase = 'verify';
       const collect = (chunk: Buffer | string) => { output = (output + sanitizeLoginOutput(chunk)).slice(-OUTPUT_CAP); };
       child.stdout?.on('data', collect);
@@ -302,6 +306,12 @@ export class SubscriptionLoginService {
       if (entry.process === child) entry.process = null;
       this.release(entry);
     }, this.killGraceMs);
+  }
+  /** A child stdin may emit EPIPE asynchronously after end/kill; consume it locally. */
+  private absorbStdinErrors(child: CliProcess): void {
+    child.stdin?.on?.('error', () => {
+      // Expected race during cancellation or a CLI closing its prompt; never crash main.
+    });
   }
 
   private killDetached(child: CliProcess): void {

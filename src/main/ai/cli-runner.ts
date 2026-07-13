@@ -13,7 +13,12 @@ import type { AiChatEvent, AiProviderErrorKind } from './types';
 
 /** Minimal child-process surface the runner needs (keeps the spawn seam mockable). */
 export interface CliProcess {
-  stdin: { write(chunk: string): void; end(): void } | null;
+  stdin: {
+    write(chunk: string): void;
+    end(): void;
+    writable?: boolean;
+    on?(event: 'error', cb: (err: Error) => void): void;
+  } | null;
   stdout: { on(event: 'data', cb: (chunk: Buffer | string) => void): void } | null;
   stderr: { on(event: 'data', cb: (chunk: Buffer | string) => void): void } | null;
   on(event: 'error', cb: (err: Error) => void): void;

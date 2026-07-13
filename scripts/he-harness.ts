@@ -153,6 +153,9 @@ async function assertSlides(md: string, opts: CellOpts) {
   }
   let maxTopOffset = 0;
   let navOverlapCount = 0;
+  let minEffectiveBodyPx = Infinity;
+  let minEffectiveCaptionPx = Infinity;
+
 
 
   // Strip the bundle's per-section slides; we render the PLANNED deck instead,
@@ -249,6 +252,18 @@ async function assertSlides(md: string, opts: CellOpts) {
     // (1) scale floor respected.
     const minAllowedScale = slide.cover ? MIN_COVER_SCALE : MIN_SCALE;
     if (slide.scale < minAllowedScale - 1e-9) failures.push(`slide ${idx}: scale ${slide.scale.toFixed(3)} < minimum ${minAllowedScale.toFixed(3)}`);
+    const effectiveScale = slide.scale * Math.min(1, window.innerWidth / dims.width, window.innerHeight / dims.height);
+    const bodyPx = 20 * effectiveScale;
+    const captionPx = 16 * effectiveScale;
+    minEffectiveBodyPx = Math.min(minEffectiveBodyPx, bodyPx);
+    minEffectiveCaptionPx = Math.min(minEffectiveCaptionPx, captionPx);
+    if (!slide.cover && bodyPx < 14 - TOL) {
+      failures.push(`slide ${idx}: effective body font ${bodyPx.toFixed(2)}px < 14px`);
+    }
+    if (!slide.cover && captionPx < 11 - TOL) {
+      failures.push(`slide ${idx}: effective caption font ${captionPx.toFixed(2)}px < 11px`);
+    }
+
 
     // (2) every rendered element's rect stays inside the SLIDE safe-area box.
     //     Catches content (overflow:visible) that escapes the slide canvas on any
@@ -318,6 +333,8 @@ async function assertSlides(md: string, opts: CellOpts) {
     navMinHeight,
     maxTopOffset,
     navOverlapCount,
+    minEffectiveBodyPx: Number.isFinite(minEffectiveBodyPx) ? Number(minEffectiveBodyPx.toFixed(2)) : null,
+    minEffectiveCaptionPx: Number.isFinite(minEffectiveCaptionPx) ? Number(minEffectiveCaptionPx.toFixed(2)) : null,
 
   };
 }

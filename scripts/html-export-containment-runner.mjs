@@ -257,6 +257,9 @@ async function run() {
               maxTopOffset: typeof verdict.maxTopOffset === 'number' ? Number(verdict.maxTopOffset.toFixed(1)) : null,
               readingWidthRatio: typeof verdict.readingWidthRatio === 'number' ? Number(verdict.readingWidthRatio.toFixed(3)) : null,
               navOverlapCount: typeof verdict.navOverlapCount === 'number' ? verdict.navOverlapCount : null,
+              minEffectiveBodyPx: typeof verdict.minEffectiveBodyPx === 'number' ? verdict.minEffectiveBodyPx : null,
+              minEffectiveCaptionPx: typeof verdict.minEffectiveCaptionPx === 'number' ? verdict.minEffectiveCaptionPx : null,
+
               failures,
             };
             rows.push(row);
@@ -294,7 +297,7 @@ async function run() {
     log(
       `[${status}] ${r.fixture.padEnd(15)} ${r.layout.padEnd(6)} ${r.orientation.padEnd(10)} ${r.presentation.padEnd(6)} ${r.viewport.padEnd(18)} ` +
         `slides=${String(r.slides).padStart(3)} splits=${String(r.splits ?? '-').padStart(3)} minScale=${r.minScale ?? '-'} ` +
-        `nav=${r.navMinWidth ?? '-'}×${r.navMinHeight ?? '-'} overlap=${r.navOverlapCount ?? '-'} topOffset=${r.maxTopOffset ?? '-'} fill=${r.readingWidthRatio ?? '-'}`,
+        `nav=${r.navMinWidth ?? '-'}×${r.navMinHeight ?? '-'} overlap=${r.navOverlapCount ?? '-'} body=${r.minEffectiveBodyPx ?? '-'} caption=${r.minEffectiveCaptionPx ?? '-'} topOffset=${r.maxTopOffset ?? '-'} fill=${r.readingWidthRatio ?? '-'}`,
     );
     for (const f of r.failures) log(`        ↳ ${f}`);
   }

@@ -10,7 +10,13 @@ class FakeChild implements CliProcess {
   private err: Array<(chunk: string) => void> = [];
   private closes: Array<(code: number | null) => void> = [];
   private errors: Array<(error: Error) => void> = [];
-  stdin = { writable: true, write: (chunk: string) => this.stdinChunks.push(chunk), end: () => {} };
+  private stdinErrors: Array<(error: Error) => void> = [];
+  stdin = {
+    writable: true,
+    write: (chunk: string) => this.stdinChunks.push(chunk),
+    end: () => {},
+    on: (_event: 'error', cb: (error: Error) => void) => this.stdinErrors.push(cb),
+  };
   stdout = { on: (_event: 'data', cb: (chunk: string) => void) => this.out.push(cb) };
   stderr = { on: (_event: 'data', cb: (chunk: string) => void) => this.err.push(cb) };
   on(event: 'error' | 'close', cb: ((error: Error) => void) | ((code: number | null) => void)): void {
@@ -20,6 +26,7 @@ class FakeChild implements CliProcess {
   kill(signal?: NodeJS.Signals): void { this.kills.push(signal); }
   emitOut(chunk: string): void { this.out.forEach((cb) => cb(chunk)); }
   close(code: number | null): void { this.closes.forEach((cb) => cb(code)); }
+  emitStdinError(error = new Error('EPIPE')): void { this.stdinErrors.forEach((cb) => cb(error)); }
 }
 
 const modulePromise = import('../main/ai/subscription-login');
@@ -129,6 +136,19 @@ describe('subscription CLI login', () => {
     await service.start('claude', senderFor([]));
     service.submitCode('claude', 'late-code');
     expect(child.stdinChunks).toEqual([]);
+  });
+  it('blocks Claude code immediately after cancel and absorbs asynchronous stdin EPIPE', async () => {
+    const { SubscriptionLoginService } = await modulePromise;
+    const child = new FakeChild();
+    const service = new SubscriptionLoginService({
+      spawn: vi.fn(() => child), resolveCommand: async () => ({ command: '/trusted/claude' }),
+      buildEnv: async () => ({ HOME: '/real-home' }), openExternal: vi.fn(async () => {}), timeoutMs: 10_000,
+    });
+    await service.start('claude', senderFor([]));
+    service.cancel('claude');
+    service.submitCode('claude', 'late-code');
+    expect(child.stdinChunks).toEqual([]);
+    expect(() => child.emitStdinError()).not.toThrow();
   });
 
   it('reports unavailable CLI without spawning and releases its slot', async () => {
