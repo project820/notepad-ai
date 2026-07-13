@@ -46,6 +46,7 @@ if (shouldUseMockKeychain(process.env)) app.commandLine.appendSwitch('use-mock-k
 configureAppIdentity();
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 const converterHost = createConverterHost();
+const testCloseChoice = process.env.NOTEPAD_AI_CLOSE_DIALOG_CHOICE;
 const windows = createAppWindows({
   registry,
   fileGrants,
@@ -60,6 +61,9 @@ const windows = createAppWindows({
     await mutateSessionAggregate((current) => windowKeys.reduce(removeWindowSnapshot, current));
   },
   commitQuitSession: (windowKeys) => markCleanExitQueued(windowKeys),
+  showCloseDialog: testCloseChoice === 'save' || testCloseChoice === 'discard' || testCloseChoice === 'cancel'
+    ? async () => testCloseChoice
+    : undefined,
 });
 
 // All IPC handlers are registered at module load, before app.whenReady().

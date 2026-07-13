@@ -269,8 +269,8 @@ describe('document close lease and replacement lifecycle', () => {
 
       expect(lifecycle.isSaveFenced()).toBe(true);
       expect(mutationFenced()).toBe(true);
-      expect(sendCloseLeaseInvalidated).toHaveBeenCalledWith('lease', 0);
-      expect(lifecycle.authorizeCloseLease('lease')).toBe(false);
+      expect(sendCloseLeaseInvalidated).not.toHaveBeenCalled();
+      expect(lifecycle.authorizeCloseLease('lease')).toBe(true);
       expect(lifecycle.rollbackDiscardFence('lease')).toBe(true);
       expect(mutationFenced()).toBe(false);
     } finally {

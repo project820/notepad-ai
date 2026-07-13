@@ -234,7 +234,7 @@ window.api.onCloseQueryState((requestId) => {
       docEmpty: ctx.editor.getDoc().length === 0,
       revision: ctx.docRevision,
       locale: getLocale(),
-      syncFailed: docLifecycle.isSaveFenced(),
+      syncFailed: docLifecycle.hasPreviewSyncFailure(),
     }),
   });
 });

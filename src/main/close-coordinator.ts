@@ -161,12 +161,10 @@ export class CloseCoordinator {
           })));
           if (epoch.some(({ decision }) => decision === 'cancel')) return { approved: false, intent };
           for (const { target, decision } of epoch) decisions.set(target.windowId, decision);
-          if (quiesce && !await quiesce.prepare(targets, context)) {
-            context.failuresUsed += 1;
-            if (context.failuresUsed >= 8) return { approved: false, intent };
-            pending = [...targets];
-            continue;
-          }
+          // Quiescing is a best-effort mutation pause. It cannot veto an
+          // approved Save/Discard close; successful targets remain owned and
+          // are compensated from finally on an unapproved exit.
+          if (quiesce) await quiesce.prepare(targets, context).catch(() => false);
           const discards = targets.filter((target) => decisions.get(target.windowId) === 'discard');
           const committed = await commit({ intent, targets, discards, context });
           if (committed !== false && !(typeof committed === 'object' && 'retry' in committed)) {

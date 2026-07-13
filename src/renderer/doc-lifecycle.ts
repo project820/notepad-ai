@@ -371,6 +371,10 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
     return savesFenced || previewSyncFailed;
   }
 
+  function hasPreviewSyncFailure(): boolean {
+    return previewSyncFailed;
+  }
+
   function markPreviewSyncFailed(): void {
     previewSyncFailed = true;
     savesFenced = true;
@@ -427,7 +431,6 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
       allowingCloseFlush = false;
     }
     quiesce = null;
-    if (closeLease && !closeLease.consumed) invalidateCloseLease();
     if (!discardFenced && !previewSyncFailed) savesFenced = false;
     reconcileMutationFence();
     quiescePreview?.resume(current.previewPending);
@@ -456,6 +459,7 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
     rollbackDiscardFence,
     setPreviewFlushGate,
     isSaveFenced,
+    hasPreviewSyncFailure,
     markPreviewSyncFailed,
     markPreviewSyncRecovered,
     setPreviewQuiesceHooks,

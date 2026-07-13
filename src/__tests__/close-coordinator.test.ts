@@ -127,6 +127,18 @@ describe('CloseCoordinator', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(rollback).toHaveBeenCalledOnce();
   });
+  it('does not let a failed best-effort quiesce veto an approved close', async () => {
+    const coordinator = new CloseCoordinator();
+    const quiesce = createQuiesceTransaction({
+      prepare: async () => false,
+      rollback: async () => {},
+      commit: async () => {},
+      awaitWithinDeadline: async (operation) => operation,
+    });
+
+    await expect(coordinator.request('close', [first], async () => 'allow', async () => true, quiesce))
+      .resolves.toEqual({ approved: true, intent: 'close' });
+  });
 
   it('decides many responsive windows in parallel rather than charging the global deadline per target', async () => {
     const targets = Array.from({ length: 7 }, (_, index) => ({ windowId: index + 1, windowKey: String(index + 1) }));
