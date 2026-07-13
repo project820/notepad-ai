@@ -206,11 +206,46 @@ async function run() {
     await inject();
     return remoteRequests.slice();
   }
+  async function assertComputedScalerTransformRegression() {
+    const md = `# ${'L'.repeat(600)}\n\n## Summary\n\nThe computed scaler transform must remain authoritative.`;
+    const opts = { orientation: 'horizontal', layout: 'slides', title: 'computed-transform-regression' };
+    const bundle = await callHarness('bundleDoc', md, opts);
+    await loadHtmlAt(bundle.html, 1280, 720);
+
+    const before = await withTimeout(
+      win.webContents.executeJavaScript(
+        `(() => {
+          const scaler = document.querySelector('.slide.active .he-scaler');
+          if (!scaler) return null;
+          const declaredScale = Number.parseFloat(scaler.getAttribute('data-he-scale') || '');
+          const transform = getComputedStyle(scaler).transform;
+          scaler.style.transform = 'none';
+          return { declaredScale, transform };
+        })()`,
+        true,
+      ),
+      15000,
+      'tamper shipped scaler transform',
+    );
+    if (!before || !Number.isFinite(before.declaredScale) || before.declaredScale >= 1) {
+      throw new Error(`scaler transform regression fixture did not produce a scaled shipped cover (${JSON.stringify(before)})`);
+    }
+
+    const verdict = await callHarness('assertSlides', md, opts);
+    const transformMismatch = (verdict.failures || []).some(
+      (failure) => typeof failure === 'string' && failure.includes('data-he-scale') && failure.includes('computed transform'),
+    );
+    if (verdict.ok !== false || !transformMismatch) {
+      throw new Error(`computed scaler transform regression was not detected (${JSON.stringify(verdict.failures || [])})`);
+    }
+    log('REGRESSION: retained data-he-scale with a removed computed scaler transform was detected.');
+  }
 
   // Boot page so the first bundleDoc() (pure) has the harness available.
   await withTimeout(win.loadURL('about:blank'), 15000, 'about:blank');
   await inject();
 
+  await assertComputedScalerTransformRegression();
   const rows = [];
   let pass = 0;
   let fail = 0;

@@ -61,6 +61,7 @@ const componentCss = themeComponentClasses(theme);
 const checklist = evaluateDesignChecklist({ designMd: DESIGN_MD, theme, css: `${themeCss}\n${componentCss}` });
 
 const TOL = 1.5; // sub-pixel tolerance for geometry comparisons
+const SCALE_TOL = 0.001; // computed CSS matrix values may be rounded
 
 
 
@@ -121,6 +122,54 @@ function computedTransformScale(el: HTMLElement): number {
   if (!values || values.length !== 6 || values.some((value) => !Number.isFinite(value))) return NaN;
   return Math.sqrt(values[0] * values[0] + values[1] * values[1]);
 }
+function inspectShippedScalerScales(root: HTMLElement, expectedScales: readonly number[], failures: string[]): number[] {
+  const slides = Array.from(root.querySelectorAll<HTMLElement>('.slide'));
+  const scalers = slides.map((slide) => slide.querySelector<HTMLElement>('.he-scaler'));
+  const activeSlides = slides.map((slide) => slide.classList.contains('active'));
+  if (scalers.length !== expectedScales.length) {
+    failures.push(`shipped scaler count ${scalers.length} differs from planned ${expectedScales.length}`);
+  }
+
+  const actualScales: number[] = [];
+  for (let idx = 0; idx < scalers.length; idx++) {
+    // In Chromium, a transform on display:none can resolve to "none". Activate
+    // each shipped slide before reading it so this is the transform users see.
+    slides.forEach((slide, slideIdx) => slide.classList.toggle('active', slideIdx === idx));
+    const scaler = scalers[idx];
+    if (!scaler) {
+      failures.push(`shipped slide ${idx} has no scaler`);
+      actualScales.push(NaN);
+      continue;
+    }
+    void scaler.offsetHeight;
+
+    const transform = getComputedStyle(scaler).transform;
+    const computedScale = computedTransformScale(scaler);
+    const declaredScale = Number.parseFloat(scaler.getAttribute('data-he-scale') || '');
+    const plannedScale = expectedScales[idx];
+
+    if (!Number.isFinite(computedScale) || computedScale <= 0) {
+      failures.push(`shipped scaler ${idx} has invalid computed transform (${transform})`);
+    }
+    if (!Number.isFinite(declaredScale) || declaredScale <= 0) {
+      failures.push(`shipped scaler ${idx} has invalid data-he-scale`);
+    } else if (Number.isFinite(computedScale) && Math.abs(declaredScale - computedScale) > SCALE_TOL) {
+      failures.push(
+        `shipped scaler ${idx} data-he-scale ${declaredScale.toFixed(3)} differs from computed transform ${computedScale.toFixed(3)}`,
+      );
+    }
+    if (plannedScale === undefined) {
+      failures.push(`shipped scaler ${idx} has no planned scale`);
+    } else if (Number.isFinite(computedScale) && Math.abs(computedScale - plannedScale) > SCALE_TOL) {
+      failures.push(
+        `shipped scaler ${idx} computed transform ${computedScale.toFixed(3)} differs from planned ${plannedScale.toFixed(3)}`,
+      );
+    }
+    actualScales.push(computedScale);
+  }
+  slides.forEach((slide, idx) => slide.classList.toggle('active', activeSlides[idx]));
+  return actualScales;
+}
 
 /**
  * DOM: measure with the real adapter, plan slides, apply the plan (split blocks
@@ -161,10 +210,11 @@ async function assertSlides(md: string, opts: CellOpts) {
   if (!Number.isFinite(shippedDeckScale) || shippedDeckScale <= 0) {
     failures.push(`invalid shipped deck transform scale (${getComputedStyle(root).transform})`);
   }
-  const shippedActiveScale = parseFloat(root.querySelector<HTMLElement>('.slide.active .he-scaler')?.getAttribute('data-he-scale') || '');
-  if (Number.isFinite(shippedActiveScale) && Math.abs(shippedActiveScale - plan.slides[0].scale) > 1e-6) {
-    failures.push(`shipped active scaler ${shippedActiveScale} differs from planned ${plan.slides[0].scale}`);
-  }
+  const shippedScalerScales = inspectShippedScalerScales(
+    root,
+    plan.slides.map((slide) => slide.scale),
+    failures,
+  );
 
   const navButtons = Array.from(document.querySelectorAll('.he-nav-btn')) as HTMLElement[];
   const navMinWidth = navButtons.length ? Math.min(...navButtons.map((button) => button.getBoundingClientRect().width)) : 0;
@@ -273,13 +323,18 @@ async function assertSlides(md: string, opts: CellOpts) {
     // (1) scale floor respected.
     const minAllowedScale = slide.cover ? MIN_COVER_SCALE : MIN_SCALE;
     if (slide.scale < minAllowedScale - 1e-9) failures.push(`slide ${idx}: scale ${slide.scale.toFixed(3)} < minimum ${minAllowedScale.toFixed(3)}`);
-    const { bodyPx, captionPx } = effectiveSlideFontSizes(slide.scale, shippedDeckScale);
-    minEffectiveBodyPx = Math.min(minEffectiveBodyPx, bodyPx);
-    minEffectiveCaptionPx = Math.min(minEffectiveCaptionPx, captionPx);
-    if (!slide.cover && !meetsEffectiveSlideFontFloor(slide.scale, shippedDeckScale)) {
-      failures.push(
-        `slide ${idx}: shipped effective fonts body=${bodyPx.toFixed(2)}px caption=${captionPx.toFixed(2)}px below floor`,
-      );
+    const shippedScalerScale = shippedScalerScales[idx];
+    if (!Number.isFinite(shippedScalerScale) || shippedScalerScale <= 0) {
+      failures.push(`slide ${idx}: missing shipped scaler transform`);
+    } else {
+      const { bodyPx, captionPx } = effectiveSlideFontSizes(shippedScalerScale, shippedDeckScale);
+      minEffectiveBodyPx = Math.min(minEffectiveBodyPx, bodyPx);
+      minEffectiveCaptionPx = Math.min(minEffectiveCaptionPx, captionPx);
+      if (!slide.cover && !meetsEffectiveSlideFontFloor(shippedScalerScale, shippedDeckScale)) {
+        failures.push(
+          `slide ${idx}: shipped effective fonts body=${bodyPx.toFixed(2)}px caption=${captionPx.toFixed(2)}px below floor`,
+        );
+      }
     }
 
 
