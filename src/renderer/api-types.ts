@@ -1,6 +1,7 @@
 import type { AiProviderId, ModelRef, ProviderAuthStatus, ReasoningEffort } from '../main/ai/types';
 import type { AuthSnapshot, LoginUpdate, SubscriptionLoginUpdate, SubscriptionProvider } from '../shared/auth-protocol';
 import type { FileTreeEntry } from '../shared/file-types';
+import type { HtmlExportPipelineApi } from '../shared/html-export-pipeline';
 
 type ProjectWizardSaveApprovedDraftInput = {
   projectFolder: string;
@@ -51,7 +52,7 @@ type ReasoningCapabilitiesSnapshot = {
 };
 
 
-export type Api = {
+export type Api = HtmlExportPipelineApi & {
   onFileOpened: (cb: (file: { filePath: string; content: string }) => void) => void;
   onMenuNew: (cb: () => void) => void;
   onMenuSave: (cb: () => void) => void;
@@ -117,7 +118,7 @@ export type Api = {
   convertAttachment: (base64: string, ext: string) => Promise<{ ok: boolean; markdown?: string; error?: string }>;
   fetchDesignMd: (input: string) => Promise<{ ok: boolean; designMd?: string; rawUrl?: string; error?: string }>;
   listDesigns: () => Promise<{ ok: boolean; designs?: { slug: string; name: string; pageUrl: string }[]; error?: string }>;
-  saveHtml: (args: { html: string; defaultName?: string }) => Promise<{ saved: boolean; filePath?: string }>;
+  saveHtml: (args: { html: string; defaultName?: string }) => Promise<{ saved: boolean; filePath?: string; error?: string }>;
   openSavedHtml: (filePath: string) => Promise<{ opened: boolean; error?: string }>;
   mdHandlerStatus: () => Promise<{ supported: boolean; registered?: boolean }>;
   registerMdHandler: () => Promise<{ ok: boolean; registered?: boolean; defaultSet?: boolean; error?: string }>;
