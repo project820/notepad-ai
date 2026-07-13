@@ -28,10 +28,10 @@ async function worker() {
   const { app, BrowserWindow } = electron;
   require(resolve(REPO, 'dist/main/main.js'));
   app.emit('open-file', { preventDefault() {} }, documentPath);
-  if (scenario === 'quit') app.emit('open-file', { preventDefault() {} }, secondDocumentPath);
+  if (scenario.startsWith('quit')) app.emit('open-file', { preventDefault() {} }, secondDocumentPath);
   await app.whenReady();
   const win = await waitFor('window', () => BrowserWindow.getAllWindows()[0] ?? null);
-  const dirtyWindows = scenario === 'quit'
+  const dirtyWindows = scenario.startsWith('quit')
     ? await waitFor('two windows', () => BrowserWindow.getAllWindows().filter((candidate) => !candidate.isDestroyed()).length === 2 ? BrowserWindow.getAllWindows() : null)
     : [win];
   await Promise.all(dirtyWindows.map((dirtyWindow) => waitFor('editor', () =>
@@ -53,14 +53,22 @@ async function worker() {
     app.exit(0);
     return;
   }
-  if (scenario === 'quit') {
+  if (scenario === 'quit-cancel') {
+    app.quit();
+    await delay(1_000);
+    if (dirtyWindows.some((dirtyWindow) => dirtyWindow.isDestroyed())) throw new Error('quit cancel closed a dirty window');
+    console.log('[close-dialog-smoke] quit-cancel-kept-two-dirty-windows');
+    app.exit(0);
+    return;
+  }
+  if (scenario === 'quit-discard') {
     const closed = new Promise((resolveClosed) => app.once('window-all-closed', resolveClosed));
     app.quit();
     await Promise.race([
       closed,
-      delay(10_000).then(() => { throw new Error('quit did not close both dirty windows'); }),
+      delay(10_000).then(() => { throw new Error('quit discard did not close both dirty windows'); }),
     ]);
-    console.log('[close-dialog-smoke] quit-closed-two-dirty-windows');
+    console.log('[close-dialog-smoke] quit-discard-closed-two-dirty-windows');
     return;
   }
   const closed = new Promise((resolveClosed) => win.once('closed', resolveClosed));
@@ -86,7 +94,7 @@ if (scenario) {
     const secondDoc = join(userData, 'close-smoke-second.md');
     writeFileSync(doc, '# Close smoke\n', 'utf8');
     writeFileSync(secondDoc, '# Close smoke second\n', 'utf8');
-    for (const choice of ['discard', 'save', 'cancel', 'quit']) {
+    for (const choice of ['discard', 'save', 'cancel', 'quit-cancel', 'quit-discard']) {
       const child = spawn(electronBinary, [fileURLToPath(import.meta.url)], {
         cwd: REPO,
         env: {
@@ -94,7 +102,7 @@ if (scenario) {
           NOTEPAD_AI_CLOSE_SMOKE_SCENARIO: choice,
           NOTEPAD_AI_CLOSE_SMOKE_DOCUMENT: doc,
           NOTEPAD_AI_CLOSE_SMOKE_SECOND_DOCUMENT: secondDoc,
-          NOTEPAD_AI_CLOSE_DIALOG_CHOICE: choice === 'quit' ? 'discard' : choice,
+          NOTEPAD_AI_CLOSE_DIALOG_CHOICE: choice === 'quit-discard' ? 'discard' : choice === 'quit-cancel' ? 'cancel' : choice,
           NOTEPAD_AI_USERDATA: userData,
           NOTEPAD_AI_INTEGRATION_TEST: '1',
           NOTEPAD_AI_HIDE_WINDOWS: '1',

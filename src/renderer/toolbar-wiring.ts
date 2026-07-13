@@ -18,7 +18,7 @@ type ToolbarWiringDeps = {
   getAuth: () => AuthSnapshot;
   setAuth: (auth: AuthSnapshot) => void;
   paintAuthPill: (auth: AuthSnapshot) => void;
-  requestLocaleRestart: (locale: ReturnType<typeof getLocale>) => Promise<void>;
+  requestLocaleRestart: (locale: ReturnType<typeof getLocale>, persist: () => void) => Promise<boolean>;
   toggleUnifiedChat: () => void;
   toggleLeftPanel: () => void;
   openSettings: () => void;
@@ -75,9 +75,10 @@ export function initToolbarWiring(ctx: AppContext, deps: ToolbarWiringDeps) {
     },
     onLocaleChange: (locale) => {
       if (locale === deps.getLocale()) return;
-      deps.prefs.locale = locale;
-      savePrefs(deps.prefs);
-      void deps.requestLocaleRestart(locale);
+      void deps.requestLocaleRestart(locale, () => {
+        deps.prefs.locale = locale;
+        savePrefs(deps.prefs);
+      });
     },
     onToggleSideChat: deps.toggleUnifiedChat,
     onToggleOutline: deps.toggleLeftPanel,

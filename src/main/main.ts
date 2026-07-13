@@ -61,7 +61,8 @@ const windows = createAppWindows({
     await mutateSessionAggregate((current) => windowKeys.reduce(removeWindowSnapshot, current));
   },
   commitQuitSession: (windowKeys) => markCleanExitQueued(windowKeys),
-  showCloseDialog: testCloseChoice === 'save' || testCloseChoice === 'discard' || testCloseChoice === 'cancel'
+  showCloseDialog: process.env.NOTEPAD_AI_INTEGRATION_TEST === '1'
+    && (testCloseChoice === 'save' || testCloseChoice === 'discard' || testCloseChoice === 'cancel')
     ? async () => testCloseChoice
     : undefined,
 });

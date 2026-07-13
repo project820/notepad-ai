@@ -78,8 +78,8 @@ function syncWorkspaceRootToCurrent(): void {
 function scheduleSessionSnapshot() {
   sessionSnapshot.scheduleSessionSnapshot();
 }
-async function requestLocaleRestart(locale: Locale) {
-  await sessionSnapshot.requestLocaleRestart(locale);
+function requestLocaleRestart(locale: Locale, persist: () => void) {
+  return sessionSnapshot.requestLocaleRestart(locale, persist);
 }
 function toggleUnifiedChat() {
   unifiedChatWiring.toggleUnifiedChat();

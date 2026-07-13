@@ -43,11 +43,13 @@ export function initSessionSnapshot(ctx: AppContext, deps: SessionSnapshotDeps) 
     await window.api.sessionWrite(buildSessionSnapshot());
   }
 
-  async function requestLocaleRestart(l: Locale) {
+  async function requestLocaleRestart(l: Locale, persist: () => void) {
+    if (!window.confirm(t('lang.restartPrompt'))) return false;
     setLocale(l);
-    if (!window.confirm(t('lang.restartPrompt'))) return;
+    persist();
     await flushSessionSnapshot();
     await window.api.relaunchApp();
+    return true;
   }
 
   function showRestoreBanner(snap: any) {
