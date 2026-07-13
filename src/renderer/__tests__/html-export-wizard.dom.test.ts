@@ -1,13 +1,57 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from 'vitest';
+
+const validationGate = vi.hoisted(() => ({
+  forceSelfContainedFailure: false,
+  selfContained: vi.fn(),
+  exportDom: vi.fn(),
+  selfContainedVerdicts: [] as Array<{ ok: boolean; violations: string[] }>,
+  exportDomVerdicts: [] as Array<{ ok: boolean; violations: string[] }>,
+}));
+
+vi.mock('../html-export-validate', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../html-export-validate')>();
+  return {
+    ...actual,
+    validateSelfContainedHtml: (...args: Parameters<typeof actual.validateSelfContainedHtml>) => {
+      validationGate.selfContained(...args);
+      const verdict = validationGate.forceSelfContainedFailure
+        ? { ok: false, violations: ['forced test failure'] }
+        : actual.validateSelfContainedHtml(...args);
+      validationGate.selfContainedVerdicts.push(verdict);
+      return verdict;
+    },
+    validateExportDom: (...args: Parameters<typeof actual.validateExportDom>) => {
+      validationGate.exportDom(...args);
+      const verdict = actual.validateExportDom(...args);
+      validationGate.exportDomVerdicts.push(verdict);
+      return verdict;
+    },
+  };
+});
+
 import { mountHtmlExportWizard, type HtmlExportDeps } from '../html-export-wizard';
 
 afterEach(() => {
   document.body.innerHTML = '';
+  validationGate.forceSelfContainedFailure = false;
+  validationGate.selfContained.mockClear();
+  validationGate.exportDom.mockClear();
+  validationGate.selfContainedVerdicts.length = 0;
+  validationGate.exportDomVerdicts.length = 0;
   vi.restoreAllMocks();
 });
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+// The slide-plan fallback path awaits planSlides + domFontsReady, which can span
+// several task ticks under loaded parallel workers. Poll until the async save
+// pipeline settles instead of assuming a single macrotask covers it.
+const settle = async (predicate: () => boolean, tries = 80): Promise<void> => {
+  for (let i = 0; i < tries; i++) {
+    await flush();
+    if (predicate()) return;
+  }
+};
 
 /** A valid ContentModel JSON reply (the AI outputs a content model, never HTML). */
 const CONTENT_MODEL = {
@@ -366,12 +410,52 @@ describe('mountHtmlExportWizard — purpose/density/etc are demoted to an option
       click(host, 'generate-submit');
       await flush();
       click(host, 'save-html');
-      await flush();
+      await settle(() => (deps.saveHtml as ReturnType<typeof vi.fn>).mock.calls.length > 0);
 
       expect(deps.saveHtml).toHaveBeenCalledTimes(1);
+      expect(validationGate.selfContained).toHaveBeenCalledTimes(1);
+      expect(validationGate.exportDom).toHaveBeenCalledTimes(1);
+      expect(validationGate.selfContained.mock.calls[0][0]).toBe(savedHtml);
+      expect(validationGate.exportDom.mock.calls[0][0]).toBe(savedHtml);
+      expect(validationGate.selfContainedVerdicts[0]).toEqual({ ok: true, violations: [] });
+      expect(validationGate.exportDomVerdicts[0]).toEqual({ ok: true, violations: [] });
       expect(savedHtml).toContain('data-he-layout="scroll"');
       expect(savedHtml).not.toContain('class="he-doc he-slides"');
+      expect(savedHtml).toContain('My Report');
+      expect(savedHtml).toContain('Intro');
+      expect(savedHtml).toContain('Hello world.');
       expect(host.textContent).not.toContain('he.error.containment');
+    } finally {
+      if (originalScrollHeight) Object.defineProperty(HTMLElement.prototype, 'scrollHeight', originalScrollHeight);
+      else delete (HTMLElement.prototype as { scrollHeight?: number }).scrollHeight;
+    }
+  });
+  it('keeps the self-containment hard gate when the fallback artifact fails validation', async () => {
+    const originalScrollHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollHeight');
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+      configurable: true,
+      get: () => 10_000,
+    });
+    validationGate.forceSelfContainedFailure = true;
+
+    try {
+      const { host, deps } = setup({
+        saveHtml: vi.fn(async () => ({ saved: true, filePath: '/tmp/export.html' })),
+      });
+      click(host, 'orient-horizontal');
+      click(host, 'layout-slides');
+      click(host, 'design-default');
+      setField(host, 'free-requirement', '');
+      click(host, 'generate-submit');
+      await flush();
+      click(host, 'save-html');
+      await settle(() => validationGate.selfContained.mock.calls.length > 0);
+
+      expect(validationGate.selfContained).toHaveBeenCalledTimes(1);
+      expect(validationGate.exportDom).toHaveBeenCalledTimes(1);
+      expect((validationGate.selfContained.mock.calls[0][0] as string)).toContain('data-he-layout="scroll"');
+      expect(deps.saveHtml).not.toHaveBeenCalled();
+      expect(host.textContent).toContain('he.error.notSelfContained');
     } finally {
       if (originalScrollHeight) Object.defineProperty(HTMLElement.prototype, 'scrollHeight', originalScrollHeight);
       else delete (HTMLElement.prototype as { scrollHeight?: number }).scrollHeight;

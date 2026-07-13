@@ -8,6 +8,7 @@ import {
   validateCmuxBundleCandidate,
   type CliOverrideBackend,
 } from '../main/ai/cli-trust';
+import { __resetCliSpawnPathForTests, __setCliProbeForTests, __setShellExecForTests } from '../main/ai/cli-runner';
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true }))); });
@@ -93,5 +94,24 @@ describe('trusted CLI override', () => {
     const store = new AtomicCliOverrideStore({ ...f.backend, writeFile: async () => { throw new Error('disk full'); } });
     expect(await store.approve('grok', f.executable)).toHaveProperty('error');
     expect(await store.get('grok')).toBeNull();
+  });
+  it('auto-registers an identity-verified login-shell PATH executable as a staged trusted command', async () => {
+    const f = await fixture();
+    const agy = path.join(f.root, 'agy');
+    await fs.writeFile(agy, '#!/bin/sh\necho version\n', { mode: 0o700 });
+    const store = new AtomicCliOverrideStore(f.backend);
+    __resetCliSpawnPathForTests();
+    __setShellExecForTests(async () => `GJC_PATH=${f.root}`);
+    __setCliProbeForTests(() => true);
+
+    try {
+      const resolved = await resolveTrustedCliCommand('agy', store);
+
+      expect(resolved).toHaveProperty('command');
+      expect((resolved as { command: string }).command).toContain('/staging/agy-');
+      expect(await store.get('agy')).not.toBeNull();
+    } finally {
+      __resetCliSpawnPathForTests();
+    }
   });
 });

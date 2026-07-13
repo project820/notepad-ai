@@ -30,6 +30,7 @@ type ActiveLogin = {
   env?: Record<string, string>;
   onResult?: (provider: SubscriptionProvider, state: 'succeeded' | 'unknown') => void;
   onLogout?: (provider: SubscriptionProvider, state: 'unknown') => void;
+  logoutCompletion?: { resolve(): void; reject(error: Error): void };
 };
 const DISCARDED_SENDER: LoginSender = {
   isDestroyed: () => true,
@@ -82,13 +83,22 @@ function extractGrokCode(buffer: string): string | undefined {
   return fromQuery ?? fromText;
 }
 
-function isLoggedInClaudeStatus(output: string): boolean {
+function claudeLoggedInStatus(output: string): boolean | null {
   try {
     const parsed: unknown = JSON.parse(output.trim());
-    return typeof parsed === 'object' && parsed !== null && (parsed as { loggedIn?: unknown }).loggedIn === true;
+    const loggedIn = (parsed as { loggedIn?: unknown } | null)?.loggedIn;
+    return typeof loggedIn === 'boolean' ? loggedIn : null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+function isLoggedInClaudeStatus(output: string): boolean {
+  return claudeLoggedInStatus(output) === true;
+}
+
+function isLoggedOutGrokStatus(output: string): boolean {
+  return /\byou are not authenticated\b|\bnot logged in\b/i.test(output);
 }
 
 export class SubscriptionLoginService {
@@ -137,37 +147,53 @@ export class SubscriptionLoginService {
   cancel(provider: SubscriptionProvider): void {
     const entry = this.active.get(provider);
     if (!entry) return;
-    if (entry.operation === 'logout') this.finishLogout(entry);
+    if (entry.operation === 'logout') this.failLogout(entry, 'CLI logout cancelled.');
     else this.cancelEntry(entry);
   }
 
   async logout(provider: SubscriptionProvider, onResult?: (provider: SubscriptionProvider, state: 'unknown') => void): Promise<void> {
     if (this.active.has(provider)) throw new Error('A login is already in progress for this provider.');
+    let resolveCompletion!: () => void;
+    let rejectCompletion!: (error: Error) => void;
+    const completion = new Promise<void>((resolve, reject) => {
+      resolveCompletion = resolve;
+      rejectCompletion = reject;
+    });
     const entry = this.reserve(provider, DISCARDED_SENDER);
     entry.operation = 'logout';
     entry.phase = 'logout';
     entry.onLogout = onResult;
+    entry.logoutCompletion = { resolve: resolveCompletion, reject: rejectCompletion };
     try {
       const trusted = await this.deps.resolveCommand(provider);
-      if (!this.isCurrent(entry)) return;
-      if (!('command' in trusted)) return this.finishLogout(entry);
+      if (!this.isCurrent(entry)) return completion;
+      if (!('command' in trusted)) {
+        this.failLogout(entry, 'CLI executable is unavailable.');
+        return completion;
+      }
       const env = await this.deps.buildEnv();
-      if (!this.isCurrent(entry)) return;
+      if (!this.isCurrent(entry)) return completion;
+      entry.command = trusted.command;
+      entry.env = env;
       const child = this.deps.spawn(trusted.command, provider === 'grok' ? ['logout'] : ['auth', 'logout'], { env, cwd: env.HOME || process.cwd() });
-      if (!this.isCurrent(entry)) return this.killDetached(child);
+      if (!this.isCurrent(entry)) {
+        this.killDetached(child);
+        return completion;
+      }
       entry.process = child;
       this.absorbStdinErrors(child);
-      child.on('error', () => this.finishLogout(entry));
-      child.on('close', () => {
+      child.on('error', () => this.failLogout(entry, 'CLI logout failed.'));
+      child.on('close', (code) => {
         if (entry.process === child) entry.process = null;
         this.clearKillTimer(entry);
         if (entry.terminal) return this.release(entry);
-        this.finishLogout(entry);
+        this.completeLogoutClose(entry, code);
       });
       child.stdin?.end();
     } catch {
-      if (this.isCurrent(entry)) this.finishLogout(entry);
+      if (this.isCurrent(entry)) this.failLogout(entry, 'CLI logout failed.');
     }
+    return completion;
   }
 
   private reserve(provider: SubscriptionProvider, sender: LoginSender, onResult?: ActiveLogin['onResult']): ActiveLogin {
@@ -186,7 +212,7 @@ export class SubscriptionLoginService {
     entry.onResult = onResult;
     entry.timer = setTimeout(
       () => entry.operation === 'logout'
-        ? this.finishLogout(entry)
+        ? this.failLogout(entry, 'CLI logout timed out.')
         : this.fail(entry, { kind: 'error', provider, code: 'timeout' }),
       this.deps.timeoutMs,
     );
@@ -290,10 +316,55 @@ export class SubscriptionLoginService {
     if (update.kind === 'success') entry.onResult?.(entry.provider, 'succeeded');
     if (!entry.process) this.release(entry);
   }
+  private completeLogoutClose(entry: ActiveLogin, code: number | null): void {
+    if (entry.terminal) return;
+    if (code !== 0) return this.failLogout(entry, 'CLI logout failed.');
+    void this.verifyLogout(entry);
+  }
+
+  private async verifyLogout(entry: ActiveLogin): Promise<void> {
+    if (!this.isCurrent(entry) || !entry.command || !entry.env) return this.failLogout(entry, 'CLI logout verification failed.');
+    let output = '';
+    try {
+      const args = entry.provider === 'claude' ? ['auth', 'status', '--json'] : ['models'];
+      const child = this.deps.spawn(entry.command, args, { env: entry.env, cwd: entry.env.HOME || process.cwd() });
+      if (!this.isCurrent(entry)) return this.killDetached(child);
+      entry.process = child;
+      entry.phase = 'verify';
+      this.absorbStdinErrors(child);
+      const collect = (chunk: Buffer | string) => { output = (output + sanitizeLoginOutput(chunk)).slice(-OUTPUT_CAP); };
+      child.stdout?.on('data', collect);
+      child.stderr?.on('data', collect);
+      child.on('error', () => this.failLogout(entry, 'CLI logout verification failed.'));
+      child.on('close', () => {
+        if (entry.process === child) entry.process = null;
+        this.clearKillTimer(entry);
+        if (entry.terminal) return this.release(entry);
+        const loggedOut = entry.provider === 'claude'
+          ? claudeLoggedInStatus(output) === false
+          : isLoggedOutGrokStatus(output);
+        if (loggedOut) this.finishLogout(entry);
+        else this.failLogout(entry, 'CLI logout verification failed.');
+      });
+      child.stdin?.end();
+    } catch {
+      this.failLogout(entry, 'CLI logout verification failed.');
+    }
+  }
+
   private finishLogout(entry: ActiveLogin): void {
     if (entry.terminal) return;
-    this.finish(entry, { kind: 'error', provider: entry.provider, code: 'login_failed' });
+    entry.terminal = true;
+    clearTimeout(entry.timer);
     entry.onLogout?.(entry.provider, 'unknown');
+    entry.logoutCompletion?.resolve();
+    if (!entry.process) this.release(entry);
+  }
+
+  private failLogout(entry: ActiveLogin, message: string): void {
+    if (entry.terminal) return;
+    entry.logoutCompletion?.reject(new Error(message));
+    this.finish(entry, { kind: 'error', provider: entry.provider, code: 'login_failed' });
     this.stopProcess(entry);
   }
 

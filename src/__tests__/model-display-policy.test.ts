@@ -7,7 +7,7 @@ function model(provider: AiProviderId, id: string): ModelRef {
 }
 
 describe('applyModelDisplayPolicy', () => {
-  it('uses exact cloud allow-lists while retaining every local discovery result', () => {
+  it('uses exact cloud allow-lists while retaining Ollama discovery results', () => {
     const visible = applyModelDisplayPolicy([
       model('chatgpt', 'gpt-5.6'),
       model('chatgpt', 'gpt-5.6-preview'),
@@ -26,7 +26,6 @@ describe('applyModelDisplayPolicy', () => {
       'claude:claude-sonnet-5',
       'grok:grok-4.5',
       'ollama:llama3:latest',
-      'lmstudio:my-local-model',
     ]);
   });
 
@@ -42,6 +41,17 @@ describe('applyModelDisplayPolicy', () => {
       id: 'openai/gpt-5.1',
       custom: true,
     });
+  });
+  it('hides LM Studio catalog entries but reinjects a current legacy selection', () => {
+    const visible = applyModelDisplayPolicy([
+      model('lmstudio', 'my-local-model'),
+      model('ollama', 'llama3:latest'),
+    ], { currentSelection: { provider: 'lmstudio', id: 'my-local-model' } });
+
+    expect(visible).toEqual([
+      expect.objectContaining({ provider: 'ollama', id: 'llama3:latest' }),
+      expect.objectContaining({ provider: 'lmstudio', id: 'my-local-model', custom: true }),
+    ]);
   });
 
   it('reinjects a no-longer-allowed selected cloud model without restoring other stale IDs', () => {

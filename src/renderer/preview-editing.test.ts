@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { AppContext } from './app-context';
 import { initPreviewEditing } from './preview-editing';
+import { createMarkdownIt } from './markdown-it';
 
 function setupPreviewEditing(initialDoc = 'original') {
   const previewEl = document.createElement('div');
@@ -166,15 +167,24 @@ describe('initPreviewEditing close flush', () => {
   });
 });
 describe('preview checkbox changes', () => {
-  it('records only a direct checkbox change, not a nearby preview click', () => {
+  it('does not turn task text clicks into checkbox changes in markdown-it rendered preview DOM', () => {
     const { ctx, previewEl, recordPreviewInput } = setupPreviewEditing();
-    previewEl.innerHTML = '<p><input type="checkbox"><span>nearby punctuation.</span></p>';
+    previewEl.innerHTML = createMarkdownIt().render('- [ ] task punctuation.');
 
-    previewEl.querySelector('span')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    const label = previewEl.querySelector('label')!;
+    const checkbox = previewEl.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    expect(label.contains(checkbox)).toBe(true);
+
+    const textClick = new MouseEvent('click', { bubbles: true, cancelable: true });
+    label.dispatchEvent(textClick);
+    expect(textClick.defaultPrevented).toBe(true);
+    expect(checkbox.checked).toBe(false);
     expect(recordPreviewInput).not.toHaveBeenCalled();
     expect(ctx.editingInPreview).toBe(false);
 
-    const checkbox = previewEl.querySelector<HTMLInputElement>('input')!;
+    const inputClick = new MouseEvent('click', { bubbles: true, cancelable: true });
+    checkbox.dispatchEvent(inputClick);
+    expect(inputClick.defaultPrevented).toBe(false);
     checkbox.checked = true;
     checkbox.dispatchEvent(new Event('change', { bubbles: true }));
     expect(recordPreviewInput).toHaveBeenCalledOnce();

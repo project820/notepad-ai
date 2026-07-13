@@ -36,8 +36,8 @@ function reinjectedSelection(selection: ModelDisplaySelection): ModelRef {
 }
 
 /**
- * Restrict cloud catalog display to product-approved exact IDs. Local discovery
- * is deliberately passed through. Persisted/current selections are reinjected
+ * Restrict catalog display to product-approved exact IDs. Ollama discovery is
+ * deliberately passed through. Persisted/current selections are reinjected
  * after filtering so catalog updates never strand an existing user.
  */
 export function applyModelDisplayPolicy(
@@ -45,7 +45,7 @@ export function applyModelDisplayPolicy(
   context: ModelDisplayPolicyContext = {},
 ): ModelRef[] {
   const visible = models.filter((model) => {
-    if (model.provider === 'ollama' || model.provider === 'lmstudio') return true;
+    if (model.provider === 'ollama') return true;
     if (model.provider === 'openrouter') return false;
     const allowed = ALLOWED_CLOUD_MODEL_IDS[model.provider as keyof typeof ALLOWED_CLOUD_MODEL_IDS];
     return !!allowed && allowed.includes(model.id);

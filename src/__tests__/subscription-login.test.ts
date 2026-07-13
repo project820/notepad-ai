@@ -210,9 +210,10 @@ describe('subscription CLI login', () => {
   });
   it('reserves the provider slot for logout, allowing only one concurrent logout child', async () => {
     const { SubscriptionLoginService } = await modulePromise;
-    const child = new FakeChild();
+    const logout = new FakeChild();
+    const status = new FakeChild();
+    const spawn = vi.fn().mockReturnValueOnce(logout).mockReturnValueOnce(status);
     let resolveCommand!: (value: { command: string }) => void;
-    const spawn = vi.fn(() => child);
     const service = new SubscriptionLoginService({
       spawn, resolveCommand: () => new Promise((resolve) => { resolveCommand = resolve; }),
       buildEnv: async () => ({ HOME: '/real-home' }), openExternal: vi.fn(async () => {}), timeoutMs: 10_000,
@@ -222,8 +223,55 @@ describe('subscription CLI login', () => {
     resolveCommand({ command: '/trusted/grok' });
     await flush();
     expect(spawn).toHaveBeenCalledTimes(1);
-    child.close(0);
+    logout.close(0);
+    await flush();
+    status.emitOut('You are not authenticated.\n');
+    status.close(0);
     await first;
+  });
+  it('waits for Claude logout and verifies the persisted session is gone before resolving', async () => {
+    const { SubscriptionLoginService } = await modulePromise;
+    const logout = new FakeChild();
+    const status = new FakeChild();
+    const spawn = vi.fn().mockReturnValueOnce(logout).mockReturnValueOnce(status);
+    const record = vi.fn();
+    const service = new SubscriptionLoginService({
+      spawn, resolveCommand: async () => ({ command: '/trusted/claude' }),
+      buildEnv: async () => ({ HOME: '/real-home' }), openExternal: vi.fn(async () => {}), timeoutMs: 10_000,
+    });
+
+    const pending = service.logout('claude', record);
+    await flush();
+    let settled = false;
+    void pending.then(() => { settled = true; });
+    logout.close(0);
+    await flush();
+
+    expect(settled).toBe(false);
+    expect(spawn).toHaveBeenNthCalledWith(2, '/trusted/claude', ['auth', 'status', '--json'], expect.any(Object));
+    expect(record).not.toHaveBeenCalled();
+
+    status.emitOut('{"loggedIn":false}');
+    status.close(1);
+    await expect(pending).resolves.toBeUndefined();
+    expect(record).toHaveBeenCalledWith('claude', 'unknown');
+  });
+
+  it('rejects failed logout without recording a disconnected CLI state', async () => {
+    const { SubscriptionLoginService } = await modulePromise;
+    const logout = new FakeChild();
+    const record = vi.fn();
+    const service = new SubscriptionLoginService({
+      spawn: vi.fn(() => logout), resolveCommand: async () => ({ command: '/trusted/grok' }),
+      buildEnv: async () => ({ HOME: '/real-home' }), openExternal: vi.fn(async () => {}), timeoutMs: 10_000,
+    });
+
+    const pending = service.logout('grok', record);
+    await flush();
+    logout.close(1);
+
+    await expect(pending).rejects.toThrow('CLI logout failed.');
+    expect(record).not.toHaveBeenCalled();
   });
   it('cancels preparation when the sender is destroyed before command resolution', async () => {
     const { SubscriptionLoginService } = await modulePromise;
@@ -257,11 +305,12 @@ describe('subscription CLI login', () => {
       openExternal: vi.fn(async () => {}), timeoutMs: 10, killGraceMs: 1,
     });
     const logout = service.logout('grok');
+    const outcome = expect(logout).rejects.toThrow('CLI logout timed out.');
     await flush();
     await vi.advanceTimersByTimeAsync(10);
     expect(child.kills).toEqual(['SIGTERM']);
     await vi.advanceTimersByTimeAsync(1);
-    await logout;
+    await outcome;
     expect(child.kills).toEqual(['SIGTERM', 'SIGKILL']);
   });
 });

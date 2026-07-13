@@ -106,7 +106,14 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
   }
 
   function saveTo(filePath: string | null): Promise<number | null> {
-    const queued = saveTail.then(() => (savesFenced || previewSyncFailed ? null : performSave(filePath)));
+    const queued = saveTail.then(() => {
+      if (savesFenced || previewSyncFailed) return null;
+      // Preview edits record their revision before their debounced source sync.
+      // Flush here so this write cannot save the older editor source and then
+      // incorrectly mark the already-recorded preview edit clean.
+      flushPendingPreview?.();
+      return savesFenced || previewSyncFailed ? null : performSave(filePath);
+    });
     saveTail = queued.then(() => undefined, () => undefined);
     return queued;
   }
@@ -278,10 +285,18 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
       pendingOpen?.cancel();
       pendingOpen?.hideLoading();
       const generation = ++openGeneration;
+      const openRevision = ctx.docRevision;
+      const openDirty = ctx.dirty;
       const hideLoading = showPreviewLoading();
       let frame = 0;
       const renderOpen = () => {
-        if (generation !== openGeneration || !tryMutateDocument()) {
+        if (
+          generation !== openGeneration ||
+          !tryMutateDocument() ||
+          ctx.docRevision !== openRevision ||
+          ctx.dirty !== openDirty
+        ) {
+          if (generation === openGeneration) pendingOpen = null;
           hideLoading();
           return;
         }

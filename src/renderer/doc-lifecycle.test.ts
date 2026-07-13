@@ -73,6 +73,21 @@ describe('document close lease and replacement lifecycle', () => {
     expect(sendCloseLeaseInvalidated).toHaveBeenCalledWith('lease-1', 1);
     expect(lifecycle.authorizeCloseLease('lease-1')).toBe(false);
   });
+  it('flushes a pending preview edit before saving so the persisted source matches its recorded revision', async () => {
+    const { ctx, lifecycle, saveFile, getDoc } = setup();
+    ctx.currentPath = '/tmp/draft.md';
+    ctx.dirty = true;
+    ctx.docRevision = 1; // Preview input already recorded this revision before debounce.
+    lifecycle.setPreviewFlushGate(() => {
+      ctx.editor.setDoc('preview edit');
+    });
+
+    await expect(lifecycle.save()).resolves.toBe(1);
+
+    expect(getDoc()).toBe('preview edit');
+    expect(saveFile).toHaveBeenCalledWith('/tmp/draft.md', 'preview edit');
+    expect(ctx.dirty).toBe(false);
+  });
 
   it('cancels an armed autosave and fences future document saves on discard', async () => {
     vi.useFakeTimers();

@@ -309,6 +309,13 @@ export function initPreviewEditing(ctx: AppContext, deps: PreviewEditingDeps) {
     syncPreviewToSource();
   }
 
+  ctx.preview.el.addEventListener('click', (e) => {
+    const target = e.target;
+    if (target instanceof HTMLInputElement && target.type === 'checkbox') return;
+    const element = target instanceof Element ? target : target instanceof Node ? target.parentElement : null;
+    const label = element?.closest('label');
+    if (label?.closest('.task-list-item')) e.preventDefault();
+  }, true);
   ctx.preview.el.addEventListener('beforeinput', (e) => {
     if (!deps.tryMutateDocument()) {
       e.preventDefault();

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { constants, promises as fs } from 'node:fs';
 import path from 'node:path';
+import { buildMinimalEnv } from './cli-runner';
 
 export type TrustedCliName = 'claude' | 'grok' | 'agy';
 
@@ -216,6 +217,28 @@ export function getCliOverrideStore(): CliOverrideStore {
   return defaultStore;
 }
 
+/** Find an exact executable name on the resolved login-shell PATH without invoking a shell. */
+async function findPathCliCandidate(cli: TrustedCliName): Promise<string | null> {
+  let env: Record<string, string>;
+  try {
+    env = await buildMinimalEnv();
+  } catch {
+    return null;
+  }
+  for (const directory of env.PATH.split(':')) {
+    if (!directory) continue;
+    try {
+      const candidate = await fs.realpath(path.join(directory, cli));
+      if (path.basename(candidate) !== cli) continue;
+      await readVerifiedCliFile(candidate);
+      return candidate;
+    } catch {
+      // A missing or unsafe PATH entry cannot become trusted; continue searching.
+    }
+  }
+  return null;
+}
+
 /** The only port that supplies a command pathname to CLI probe and completion spawns. */
 export async function resolveTrustedCliCommand(cli: TrustedCliName, store: CliOverrideStore = getCliOverrideStore()): Promise<TrustedCliResult> {
   const override = await store.get(cli);
@@ -224,18 +247,22 @@ export async function resolveTrustedCliCommand(cli: TrustedCliName, store: CliOv
       const source = await readVerifiedCliFile(override.identity.realpath);
       if (!sameIdentity(source.identity, override.identity)) return { error: 'CLI executable changed after approval. Select it again to re-approve.' };
       const staged = await readVerifiedCliFile(override.stagedPath);
-      if (!sameIdentity(staged.identity, override.stagedIdentity)) return { error: 'Trusted CLI staging artifact changed. Select the executable again to re-approve.' };
+      if (!sameIdentity(staged.identity, override.stagedIdentity)) return { error: 'Trusted CLI staging artifact changed. Select it again to re-approve.' };
       return { command: override.stagedPath };
     } catch {
       return { error: 'CLI executable changed after approval. Select it again to re-approve.' };
     }
   }
   const candidate = CMUX_COMMANDS[cli as Exclude<TrustedCliName, 'agy'>];
-  if (!candidate) return { error: 'No approved CLI executable selected.' };
-  try {
-    const verified = await validateCmuxBundleCandidate(cli as Exclude<TrustedCliName, 'agy'>, candidate);
-    return { command: verified.realpath };
-  } catch {
-    return { error: 'CLI executable is unavailable.' };
+  if (candidate) {
+    try {
+      const verified = await validateCmuxBundleCandidate(cli as Exclude<TrustedCliName, 'agy'>, candidate);
+      return { command: verified.realpath };
+    } catch {
+      // Continue to the login-shell PATH for non-cmux installations.
+    }
   }
+  const pathCandidate = await findPathCliCandidate(cli);
+  if (pathCandidate) return store.approve(cli, pathCandidate);
+  return { error: 'CLI executable is unavailable.' };
 }

@@ -76,5 +76,13 @@ describe('document open loading indicator', () => {
     expect(setPreviewDoc).toHaveBeenCalledWith('large document');
     expect(host.querySelector('.preview-loading')).toBeNull();
     expect(previewEl.hasAttribute('aria-busy')).toBe(false);
+    onFileOpened!({ filePath: '/tmp/new.md', content: 'replacement document' });
+    renderFrame!(32);
+    doc = 'typed while open was pending';
+    lifecycle.onDocChange(doc);
+    renderFrame!(48);
+
+    expect(doc).toBe('typed while open was pending');
+    expect(host.querySelector('.preview-loading')).toBeNull();
   });
 });
