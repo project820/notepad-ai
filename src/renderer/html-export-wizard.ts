@@ -38,7 +38,8 @@ import { formatContextWindow } from '../main/ai/output-budget';
 import { applyModelDisplayPolicy } from '../main/ai/model-display-policy';
 import { isAiProviderId, type ModelRef } from '../main/ai/types';
 import { modelKey, parseModelKey } from './model-key';
-import { planSlides, type PlannedSlide } from './html-export-layout';
+import { planSlides, slideDimsFor, type PlannedSlide } from './html-export-layout';
+
 import { createDomMeasure, domFontsReady } from './html-export-measure-dom';
 import { bundleHtml, buildExportStyle } from './html-export-bundle';
 import { validateSelfContainedHtml, validateExportDom } from './html-export-validate';
@@ -47,6 +48,8 @@ import {
   toCssVariables,
   themeComponentClasses,
   evaluateDesignChecklist,
+  resolveHtmlExportSlideGeometry,
+
 } from './html-export-theme';
 import { defaultHtmlFileName } from './html-export-prompt';
 
@@ -389,6 +392,7 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
         const res = await planSlides({
           model,
           orientation,
+          dims: slideDimsFor(orientation, resolveHtmlExportSlideGeometry(theme, presentation)),
           measure: createDomMeasure({ doc: document, styleCss: buildExportStyle(theme, orientation, layout, presentation) }),
 
           fontsReady: domFontsReady(document),

@@ -15,10 +15,12 @@
 import type { ContentModel, DesignSource, SummaryChartMode } from './html-export-model';
 import type { LayoutKind, Orientation } from './html-export-state';
 import type { ChecklistResult, DesignTheme, HtmlExportPresentation } from './html-export-theme';
-import { stableHash, themeComponentClasses, toCssVariables } from './html-export-theme';
+import { stableHash, themeComponentClasses, toCssVariables, resolveHtmlExportSlideGeometry } from './html-export-theme';
+
 
 import { renderContent } from './html-export-renderer';
-import type { PlannedSlide } from './html-export-layout';
+import { slideDimsFor, type PlannedSlide } from './html-export-layout';
+
 import { sha256Base64 } from './sha256';
 
 /** Bump when the embedded manifest shape changes. */
@@ -123,7 +125,8 @@ const SLIDES_CSS = [
   '.he-slides{position:fixed;left:50%;top:50%;width:var(--he-canvas-w,1280px);height:var(--he-canvas-h,720px);overflow:hidden;transform:translate(-50%,-50%);transform-origin:center center;}',
   // Keep sparse slides anchored to the safe area's top edge rather than floating
   // in the center of the canvas. The planner still owns containment and scale.
-  '.he-slides .slide.active{width:100%;height:100%;padding:var(--he-rhythm);overflow:hidden;align-items:stretch;justify-content:flex-start;gap:var(--he-rhythm-sm);}',
+  '.he-slides .slide.active{width:100%;height:100%;padding:var(--he-slide-pad);padding-bottom:calc(var(--he-slide-pad) + var(--he-nav-reserve));overflow:hidden;align-items:stretch;justify-content:flex-start;gap:var(--he-rhythm-sm);}',
+
   // The scale box: the runtime sizes `.he-scale-host` to the slide's SCALED
   // footprint. Top alignment keeps the scaled content's first line at the safe
   // area edge while the scaler carries the engine's uniform transform.
@@ -241,6 +244,9 @@ export function bundleHtml(args: BundleArgs): BundleResult {
   // can no longer inject arbitrary themeCss/componentCss into the export (G006).
   const themeCss = toCssVariables(args.theme, args.presentation);
   const componentCss = themeComponentClasses(args.theme);
+  const slideGeometry = resolveHtmlExportSlideGeometry(args.theme, args.presentation);
+  const slideDims = slideDimsFor(args.orientation, slideGeometry);
+
 
 
   const minScale =
@@ -251,6 +257,7 @@ export function bundleHtml(args: BundleArgs): BundleResult {
     layout: args.layout,
     orientation: args.orientation,
     plan: args.layout === 'slides' ? args.plan : undefined,
+    dims: args.layout === 'slides' ? slideDims : undefined,
   });
 
   const manifest: ExportManifest = {

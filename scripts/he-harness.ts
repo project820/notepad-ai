@@ -34,7 +34,10 @@ import {
   toCssVariables,
   themeComponentClasses,
   evaluateDesignChecklist,
+  resolveHtmlExportSlideGeometry,
+  type HtmlExportPresentation,
 } from '../src/renderer/html-export-theme';
+
 import { createDomMeasure, domFontsReady } from '../src/renderer/html-export-measure-dom';
 import { corpusToModel } from '../src/renderer/__fixtures__/html-export/corpus-to-model';
 import type { ContentBlock, ContentModel } from '../src/renderer/html-export-model';
@@ -55,7 +58,10 @@ const checklist = evaluateDesignChecklist({ designMd: DESIGN_MD, theme, css: `${
 
 const TOL = 1.5; // sub-pixel tolerance for geometry comparisons
 
-type CellOpts = { orientation: Orientation; layout?: LayoutKind; title?: string };
+
+
+type CellOpts = { orientation: Orientation; layout?: LayoutKind; title?: string; presentation?: HtmlExportPresentation };
+
 
 function buildModel(md: string, title?: string): ContentModel {
   return corpusToModel(md, title || 'Untitled');
@@ -76,6 +82,8 @@ function bundleDoc(md: string, opts: CellOpts) {
     designMd: DESIGN_MD,
     freeRequirement: 'containment runner',
     checklist,
+    presentation: opts.presentation,
+
   });
   const verdict = validateSelfContainedHtml(html);
   return { html, manifest, validate: verdict, sectionCount: model.sections.length };
@@ -100,9 +108,12 @@ function reflowRoot(): HTMLElement | null {
  */
 async function assertSlides(md: string, opts: CellOpts) {
   const orientation = opts.orientation;
-  const dims: SlideDims = slideDimsFor(orientation);
+  const dims: SlideDims = slideDimsFor(orientation, resolveHtmlExportSlideGeometry(theme, opts.presentation));
+
+
   const model = buildModel(md, opts.title);
-  const measure = createDomMeasure({ doc: document, styleCss: buildExportStyle(theme, opts.orientation, 'slides') });
+  const measure = createDomMeasure({ doc: document, styleCss: buildExportStyle(theme, opts.orientation, 'slides', opts.presentation) });
+
   const fontsReady = domFontsReady(document);
 
   const plan = await planSlides({ model, orientation, dims, measure, fontsReady });
@@ -129,6 +140,8 @@ async function assertSlides(md: string, opts: CellOpts) {
     failures.push(`navigation controls below 44px (${navMinWidth.toFixed(1)}×${navMinHeight.toFixed(1)})`);
   }
   let maxTopOffset = 0;
+  let navOverlapCount = 0;
+
 
   // Strip the bundle's per-section slides; we render the PLANNED deck instead,
   // reusing the SHIPPED slide CSS so the harness layout cannot drift from what
@@ -137,7 +150,7 @@ async function assertSlides(md: string, opts: CellOpts) {
 
   // Mount the planned deck inside a REAL `.he-slides` container so the shipped
   // `.slide.active` flex contract (display:flex; flex-direction:column;
-  // justify-content:center; align-items:stretch; padding; overflow:hidden — from
+  // top-aligned safe-area padding; overflow:hidden — from
   // html-export-bundle.ts COMMON_CSS + SLIDES_CSS) applies VERBATIM. The
   // container is PINNED to the design canvas (overriding the bundle's
   // 100vw/100vh) so containment is asserted against the SLIDE CANVAS, never the
@@ -200,6 +213,20 @@ async function assertSlides(md: string, opts: CellOpts) {
     const safeTop = sr.top + (parseFloat(cs.paddingTop) || 0);
     const safeRight = sr.right - (parseFloat(cs.paddingRight) || 0);
     const safeBottom = sr.bottom - (parseFloat(cs.paddingBottom) || 0);
+    const navReserve = parseFloat(cs.getPropertyValue('--he-nav-reserve')) || 0;
+    const navLane = { left: sr.left, top: sr.bottom - navReserve, right: sr.right, bottom: sr.bottom };
+    const scalerRect = scaler.getBoundingClientRect();
+    if (
+      scalerRect.left < navLane.right - TOL &&
+      scalerRect.right > navLane.left + TOL &&
+      scalerRect.top < navLane.bottom - TOL &&
+      scalerRect.bottom > navLane.top + TOL
+    ) {
+      navOverlapCount += 1;
+
+      failures.push(`slide ${idx}: content overlaps reserved navigation lane`);
+    }
+
     const topOffset = inner.getBoundingClientRect().top - safeTop;
     maxTopOffset = Math.max(maxTopOffset, topOffset);
     if (topOffset > TOL) {
@@ -277,6 +304,7 @@ async function assertSlides(md: string, opts: CellOpts) {
     navMinWidth,
     navMinHeight,
     maxTopOffset,
+    navOverlapCount,
 
   };
 }
@@ -288,9 +316,12 @@ async function assertSlides(md: string, opts: CellOpts) {
  */
 async function assertScroll(md: string, opts: CellOpts) {
   const orientation = opts.orientation;
-  const dims: SlideDims = slideDimsFor(orientation);
+  const dims: SlideDims = slideDimsFor(orientation, resolveHtmlExportSlideGeometry(theme, opts.presentation));
+
+
   const model = buildModel(md, opts.title);
-  const measure = createDomMeasure({ doc: document, styleCss: buildExportStyle(theme, opts.orientation, 'scroll') });
+  const measure = createDomMeasure({ doc: document, styleCss: buildExportStyle(theme, opts.orientation, 'scroll', opts.presentation) });
+
   const fontsReady = domFontsReady(document);
   const scroll = await planScrollContainment({ model, orientation, dims, measure, fontsReady });
 
@@ -342,9 +373,10 @@ async function assertScroll(md: string, opts: CellOpts) {
 
 /** DIAGNOSTIC: per-block real-DOM footprint vs the slide safe area. */
 async function probe(md: string, opts: CellOpts) {
-  const dims: SlideDims = slideDimsFor(opts.orientation);
+  const dims: SlideDims = slideDimsFor(opts.orientation, resolveHtmlExportSlideGeometry(theme, opts.presentation));
+
   const model = buildModel(md, opts.title);
-  const measure = createDomMeasure({ doc: document, styleCss: buildExportStyle(theme, opts.orientation, 'slides') });
+  const measure = createDomMeasure({ doc: document, styleCss: buildExportStyle(theme, opts.orientation, 'slides', opts.presentation) });
   await domFontsReady(document)();
   const out: Array<Record<string, number | string>> = [];
   for (const s of model.sections) {

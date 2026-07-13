@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CliProcess } from '../main/ai/cli-runner';
 
 vi.mock('electron', () => ({ shell: { openExternal: vi.fn() } }));
@@ -19,10 +19,14 @@ class FakeChild implements CliProcess {
   }
   kill(signal?: NodeJS.Signals): void { this.kills.push(signal); }
   emitOut(chunk: string): void { this.out.forEach((cb) => cb(chunk)); }
-  close(code: number): void { this.closes.forEach((cb) => cb(code)); }
+  close(code: number | null): void { this.closes.forEach((cb) => cb(code)); }
 }
 
 const modulePromise = import('../main/ai/subscription-login');
+const senderFor = (updates: unknown[]) => ({ isDestroyed: () => false, send: (_channel: string, update: unknown) => updates.push(update) });
+const flush = async () => { await Promise.resolve(); await Promise.resolve(); };
+
+afterEach(() => vi.useRealTimers());
 
 describe('subscription CLI login', () => {
   it('rejects malformed, lookalike, custom scheme, and wrong-path URLs', async () => {
@@ -42,11 +46,11 @@ describe('subscription CLI login', () => {
       buildEnv: async () => ({ HOME: '/real-home' }), openExternal, timeoutMs: 10_000,
     });
     const updates: unknown[] = [];
-    const sender = { isDestroyed: () => false, send: (_channel: string, update: unknown) => updates.push(update) };
-    await service.start('grok', sender);
+    await service.start('grok', senderFor(updates));
     child.emitOut('https://accounts.x.ai/oauth2/de');
     child.emitOut('vice?user_code=ABCD\nWaiting for authorization');
     child.close(0);
+    await flush();
     expect(openExternal).toHaveBeenCalledWith('https://accounts.x.ai/oauth2/device?user_code=ABCD');
     expect(updates).toEqual([
       { kind: 'opened-url', provider: 'grok', url: 'https://accounts.x.ai/oauth2/device?user_code=ABCD', code: 'ABCD' },
@@ -54,22 +58,128 @@ describe('subscription CLI login', () => {
     ]);
   });
 
-  it('relays a Claude paste-back code and emits one terminal event', async () => {
+  it('relays a Claude paste-back code and verifies auth status before success', async () => {
     const { SubscriptionLoginService } = await modulePromise;
-    const child = new FakeChild();
+    const login = new FakeChild();
+    const status = new FakeChild();
+    const spawn = vi.fn().mockReturnValueOnce(login).mockReturnValueOnce(status);
     const service = new SubscriptionLoginService({
-      spawn: vi.fn(() => child), resolveCommand: async () => ({ command: '/trusted/claude' }),
+      spawn, resolveCommand: async () => ({ command: '/trusted/claude' }),
       buildEnv: async () => ({ HOME: '/real-home' }), openExternal: vi.fn(async () => {}), timeoutMs: 10_000,
     });
     const updates: unknown[] = [];
-    const sender = { isDestroyed: () => false, send: (_channel: string, update: unknown) => updates.push(update) };
-    await service.start('claude', sender);
-    child.emitOut('https://claude.com/cai/oauth/authorize?code=true\nPaste code here if prompted > ');
+    await service.start('claude', senderFor(updates));
+    login.emitOut('https://claude.com/cai/oauth/authorize?code=true\nPaste code here if prompted > ');
     service.submitCode('claude', ' user-code ');
-    child.close(0);
-    child.close(0);
-    expect(child.stdinChunks).toEqual(['user-code\n']);
+    login.close(0);
+    await flush();
+    expect(spawn).toHaveBeenNthCalledWith(2, '/trusted/claude', ['auth', 'status'], expect.any(Object));
+    status.emitOut('{"loggedIn":true,"authMethod":"oauth_token"}');
+    status.close(0);
+    status.close(0);
+    expect(login.stdinChunks).toEqual(['user-code\n']);
     expect(updates.filter((update: any) => update.kind === 'success')).toHaveLength(1);
     expect(updates.some((update: any) => update.kind === 'awaiting-code')).toBe(true);
+  });
+
+  it('treats Claude loggedIn:false status as login failure', async () => {
+    const { SubscriptionLoginService } = await modulePromise;
+    const login = new FakeChild();
+    const status = new FakeChild();
+    const service = new SubscriptionLoginService({
+      spawn: vi.fn().mockReturnValueOnce(login).mockReturnValueOnce(status), resolveCommand: async () => ({ command: '/trusted/claude' }),
+      buildEnv: async () => ({ HOME: '/real-home' }), openExternal: vi.fn(async () => {}), timeoutMs: 10_000,
+    });
+    const updates: any[] = [];
+    await service.start('claude', senderFor(updates));
+    login.emitOut('https://claude.com/cai/oauth/authorize?code=true\n');
+    login.close(0);
+    await flush();
+    status.emitOut('{"loggedIn":false}');
+    status.close(0);
+    expect(updates.some((update) => update.kind === 'success')).toBe(false);
+    expect(updates.at(-1)).toMatchObject({ kind: 'error', provider: 'claude', code: 'login_failed' });
+  });
+
+  it('kills a timed-out child with TERM followed by KILL', async () => {
+    vi.useFakeTimers();
+    const { SubscriptionLoginService } = await modulePromise;
+    const child = new FakeChild();
+    const service = new SubscriptionLoginService({
+      spawn: vi.fn(() => child), resolveCommand: async () => ({ command: '/trusted/grok' }), buildEnv: async () => ({ HOME: '/real-home' }),
+      openExternal: vi.fn(async () => {}), timeoutMs: 10, killGraceMs: 1,
+    });
+    await service.start('grok', senderFor([]));
+    await vi.advanceTimersByTimeAsync(10);
+    expect(child.kills).toEqual(['SIGTERM']);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(child.kills).toEqual(['SIGTERM', 'SIGKILL']);
+  });
+
+  it('does not kill again when cancelled after normal completion', async () => {
+    const { SubscriptionLoginService } = await modulePromise;
+    const child = new FakeChild();
+    const service = new SubscriptionLoginService({
+      spawn: vi.fn(() => child), resolveCommand: async () => ({ command: '/trusted/grok' }), buildEnv: async () => ({ HOME: '/real-home' }),
+      openExternal: vi.fn(async () => {}), timeoutMs: 10_000,
+    });
+    await service.start('grok', senderFor([]));
+    child.emitOut('https://accounts.x.ai/oauth2/device?user_code=ABCD\n');
+    child.close(0);
+    await flush();
+    service.cancel('grok');
+    expect(child.kills).toEqual([]);
+  });
+
+  it('reserves a provider before awaits so concurrent starts spawn one child', async () => {
+    const { SubscriptionLoginService } = await modulePromise;
+    const child = new FakeChild();
+    let resolveCommand!: (value: { command: string }) => void;
+    const service = new SubscriptionLoginService({
+      spawn: vi.fn(() => child), resolveCommand: () => new Promise((resolve) => { resolveCommand = resolve; }),
+      buildEnv: async () => ({ HOME: '/real-home' }), openExternal: vi.fn(async () => {}), timeoutMs: 10_000,
+    });
+    const first = service.start('grok', senderFor([]));
+    await expect(service.start('grok', senderFor([]))).rejects.toThrow('already in progress');
+    resolveCommand({ command: '/trusted/grok' });
+    await first;
+    expect((service as any).deps.spawn).toHaveBeenCalledTimes(1);
+  });
+  it('cancels a reserved login when its sender is destroyed before preparation completes', async () => {
+    const { SubscriptionLoginService } = await modulePromise;
+    const spawn = vi.fn(() => new FakeChild());
+    let destroy!: () => void;
+    let resolveCommand!: (value: { command: string }) => void;
+    const sender = {
+      isDestroyed: () => true,
+      send: vi.fn(),
+      once: (_event: 'destroyed', listener: () => void) => { destroy = listener; },
+    };
+    const service = new SubscriptionLoginService({
+      spawn, resolveCommand: () => new Promise((resolve) => { resolveCommand = resolve; }),
+      buildEnv: async () => ({ HOME: '/real-home' }), openExternal: vi.fn(async () => {}), timeoutMs: 10_000,
+    });
+    const start = service.start('grok', sender);
+    destroy();
+    resolveCommand({ command: '/trusted/grok' });
+    await start;
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('times out logout and escalates its child from TERM to KILL', async () => {
+    vi.useFakeTimers();
+    const { SubscriptionLoginService } = await modulePromise;
+    const child = new FakeChild();
+    const service = new SubscriptionLoginService({
+      spawn: vi.fn(() => child), resolveCommand: async () => ({ command: '/trusted/grok' }), buildEnv: async () => ({ HOME: '/real-home' }),
+      openExternal: vi.fn(async () => {}), timeoutMs: 10, killGraceMs: 1,
+    });
+    const logout = service.logout('grok');
+    await flush();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(child.kills).toEqual(['SIGTERM']);
+    await vi.advanceTimersByTimeAsync(1);
+    await logout;
+    expect(child.kills).toEqual(['SIGTERM', 'SIGKILL']);
   });
 });

@@ -118,6 +118,12 @@ describe('slideDimsFor', () => {
     expect(v.safeW).toBeLessThan(v.width);
     expect(v.safeH).toBeLessThan(v.height);
   });
+  it('reserves the rendered navigation footer in the vertical safe area', () => {
+    const dims = slideDimsFor('horizontal', { padding: 80, navReserve: 128 });
+
+    expect(dims.safeW).toBe(1120);
+    expect(dims.safeH).toBe(432);
+  });
 });
 
 // ---------------------------------------------------------------------------

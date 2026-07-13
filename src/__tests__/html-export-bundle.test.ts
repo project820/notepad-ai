@@ -101,6 +101,16 @@ describe('bundleHtml — single self-contained document', () => {
     expect(html).toContain('padding:8px 14px');
     expect(html).toContain('font-size:16px');
   });
+  it('shares resolved rhythm and navigation reserve with planned-slide rendering', () => {
+    const { html } = bundle({
+      plan: [{ blocks: [{ kind: 'paragraph', text: 'Contained' }], scale: 1, sectionTitle: 'One' }],
+    });
+
+    expect(html).toContain('--he-slide-pad: 38px;');
+    expect(html).toContain('--he-nav-reserve: 86px;');
+    expect(html).toContain('padding-bottom:calc(var(--he-slide-pad) + var(--he-nav-reserve))');
+    expect(html).toContain('style="width:1204px"');
+  });
 
   it('embeds the manifest JSON with every required field, correct', () => {
     const { html, manifest } = bundle();

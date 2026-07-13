@@ -42,6 +42,12 @@ export type SlideDims = {
   /** Usable inner height (safe area). Content must fit within this after scaling. */
   safeH: number;
 };
+/** Rendered slide insets shared with the CSS variables in html-export-theme. */
+export type SlideSafeArea = {
+  padding: number;
+  navReserve?: number;
+};
+
 
 /**
  * Measure the natural pixel footprint of `blocks` laid out for `dims` at the
@@ -143,8 +149,9 @@ export const MIN_SCALE = MIN_BODY_PX / BASE_BODY_PX;
 /** Default hard iteration cap for the measure→split loop. */
 export const DEFAULT_MAX_ITERATIONS = 200;
 
-/** Safe-area padding (per edge) trimmed from the raw slide rectangle. */
+/** Default slide padding per edge, retained for callers without a resolved theme. */
 const SAFE_PAD = 48;
+
 /** Charts cannot be reduced below this label count — fewer would be meaningless. */
 const MIN_CHART_LABELS = 2;
 
@@ -153,14 +160,17 @@ const MIN_CHART_LABELS = 2;
 // ---------------------------------------------------------------------------
 
 /** Slide dimensions for an orientation (horizontal 1280×720, vertical 720×1280). */
-export function slideDimsFor(orientation: Orientation): SlideDims {
+/** Slide dimensions for an orientation (horizontal 1280×720, vertical 720×1280). */
+export function slideDimsFor(orientation: Orientation, safeArea: SlideSafeArea = { padding: SAFE_PAD }): SlideDims {
   const width = orientation === 'vertical' ? 720 : 1280;
   const height = orientation === 'vertical' ? 1280 : 720;
+  const padding = Math.max(0, safeArea.padding);
+  const navReserve = Math.max(0, safeArea.navReserve ?? 0);
   return {
     width,
     height,
-    safeW: width - SAFE_PAD * 2,
-    safeH: height - SAFE_PAD * 2,
+    safeW: Math.max(1, width - padding * 2),
+    safeH: Math.max(1, height - padding * 2 - navReserve),
   };
 }
 

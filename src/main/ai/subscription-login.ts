@@ -4,6 +4,7 @@ import { resolveTrustedCliCommand, type TrustedCliResult } from './cli-trust';
 import type { SubscriptionLoginUpdate, SubscriptionProvider } from '../../shared/auth-protocol';
 
 const LOGIN_TIMEOUT_MS = 15 * 60_000;
+const KILL_GRACE_MS = 1_000;
 const OUTPUT_CAP = 64 * 1024;
 
 type LoginSender = {
@@ -13,13 +14,19 @@ type LoginSender = {
 };
 
 type ActiveLogin = {
-  process: CliProcess;
   sender: LoginSender;
   terminal: boolean;
   timer: ReturnType<typeof setTimeout>;
+  killTimer: ReturnType<typeof setTimeout> | null;
+  process: CliProcess | null;
   provider: SubscriptionProvider;
   sawValidUrl: boolean;
   sawCodePrompt: boolean;
+  openPending: boolean;
+  loginExitCode: number | null | undefined;
+  command?: string;
+  env?: Record<string, string>;
+  onResult?: (provider: SubscriptionProvider, state: 'succeeded' | 'unknown') => void;
 };
 
 export type SubscriptionLoginDeps = {
@@ -28,6 +35,7 @@ export type SubscriptionLoginDeps = {
   buildEnv: () => Promise<Record<string, string>>;
   openExternal: (url: string) => Promise<void>;
   timeoutMs: number;
+  killGraceMs?: number;
 };
 
 const defaults: SubscriptionLoginDeps = {
@@ -36,6 +44,7 @@ const defaults: SubscriptionLoginDeps = {
   buildEnv: buildMinimalEnv,
   openExternal: (url) => shell.openExternal(url),
   timeoutMs: LOGIN_TIMEOUT_MS,
+  killGraceMs: KILL_GRACE_MS,
 };
 
 /** Removes terminal control bytes before parsing CLI chatter. Never persist CLI output. */
@@ -66,6 +75,15 @@ function extractGrokCode(buffer: string): string | undefined {
   return fromQuery ?? fromText;
 }
 
+function isLoggedInClaudeStatus(output: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(output.trim());
+    return typeof parsed === 'object' && parsed !== null && (parsed as { loggedIn?: unknown }).loggedIn === true;
+  } catch {
+    return false;
+  }
+}
+
 export class SubscriptionLoginService {
   private readonly active = new Map<SubscriptionProvider, ActiveLogin>();
 
@@ -73,77 +91,212 @@ export class SubscriptionLoginService {
 
   async start(provider: SubscriptionProvider, sender: LoginSender, onResult?: (provider: SubscriptionProvider, state: 'succeeded' | 'unknown') => void): Promise<void> {
     if (this.active.has(provider)) throw new Error('A login is already in progress for this provider.');
-    const trusted = await this.deps.resolveCommand(provider);
-    if (!('command' in trusted)) {
-      this.emit(sender, { kind: 'error', provider, code: 'cli_unavailable' });
-      return;
+    // Reserve synchronously before any asynchronous command/env work. This prevents
+    // concurrent starts from spawning multiple provider CLIs.
+    const entry = this.reserve(provider, sender, onResult);
+    sender.once?.('destroyed', () => this.cancelEntry(entry));
+    try {
+      const trusted = await this.deps.resolveCommand(provider);
+      if (!this.isCurrent(entry)) return;
+      if (!('command' in trusted)) return this.fail(entry, { kind: 'error', provider, code: 'cli_unavailable' });
+      const env = await this.deps.buildEnv();
+      if (!this.isCurrent(entry)) return;
+      entry.command = trusted.command;
+      entry.env = env;
+      const args = provider === 'grok' ? ['login', '--device-auth'] : ['auth', 'login', '--claudeai'];
+      this.attachLoginProcess(entry, this.deps.spawn(trusted.command, args, { env, cwd: env.HOME || process.cwd() }));
+    } catch {
+      if (this.isCurrent(entry)) this.fail(entry, { kind: 'error', provider, code: 'login_failed' });
     }
-    const env = await this.deps.buildEnv();
-    const args = provider === 'grok' ? ['login', '--device-auth'] : ['auth', 'login', '--claudeai'];
-    const child = this.deps.spawn(trusted.command, args, { env, cwd: env.HOME || process.cwd() });
-    let output = '';
-    const entry: ActiveLogin = {
-      process: child, sender, terminal: false, provider, sawValidUrl: false, sawCodePrompt: false,
-      timer: setTimeout(() => this.finish(entry, { kind: 'error', provider, code: 'timeout' }, onResult), this.deps.timeoutMs),
-    };
-    this.active.set(provider, entry);
-    const consume = (chunk: Buffer | string) => {
-      if (entry.terminal) return;
-      output = (output + sanitizeLoginOutput(chunk)).slice(-OUTPUT_CAP);
-      const candidate = extractUrl(output);
-      if (candidate && !entry.sawValidUrl) {
-        const url = parseSubscriptionLoginUrl(provider, candidate);
-        if (!url) return this.finish(entry, { kind: 'error', provider, code: 'invalid_login_url' }, onResult);
-        entry.sawValidUrl = true;
-        void this.deps.openExternal(url).catch(() => this.finish(entry, { kind: 'error', provider, code: 'login_failed' }, onResult));
-        this.emit(sender, { kind: 'opened-url', provider, url, ...(provider === 'grok' ? { code: extractGrokCode(output) } : {}) });
-      }
-      if (provider === 'claude' && !entry.sawCodePrompt && /paste code here if prompted\s*>?/i.test(output)) {
-        entry.sawCodePrompt = true;
-        this.emit(sender, { kind: 'awaiting-code', provider: 'claude' });
-      }
-    };
-    child.stdout?.on('data', consume);
-    child.stderr?.on('data', consume);
-    child.on('error', () => this.finish(entry, { kind: 'error', provider, code: 'login_failed' }, onResult));
-    child.on('close', (code) => {
-      if (entry.terminal) return;
-      this.finish(entry, code === 0 && entry.sawValidUrl ? { kind: 'success', provider } : { kind: 'error', provider, code: 'login_failed' }, onResult);
-    });
-    sender.once?.('destroyed', () => this.cancel(provider));
-    if (provider === 'grok') child.stdin?.end();
   }
 
   submitCode(provider: SubscriptionProvider, code: string): void {
     if (provider !== 'claude' || !/\S/.test(code)) return;
     const entry = this.active.get(provider);
-    if (entry && !entry.terminal) entry.process.stdin?.write(`${code.trim()}\n`);
+    if (entry && !entry.terminal) entry.process?.stdin?.write(`${code.trim()}\n`);
   }
 
   cancel(provider: SubscriptionProvider): void {
     const entry = this.active.get(provider);
-    if (!entry || entry.terminal) return;
-    entry.process.kill('SIGTERM');
-    setTimeout(() => { if (!entry.terminal) entry.process.kill('SIGKILL'); }, 1_000);
-    this.finish(entry, { kind: 'cancelled', provider });
+    if (entry) this.cancelEntry(entry);
   }
 
   async logout(provider: SubscriptionProvider, onResult?: (provider: SubscriptionProvider, state: 'unknown') => void): Promise<void> {
-    const trusted = await this.deps.resolveCommand(provider);
-    if (!('command' in trusted)) return;
-    const env = await this.deps.buildEnv();
-    const child = this.deps.spawn(trusted.command, provider === 'grok' ? ['logout'] : ['auth', 'logout'], { env, cwd: env.HOME || process.cwd() });
-    await new Promise<void>((resolve) => { child.on('error', () => resolve()); child.on('close', () => resolve()); });
-    onResult?.(provider, 'unknown');
+    let child: CliProcess | null = null;
+    let done = false;
+    let killTimer: ReturnType<typeof setTimeout> | null = null;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timeout);
+      if (killTimer) clearTimeout(killTimer);
+      onResult?.(provider, 'unknown');
+    };
+    const kill = () => {
+      if (!child) return finish();
+      try { child.kill('SIGTERM'); } catch { /* already gone */ }
+      killTimer = setTimeout(() => {
+        try { child?.kill('SIGKILL'); } catch { /* already gone */ }
+        finish();
+      }, this.killGraceMs);
+    };
+    const timeout = setTimeout(kill, this.deps.timeoutMs);
+    try {
+      const trusted = await this.deps.resolveCommand(provider);
+      if (done || !('command' in trusted)) return finish();
+      const env = await this.deps.buildEnv();
+      if (done) return finish();
+      child = this.deps.spawn(trusted.command, provider === 'grok' ? ['logout'] : ['auth', 'logout'], { env, cwd: env.HOME || process.cwd() });
+      child.on('error', finish);
+      child.on('close', finish);
+      child.stdin?.end();
+    } catch {
+      finish();
+    }
   }
 
-  private finish(entry: ActiveLogin, update: SubscriptionLoginUpdate, onResult?: (provider: SubscriptionProvider, state: 'succeeded' | 'unknown') => void): void {
+  private reserve(provider: SubscriptionProvider, sender: LoginSender, onResult?: ActiveLogin['onResult']): ActiveLogin {
+    const entry = {} as ActiveLogin;
+    entry.sender = sender;
+    entry.provider = provider;
+    entry.terminal = false;
+    entry.killTimer = null;
+    entry.process = null;
+    entry.sawValidUrl = false;
+    entry.sawCodePrompt = false;
+    entry.openPending = false;
+    entry.loginExitCode = undefined;
+    entry.onResult = onResult;
+    entry.timer = setTimeout(() => this.fail(entry, { kind: 'error', provider, code: 'timeout' }), this.deps.timeoutMs);
+    this.active.set(provider, entry);
+    return entry;
+  }
+
+  private attachLoginProcess(entry: ActiveLogin, child: CliProcess): void {
+    if (!this.isCurrent(entry)) {
+      this.killDetached(child);
+      return;
+    }
+    entry.process = child;
+    let output = '';
+    const consume = (chunk: Buffer | string) => {
+      if (entry.terminal) return;
+      output = (output + sanitizeLoginOutput(chunk)).slice(-OUTPUT_CAP);
+      const candidate = extractUrl(output);
+      if (candidate && !entry.sawValidUrl) {
+        const url = parseSubscriptionLoginUrl(entry.provider, candidate);
+        if (!url) return this.fail(entry, { kind: 'error', provider: entry.provider, code: 'invalid_login_url' });
+        entry.sawValidUrl = true;
+        entry.openPending = true;
+        void this.deps.openExternal(url).then(() => {
+          if (entry.terminal) return;
+          entry.openPending = false;
+          this.emit(entry.sender, { kind: 'opened-url', provider: entry.provider, url, ...(entry.provider === 'grok' ? { code: extractGrokCode(output) } : {}) });
+          if (entry.loginExitCode !== undefined) this.completeLoginClose(entry, entry.loginExitCode);
+        }).catch(() => this.fail(entry, { kind: 'error', provider: entry.provider, code: 'login_failed' }));
+      }
+      if (entry.provider === 'claude' && !entry.sawCodePrompt && /paste code here if prompted\s*>?/i.test(output)) {
+        entry.sawCodePrompt = true;
+        this.emit(entry.sender, { kind: 'awaiting-code', provider: 'claude' });
+      }
+    };
+    child.stdout?.on('data', consume);
+    child.stderr?.on('data', consume);
+    child.on('error', () => this.fail(entry, { kind: 'error', provider: entry.provider, code: 'login_failed' }));
+    child.on('close', (code) => {
+      if (entry.process === child) entry.process = null;
+      this.clearKillTimer(entry);
+      if (entry.terminal) return this.release(entry);
+      if (entry.openPending) {
+        entry.loginExitCode = code;
+        return;
+      }
+      this.completeLoginClose(entry, code);
+    });
+    if (entry.provider === 'grok') child.stdin?.end();
+  }
+  private completeLoginClose(entry: ActiveLogin, code: number | null): void {
+    if (entry.terminal) return;
+    if (code !== 0 || !entry.sawValidUrl) return this.fail(entry, { kind: 'error', provider: entry.provider, code: 'login_failed' });
+    if (entry.provider === 'claude') void this.verifyClaudeStatus(entry);
+    else this.finish(entry, { kind: 'success', provider: entry.provider });
+  }
+
+  private async verifyClaudeStatus(entry: ActiveLogin): Promise<void> {
+    if (!this.isCurrent(entry) || !entry.command || !entry.env) return;
+    let output = '';
+    try {
+      const child = this.deps.spawn(entry.command, ['auth', 'status'], { env: entry.env, cwd: entry.env.HOME || process.cwd() });
+      if (!this.isCurrent(entry)) return this.killDetached(child);
+      entry.process = child;
+      const collect = (chunk: Buffer | string) => { output = (output + sanitizeLoginOutput(chunk)).slice(-OUTPUT_CAP); };
+      child.stdout?.on('data', collect);
+      child.stderr?.on('data', collect);
+      child.on('error', () => this.fail(entry, { kind: 'error', provider: 'claude', code: 'login_failed' }));
+      child.on('close', (code) => {
+        if (entry.process === child) entry.process = null;
+        this.clearKillTimer(entry);
+        if (entry.terminal) return this.release(entry);
+        if (code === 0 && isLoggedInClaudeStatus(output)) this.finish(entry, { kind: 'success', provider: 'claude' });
+        else this.fail(entry, { kind: 'error', provider: 'claude', code: 'login_failed' });
+      });
+      child.stdin?.end();
+    } catch {
+      this.fail(entry, { kind: 'error', provider: 'claude', code: 'login_failed' });
+    }
+  }
+
+  private cancelEntry(entry: ActiveLogin): void {
+    if (!this.isCurrent(entry)) return;
+    this.fail(entry, { kind: 'cancelled', provider: entry.provider });
+  }
+
+  private fail(entry: ActiveLogin, update: Extract<SubscriptionLoginUpdate, { kind: 'error' | 'cancelled' }>): void {
+    this.finish(entry, update);
+    this.stopProcess(entry);
+  }
+
+  private finish(entry: ActiveLogin, update: SubscriptionLoginUpdate): void {
     if (entry.terminal) return;
     entry.terminal = true;
     clearTimeout(entry.timer);
-    this.active.delete(entry.provider);
     this.emit(entry.sender, update);
-    if (update.kind === 'success') onResult?.(entry.provider, 'succeeded');
+    if (update.kind === 'success') entry.onResult?.(entry.provider, 'succeeded');
+    if (!entry.process) this.release(entry);
+  }
+
+  private stopProcess(entry: ActiveLogin): void {
+    const child = entry.process;
+    if (!child) return this.release(entry);
+    try { child.kill('SIGTERM'); } catch { /* already gone */ }
+    entry.killTimer = setTimeout(() => {
+      try { child.kill('SIGKILL'); } catch { /* already gone */ }
+      if (entry.process === child) entry.process = null;
+      this.release(entry);
+    }, this.killGraceMs);
+  }
+
+  private killDetached(child: CliProcess): void {
+    try { child.kill('SIGTERM'); } catch { /* already gone */ }
+    setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* already gone */ } }, this.killGraceMs);
+  }
+
+  private clearKillTimer(entry: ActiveLogin): void {
+    if (entry.killTimer) clearTimeout(entry.killTimer);
+    entry.killTimer = null;
+  }
+
+  private release(entry: ActiveLogin): void {
+    this.clearKillTimer(entry);
+    if (this.active.get(entry.provider) === entry) this.active.delete(entry.provider);
+  }
+
+  private isCurrent(entry: ActiveLogin): boolean {
+    return this.active.get(entry.provider) === entry && !entry.terminal;
+  }
+
+  private get killGraceMs(): number {
+    return this.deps.killGraceMs ?? KILL_GRACE_MS;
   }
 
   private emit(sender: LoginSender, update: SubscriptionLoginUpdate): void {

@@ -105,6 +105,12 @@ export type HtmlExportPresentation = {
   readableWidth?: 'narrow' | 'normal' | 'wide';
 };
 
+/** Resolved slide geometry shared by the planner and rendered deck CSS. */
+export type HtmlExportSlideGeometry = {
+  padding: number;
+  navReserve: number;
+};
+
 export type ChecklistResult = { passed: boolean; items: ChecklistItem[] };
 
 // ---------------------------------------------------------------------------
@@ -633,6 +639,17 @@ function headingUsesAccent(theme: DesignTheme): boolean {
   return bgContrast !== null && surfaceContrast !== null && bgContrast >= HEADING_ACCENT_CONTRAST_MIN && surfaceContrast >= HEADING_ACCENT_CONTRAST_MIN;
 }
 
+export function resolveHtmlExportSlideGeometry(
+  theme: DesignTheme,
+  presentation?: HtmlExportPresentation,
+): HtmlExportSlideGeometry {
+  const rhythm = Math.round(clamp(theme.spacing.rhythm * densityFactor(theme.tone.density, presentation), RHYTHM_MIN, RHYTHM_MAX));
+  return {
+    padding: rhythm,
+    navReserve: 48 + Math.round(rhythm / 2) * 2,
+  };
+}
+
 function toneRadius(theme: DesignTheme): number {
   const { corner } = theme.tone;
   if (corner === 'sharp') return 0;
@@ -655,7 +672,8 @@ function dividerWidth(theme: DesignTheme): number {
 export function toCssVariables(theme: DesignTheme, presentation?: HtmlExportPresentation): string {
   const c = theme.colors;
   const t = theme.type;
-  const rhythm = Math.round(clamp(theme.spacing.rhythm * densityFactor(theme.tone.density, presentation), RHYTHM_MIN, RHYTHM_MAX));
+  const rhythm = resolveHtmlExportSlideGeometry(theme, presentation).padding;
+
   const radius = toneRadius(theme);
   const bw = dividerWidth(theme);
   const headingWeight = theme.tone.contrast === 'high' ? Math.min(900, t.titleWeight + 100) : t.titleWeight;
@@ -695,6 +713,8 @@ export function toCssVariables(theme: DesignTheme, presentation?: HtmlExportPres
   out.push(`  --he-rhythm-lg: ${cssNum(Math.round(rhythm * 1.5))}px;`);
   out.push(`  --he-component-padding: ${cssNum(Math.round(rhythm / 3))}px;`);
   out.push(`  --he-readable-width: ${readableWidth(presentation?.readableWidth)};`);
+  out.push(`  --he-slide-pad: ${cssNum(rhythm)}px;`);
+  out.push(`  --he-nav-reserve: ${cssNum(48 + Math.round(rhythm / 2) * 2)}px;`);
   out.push('  /* shape + tone */');
   out.push(`  --he-radius: ${cssNum(radius)}px;`);
   out.push(`  --he-radius-sm: ${cssNum(theme.radii.sm)}px;`);

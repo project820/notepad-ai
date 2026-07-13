@@ -24,7 +24,8 @@
 import type { ContentBlock, ContentModel, ContentSection } from './html-export-model';
 import type { LayoutKind, Orientation } from './html-export-state';
 import { renderChartSvg } from './html-export-charts';
-import { slideDimsFor, type PlannedSlide } from './html-export-layout';
+import { slideDimsFor, type PlannedSlide, type SlideDims } from './html-export-layout';
+
 
 export type RenderContext = {
   layout: LayoutKind;
@@ -37,6 +38,9 @@ export type RenderContext = {
    * containment the layout engine guarantees. Omitted → legacy section deck.
    */
   plan?: readonly PlannedSlide[];
+  /** Resolved geometry used by the planner for this export. */
+  dims?: SlideDims;
+
 };
 
 export type RenderResult = {
@@ -225,7 +229,7 @@ function buildPlannedSlides(
   ctx: RenderContext,
   counters: Counters,
 ): { bodyHtml: string; slideCount: number } {
-  const safeW = slideDimsFor(ctx.orientation).safeW;
+  const safeW = (ctx.dims ?? slideDimsFor(ctx.orientation)).safeW;
   const slides: string[] = [];
   // Cover slide (index 0) — the only `.slide.active` at build time, scale 1.
   slides.push(

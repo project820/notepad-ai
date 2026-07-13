@@ -52,6 +52,10 @@ const DUMP = process.env.HE_DUMP || '';
 let shotDone = false;
 
 const ORIENTATIONS = ['horizontal', 'vertical'];
+const PRESENTATIONS = [
+  { label: 'theme', presentation: undefined },
+  { label: 'roomy', presentation: { density: 'roomy' } },
+];
 
 // Offscreen + headless-friendly switches (best effort across environments).
 app.disableHardwareAcceleration();
@@ -209,56 +213,67 @@ async function run() {
   for (const fx of fixtures) {
     for (const orientation of ORIENTATIONS) {
       for (const layout of ['slides', 'scroll']) {
-        // Pure bundle (harness present from the previous load's injection).
-        const bundle = await callHarness('bundleDoc', fx.md, { orientation, layout, title: fx.name });
         const viewports = layout === 'slides' ? slideViewports(orientation) : scrollViewports(orientation);
-        for (const vp of viewports) {
-          const remote = await loadHtmlAt(bundle.html, vp.w, vp.h);
-          const assertFn = layout === 'slides' ? 'assertSlides' : 'assertScroll';
-          const verdict = await callHarness(assertFn, fx.md, { orientation, title: fx.name });
-
-          const failures = [...(verdict.failures || [])];
-          if (!bundle.validate.ok) failures.push(`not self-contained: ${bundle.validate.violations.join('; ')}`);
-          if (remote.length > 0) failures.push(`remote request(s): ${remote.join(', ')}`);
-
-          const ok = failures.length === 0 && verdict.ok !== false;
-          const row = {
-            fixture: fx.name,
-            kind: fx.kind,
-            layout,
+        for (const presentationCase of PRESENTATIONS) {
+          const bundle = await callHarness('bundleDoc', fx.md, {
             orientation,
-            viewport: `${vp.w}x${vp.h}(${vp.label})`,
-            slides: verdict.slideCount,
-            splits: verdict.splits,
-            minScale: typeof verdict.minScale === 'number' ? Number(verdict.minScale.toFixed(3)) : null,
-            ok,
-            navMinWidth: typeof verdict.navMinWidth === 'number' ? Number(verdict.navMinWidth.toFixed(1)) : null,
-            navMinHeight: typeof verdict.navMinHeight === 'number' ? Number(verdict.navMinHeight.toFixed(1)) : null,
-            maxTopOffset: typeof verdict.maxTopOffset === 'number' ? Number(verdict.maxTopOffset.toFixed(1)) : null,
-            readingWidthRatio: typeof verdict.readingWidthRatio === 'number' ? Number(verdict.readingWidthRatio.toFixed(3)) : null,
+            layout,
+            title: fx.name,
+            presentation: presentationCase.presentation,
+          });
+          for (const vp of viewports) {
+            const remote = await loadHtmlAt(bundle.html, vp.w, vp.h);
+            const assertFn = layout === 'slides' ? 'assertSlides' : 'assertScroll';
+            const verdict = await callHarness(assertFn, fx.md, {
+              orientation,
+              title: fx.name,
+              presentation: presentationCase.presentation,
+            });
 
-            failures,
-          };
-          rows.push(row);
-          if (fx.kind === 'inject') {
-            if (!ok) injectDetected = true; // expected to fail
-          }
-          if (ok) pass += 1;
-          else fail += 1;
-          // Optional: capture ONE real screenshot of an applied (paginated+scaled) cell.
-          if (DUMP && !shotDone && ok && fx.kind !== 'inject' && layout === 'slides' && orientation === 'horizontal') {
-            writeFileSync(DUMP, bundle.html, 'utf8');
-            shotDone = true;
-            console.log(`DUMP saved: ${DUMP} (${fx.name} / slides / horizontal)`);
-          }
-          if (SHOT && !shotDone && ok && fx.kind !== 'inject' && layout === 'slides' && orientation === 'horizontal') {
-            try {
-              const img = await withTimeout(win.webContents.capturePage(), 15000, 'capturePage');
-              writeFileSync(SHOT, img.toPNG());
+            const failures = [...(verdict.failures || [])];
+            if (!bundle.validate.ok) failures.push(`not self-contained: ${bundle.validate.violations.join('; ')}`);
+            if (remote.length > 0) failures.push(`remote request(s): ${remote.join(', ')}`);
+
+            const ok = failures.length === 0 && verdict.ok !== false;
+            const row = {
+              fixture: fx.name,
+              kind: fx.kind,
+              layout,
+              orientation,
+              presentation: presentationCase.label,
+              viewport: `${vp.w}x${vp.h}(${vp.label})`,
+              slides: verdict.slideCount,
+              splits: verdict.splits,
+              minScale: typeof verdict.minScale === 'number' ? Number(verdict.minScale.toFixed(3)) : null,
+              ok,
+              navMinWidth: typeof verdict.navMinWidth === 'number' ? Number(verdict.navMinWidth.toFixed(1)) : null,
+              navMinHeight: typeof verdict.navMinHeight === 'number' ? Number(verdict.navMinHeight.toFixed(1)) : null,
+              maxTopOffset: typeof verdict.maxTopOffset === 'number' ? Number(verdict.maxTopOffset.toFixed(1)) : null,
+              readingWidthRatio: typeof verdict.readingWidthRatio === 'number' ? Number(verdict.readingWidthRatio.toFixed(3)) : null,
+              navOverlapCount: typeof verdict.navOverlapCount === 'number' ? verdict.navOverlapCount : null,
+              failures,
+            };
+            rows.push(row);
+            if (fx.kind === 'inject') {
+              if (!ok) injectDetected = true; // expected to fail
+            }
+            if (ok) pass += 1;
+            else fail += 1;
+            // Optional: capture ONE real screenshot of an applied (paginated+scaled) cell.
+            if (DUMP && !shotDone && ok && fx.kind !== 'inject' && layout === 'slides' && orientation === 'horizontal') {
+              writeFileSync(DUMP, bundle.html, 'utf8');
               shotDone = true;
-              console.log(`SHOT saved: ${SHOT} (${fx.name} / slides / horizontal / ${vp.label})`);
-            } catch (e) {
-              console.log(`SHOT failed: ${e?.message ?? e}`);
+              console.log(`DUMP saved: ${DUMP} (${fx.name} / slides / horizontal)`);
+            }
+            if (SHOT && !shotDone && ok && fx.kind !== 'inject' && layout === 'slides' && orientation === 'horizontal') {
+              try {
+                const img = await withTimeout(win.webContents.capturePage(), 15000, 'capturePage');
+                writeFileSync(SHOT, img.toPNG());
+                shotDone = true;
+                console.log(`SHOT saved: ${SHOT} (${fx.name} / slides / horizontal / ${vp.label})`);
+              } catch (e) {
+                console.log(`SHOT failed: ${e?.message ?? e}`);
+              }
             }
           }
         }
@@ -271,9 +286,9 @@ async function run() {
   for (const r of rows) {
     const status = r.ok ? 'PASS' : 'FAIL';
     log(
-      `[${status}] ${r.fixture.padEnd(15)} ${r.layout.padEnd(6)} ${r.orientation.padEnd(10)} ${r.viewport.padEnd(18)} ` +
+      `[${status}] ${r.fixture.padEnd(15)} ${r.layout.padEnd(6)} ${r.orientation.padEnd(10)} ${r.presentation.padEnd(6)} ${r.viewport.padEnd(18)} ` +
         `slides=${String(r.slides).padStart(3)} splits=${String(r.splits ?? '-').padStart(3)} minScale=${r.minScale ?? '-'} ` +
-        `nav=${r.navMinWidth ?? '-'}×${r.navMinHeight ?? '-'} topOffset=${r.maxTopOffset ?? '-'} fill=${r.readingWidthRatio ?? '-'}`,
+        `nav=${r.navMinWidth ?? '-'}×${r.navMinHeight ?? '-'} overlap=${r.navOverlapCount ?? '-'} topOffset=${r.maxTopOffset ?? '-'} fill=${r.readingWidthRatio ?? '-'}`,
     );
     for (const f of r.failures) log(`        ↳ ${f}`);
   }
