@@ -25,6 +25,8 @@ import {
   slideDimsFor,
   MIN_SCALE,
   MIN_COVER_SCALE,
+  effectiveSlideFontSizes,
+  meetsEffectiveSlideFontFloor,
 
 } from '../src/renderer/html-export-layout';
 import type { SlideDims } from '../src/renderer/html-export-layout';
@@ -112,6 +114,13 @@ function headerThenBlocks(slide: { blocks: ContentBlock[]; sectionTitle?: string
 function reflowRoot(): HTMLElement | null {
   return document.querySelector('[data-he-reflow-root]');
 }
+function computedTransformScale(el: HTMLElement): number {
+  const transform = getComputedStyle(el).transform;
+  if (!transform || transform === 'none') return 1;
+  const values = transform.match(/matrix\(([^)]+)\)/)?.[1].split(',').map(Number);
+  if (!values || values.length !== 6 || values.some((value) => !Number.isFinite(value))) return NaN;
+  return Math.sqrt(values[0] * values[0] + values[1] * values[1]);
+}
 
 /**
  * DOM: measure with the real adapter, plan slides, apply the plan (split blocks
@@ -145,6 +154,18 @@ async function assertSlides(md: string, opts: CellOpts) {
   if (!root) {
     return { ok: false, failures: ['no [data-he-reflow-root] in document'], slideCount: plan.slides.length, minScale: plan.diagnostics.minScale, splits: plan.diagnostics.splits, sectionCount: model.sections.length };
   }
+  const runtimeReflow = (window as unknown as { __heReflow?: () => void }).__heReflow;
+  runtimeReflow?.();
+  void root.offsetHeight;
+  const shippedDeckScale = computedTransformScale(root);
+  if (!Number.isFinite(shippedDeckScale) || shippedDeckScale <= 0) {
+    failures.push(`invalid shipped deck transform scale (${getComputedStyle(root).transform})`);
+  }
+  const shippedActiveScale = parseFloat(root.querySelector<HTMLElement>('.slide.active .he-scaler')?.getAttribute('data-he-scale') || '');
+  if (Number.isFinite(shippedActiveScale) && Math.abs(shippedActiveScale - plan.slides[0].scale) > 1e-6) {
+    failures.push(`shipped active scaler ${shippedActiveScale} differs from planned ${plan.slides[0].scale}`);
+  }
+
   const navButtons = Array.from(document.querySelectorAll('.he-nav-btn')) as HTMLElement[];
   const navMinWidth = navButtons.length ? Math.min(...navButtons.map((button) => button.getBoundingClientRect().width)) : 0;
   const navMinHeight = navButtons.length ? Math.min(...navButtons.map((button) => button.getBoundingClientRect().height)) : 0;
@@ -252,17 +273,15 @@ async function assertSlides(md: string, opts: CellOpts) {
     // (1) scale floor respected.
     const minAllowedScale = slide.cover ? MIN_COVER_SCALE : MIN_SCALE;
     if (slide.scale < minAllowedScale - 1e-9) failures.push(`slide ${idx}: scale ${slide.scale.toFixed(3)} < minimum ${minAllowedScale.toFixed(3)}`);
-    const effectiveScale = slide.scale * Math.min(1, window.innerWidth / dims.width, window.innerHeight / dims.height);
-    const bodyPx = 20 * effectiveScale;
-    const captionPx = 16 * effectiveScale;
+    const { bodyPx, captionPx } = effectiveSlideFontSizes(slide.scale, shippedDeckScale);
     minEffectiveBodyPx = Math.min(minEffectiveBodyPx, bodyPx);
     minEffectiveCaptionPx = Math.min(minEffectiveCaptionPx, captionPx);
-    if (!slide.cover && bodyPx < 14 - TOL) {
-      failures.push(`slide ${idx}: effective body font ${bodyPx.toFixed(2)}px < 14px`);
+    if (!slide.cover && !meetsEffectiveSlideFontFloor(slide.scale, shippedDeckScale)) {
+      failures.push(
+        `slide ${idx}: shipped effective fonts body=${bodyPx.toFixed(2)}px caption=${captionPx.toFixed(2)}px below floor`,
+      );
     }
-    if (!slide.cover && captionPx < 11 - TOL) {
-      failures.push(`slide ${idx}: effective caption font ${captionPx.toFixed(2)}px < 11px`);
-    }
+
 
 
     // (2) every rendered element's rect stays inside the SLIDE safe-area box.
@@ -335,6 +354,7 @@ async function assertSlides(md: string, opts: CellOpts) {
     navOverlapCount,
     minEffectiveBodyPx: Number.isFinite(minEffectiveBodyPx) ? Number(minEffectiveBodyPx.toFixed(2)) : null,
     minEffectiveCaptionPx: Number.isFinite(minEffectiveCaptionPx) ? Number(minEffectiveCaptionPx.toFixed(2)) : null,
+    shippedDeckScale: Number.isFinite(shippedDeckScale) ? Number(shippedDeckScale.toFixed(4)) : null,
 
   };
 }

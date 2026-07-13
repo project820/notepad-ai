@@ -429,6 +429,11 @@ export function runCliCompletion(opts: {
     });
 
     // Prompt is delivered ONLY via stdin; argv never carries user content.
+    // The write may surface EPIPE asynchronously after the CLI closes stdin.
+    // Consume it before writing; an unfinished run reports a normal provider failure.
+    child.stdin?.on?.('error', (err) => {
+      if (!settled) fail(`failed to write prompt to ${opts.command} stdin: ${err?.message ?? err}`, 'provider');
+    });
     try {
       child.stdin?.write(opts.prompt);
       child.stdin?.end();

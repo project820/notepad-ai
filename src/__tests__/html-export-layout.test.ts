@@ -18,6 +18,9 @@ import {
   BASE_BODY_PX,
   BASE_CAPTION_PX,
 
+  effectiveSlideFontSizes,
+  meetsEffectiveSlideFontFloor,
+
   DEFAULT_MAX_ITERATIONS,
   type MeasureFn,
   type FontsReadyFn,
@@ -107,6 +110,16 @@ describe('readability floor constants', () => {
     expect(BASE_CAPTION_PX * MIN_SCALE).toBeGreaterThanOrEqual(MIN_CAPTION_PX);
 
     expect(DEFAULT_MAX_ITERATIONS).toBe(200);
+  });
+
+  it('detects the former fitDeck -56px scale regression with the narrow font tolerance', () => {
+    const oldDeckScale = (720 - 56) / 720;
+    const { bodyPx, captionPx } = effectiveSlideFontSizes(MIN_SCALE, oldDeckScale);
+
+    expect(bodyPx).toBeLessThan(14);
+    expect(captionPx).toBeLessThan(11);
+    expect(meetsEffectiveSlideFontFloor(MIN_SCALE, oldDeckScale)).toBe(false);
+    expect(meetsEffectiveSlideFontFloor(MIN_SCALE, 1)).toBe(true);
   });
 });
 

@@ -154,6 +154,21 @@ export const MIN_SCALE = 0.7;
 /** Cover titles may scale to about 22px, but never below that readable display floor. */
 export const MIN_COVER_SCALE = 0.45;
 
+/** Font-floor tolerance is intentionally narrow: it catches a deck-scale regression. */
+export const FONT_FLOOR_TOLERANCE_PX = 0.5;
+
+export function effectiveSlideFontSizes(slideScale: number, deckScale: number): {
+  bodyPx: number;
+  captionPx: number;
+} {
+  const scale = Math.max(0, slideScale) * Math.max(0, deckScale);
+  return { bodyPx: BASE_BODY_PX * scale, captionPx: BASE_CAPTION_PX * scale };
+}
+
+export function meetsEffectiveSlideFontFloor(slideScale: number, deckScale: number): boolean {
+  const { bodyPx, captionPx } = effectiveSlideFontSizes(slideScale, deckScale);
+  return bodyPx >= MIN_BODY_PX - FONT_FLOOR_TOLERANCE_PX && captionPx >= MIN_CAPTION_PX - FONT_FLOOR_TOLERANCE_PX;
+}
 /** Default hard iteration cap for the measure→split loop. */
 export const DEFAULT_MAX_ITERATIONS = 200;
 

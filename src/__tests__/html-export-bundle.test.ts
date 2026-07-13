@@ -101,6 +101,12 @@ describe('bundleHtml — single self-contained document', () => {
     expect(html).toContain('padding:8px 14px');
     expect(html).toContain('font-size:16px');
   });
+  it('does not double-reserve navigation during final deck fitting', () => {
+    const { html } = bundle();
+
+    expect(html).toContain('window.innerHeight/ch');
+    expect(html).not.toContain('window.innerHeight-56');
+  });
   it('shares resolved rhythm and navigation reserve with planned-slide rendering', () => {
     const { html } = bundle({
       plan: [{ blocks: [{ kind: 'paragraph', text: 'Contained' }], scale: 1, sectionTitle: 'One' }],

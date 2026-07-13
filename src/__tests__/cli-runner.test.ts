@@ -26,7 +26,12 @@ class FakeChild implements CliProcess {
   private err: Array<(c: string) => void> = [];
   private closeCbs: Array<(c: number | null) => void> = [];
   private errCbs: Array<(e: Error) => void> = [];
-  stdin = { write: (c: string) => this.stdinChunks.push(c), end: () => { this.stdinEnded = true; } };
+  private stdinErrorCbs: Array<(e: Error) => void> = [];
+  stdin = {
+    write: (c: string) => this.stdinChunks.push(c),
+    end: () => { this.stdinEnded = true; },
+    on: (_event: 'error', cb: (e: Error) => void) => this.stdinErrorCbs.push(cb),
+  };
   stdout = { on: (_e: 'data', cb: (c: string) => void) => { this.out.push(cb); } };
   stderr = { on: (_e: 'data', cb: (c: string) => void) => { this.err.push(cb); } };
   on(ev: 'error' | 'close', cb: (...a: never[]) => void): void {
@@ -38,6 +43,7 @@ class FakeChild implements CliProcess {
   emitErr(s: string) { this.err.forEach((cb) => cb(s)); }
   doClose(code: number | null) { this.closeCbs.forEach((cb) => cb(code)); }
   doError(e: Error) { this.errCbs.forEach((cb) => cb(e)); }
+  doStdinError(e: Error) { this.stdinErrorCbs.forEach((cb) => cb(e)); }
 }
 
 // Claude-stream-json-like mapper for tests.
@@ -310,6 +316,17 @@ describe('runCliCompletion (stdin-only, streaming, lifecycle)', () => {
     expect(res.ok).toBe(false);
     expect(h.events.some((e) => e.kind === 'error' && (e as { message: string }).message === 'overloaded')).toBe(true);
     expect(child.killed).toBe(true);
+  });
+  it('turns asynchronous stdin EPIPE into one provider failure without crashing', async () => {
+    const h = harness();
+    const child = h.getChild();
+    expect(() => child.doStdinError(new Error('EPIPE'))).not.toThrow();
+    const res = await h.promise;
+    expect(res.ok).toBe(false);
+    expect(child.killed).toBe(true);
+    expect(h.events).toEqual([
+      expect.objectContaining({ kind: 'error', errorKind: 'provider', message: expect.stringContaining('EPIPE') }),
+    ]);
   });
 
   it('enforces the output byte cap', async () => {
