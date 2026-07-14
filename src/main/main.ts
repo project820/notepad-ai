@@ -24,6 +24,13 @@ import { HtmlExportAttemptRegistry } from './html-export-attempt-registry';
 import { HtmlExportAssetRegistry } from './html-export-asset-registry';
 import { HtmlExportParseHost } from './html-export-parse-host';
 import { HtmlExportPipelineService } from './html-export-pipeline-service';
+import { HtmlExportQuarantinePool } from './html-export-quarantine';
+import { ElectronQuarantineHost } from './html-export-quarantine-host';
+import {
+  createHtmlExportQuarantineError,
+  type HtmlExportAttemptId,
+  type ResolvedArtifactId,
+} from '../shared/html-export-pipeline';
 import { registerOsIpc } from './ipc/os-ipc';
 import { registerSessionIpc } from './ipc/session-ipc';
 import { registerWizardIpc } from './ipc/wizard-ipc';
@@ -78,6 +85,22 @@ const htmlExportPipelineService = new HtmlExportPipelineService({
   registry: htmlExportAttemptRegistry,
   parseHost: htmlExportParseHost,
 });
+// The pre-finalization quarantine pool is additive (PR-S3b) and not wired into
+// the live wizard. Its Electron host is constructed after app.whenReady(); the
+// module-level holder lets the IPC layer resolve it lazily.
+let htmlExportQuarantinePool: HtmlExportQuarantinePool | undefined;
+const htmlExportQuarantine = {
+  measure: (webContentsId: number, attemptId: HtmlExportAttemptId, resolvedArtifactId: ResolvedArtifactId) =>
+    htmlExportQuarantinePool
+      ? htmlExportQuarantinePool.measure(webContentsId, attemptId, resolvedArtifactId)
+      : Promise.resolve({
+          ok: false as const,
+          error: createHtmlExportQuarantineError('quarantine-unavailable'),
+        }),
+  cancelWebContents: (webContentsId: number) => htmlExportQuarantinePool?.cancelWebContents(webContentsId),
+  cancelAttempt: (webContentsId: number, attemptId: HtmlExportAttemptId) =>
+    htmlExportQuarantinePool?.cancelAttempt(webContentsId, attemptId),
+};
 const testCloseChoice = process.env.NOTEPAD_AI_CLOSE_DIALOG_CHOICE;
 const windows = createAppWindows({
   registry,
@@ -126,6 +149,7 @@ registerHtmlExportIpc({
     invalidateAttempt: (owner) => htmlExportAssetRegistry.invalidateAttempt(owner),
     releaseWebContents: (id) => htmlExportAssetRegistry.releaseWebContents(id),
   },
+  quarantine: htmlExportQuarantine,
 });
 registerHtmlExportAssetIpc({
   windowForWebContents: (id) => windows.windowFromRecord(registry.getByWebContents(id)),
@@ -159,6 +183,13 @@ app.on('before-quit', (event) => {
 });
 app.whenReady().then(async () => {
   void prewarmCliSpawnPath();
+  // Construct the additive quarantine pool now that Electron is ready. It stays
+  // unwired from the live wizard (PR-S3b); only the html:quarantine:measure IPC
+  // reaches it.
+  htmlExportQuarantinePool = new HtmlExportQuarantinePool({
+    registry: htmlExportAttemptRegistry,
+    host: new ElectronQuarantineHost(),
+  });
   const iconPath = path.resolve(__dirname, '../../build/icon.png');
   if (process.platform === 'darwin' && require('node:fs').existsSync(iconPath)) app.dock?.setIcon(iconPath);
   try {

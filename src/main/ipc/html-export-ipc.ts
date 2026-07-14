@@ -15,6 +15,10 @@ import {
   type ResolveResult,
   type SanitizeRequest,
   type SanitizeResult,
+  type QuarantineMeasureRequest,
+  type QuarantineMeasureResult,
+  type ResolvedArtifactId,
+  createHtmlExportQuarantineError,
 } from '../../shared/html-export-pipeline';
 import {
   designListContentsUrl,
@@ -31,6 +35,21 @@ type HtmlExportAssetLifecycle = {
   releaseWebContents(webContentsId: number): void | Promise<void>;
 };
 
+/**
+ * Additive pre-finalization quarantine gate (PR-S3b / §5.12). Optional so the
+ * heavily-tested pipeline IPC keeps working without a live Electron host; when
+ * absent, measurement fails closed with a renderer-safe `quarantine-unavailable`.
+ */
+type HtmlExportQuarantineLifecycle = {
+  measure(
+    webContentsId: number,
+    attemptId: HtmlExportAttemptId,
+    resolvedArtifactId: ResolvedArtifactId,
+  ): Promise<QuarantineMeasureResult>;
+  cancelWebContents(webContentsId: number): void;
+  cancelAttempt(webContentsId: number, attemptId: HtmlExportAttemptId): void;
+};
+
 type HtmlExportIpcDeps = {
   windowForWebContents: (webContentsId: number) => BrowserWindow | null;
   pipelineService: Pick<
@@ -38,6 +57,7 @@ type HtmlExportIpcDeps = {
     'beginAttempt' | 'sanitize' | 'resolve' | 'invalidateAttempt' | 'invalidateSender'
   >;
   assetLifecycle: HtmlExportAssetLifecycle;
+  quarantine?: HtmlExportQuarantineLifecycle;
 };
 
 
@@ -158,10 +178,21 @@ function isCancelAttemptRequest(input: unknown): input is CancelAttemptRequest {
   return hasExactStringFields(input, ['attemptId']) && isOpaqueHtmlExportId(input.attemptId);
 }
 
+function isQuarantineMeasureRequest(input: unknown): input is QuarantineMeasureRequest {
+  return hasExactStringFields(input, ['attemptId', 'resolvedArtifactId'])
+    && isOpaqueHtmlExportId(input.attemptId)
+    && isOpaqueHtmlExportId(input.resolvedArtifactId);
+}
+
+function quarantineReject(kind: Parameters<typeof createHtmlExportQuarantineError>[0]): QuarantineMeasureResult {
+  return { ok: false, error: createHtmlExportQuarantineError(kind) };
+}
+
 export function registerHtmlExportIpc({
   windowForWebContents,
   pipelineService,
   assetLifecycle,
+  quarantine,
 }: HtmlExportIpcDeps): void {
 
   type SenderBinding = {
@@ -186,6 +217,11 @@ export function registerHtmlExportIpc({
       assetCleanup = assetLifecycle.releaseWebContents(webContentsId);
     } catch {
       invoked = false;
+    }
+    try {
+      quarantine?.cancelWebContents(webContentsId);
+    } catch {
+      // Quarantine teardown is best effort and must not block sender cleanup.
     }
     return Promise.allSettled([pipelineCleanup, assetCleanup]).then(
       (results) => invoked && results.every((result) => result.status === 'fulfilled'),
@@ -343,6 +379,16 @@ export function registerHtmlExportIpc({
     const binding = await bindSenderInvalidation(event.sender);
     if (!binding) return pipelineReject();
     if (!isCancelAttemptRequest(input)) return pipelineReject();
+    // Cancel any in-flight quarantine measure for this attempt unconditionally:
+    // a renderer-initiated cancel must tear down sandboxed work even when the
+    // pipeline attempt invalidation itself reports a stale/unknown attempt.
+    if (isCurrentSender(binding)) {
+      try {
+        quarantine?.cancelAttempt(binding.webContentsId, input.attemptId);
+      } catch {
+        // Quarantine cancellation is best effort.
+      }
+    }
     return containsPipelineException(
       async () => {
         const result = await pipelineService.invalidateAttempt(binding.webContentsId, input.attemptId);
@@ -357,6 +403,29 @@ export function registerHtmlExportIpc({
         }
       },
     );
+  });
+
+  handleTrusted('html:quarantine:measure', async (event, input: unknown): Promise<QuarantineMeasureResult> => {
+    const binding = await bindSenderInvalidation(event.sender);
+    if (!binding) return quarantineReject('recoverable-failure');
+    if (!isQuarantineMeasureRequest(input)) return quarantineReject('recoverable-failure');
+    if (!quarantine) return quarantineReject('quarantine-unavailable');
+    try {
+      const result = await quarantine.measure(
+        binding.webContentsId,
+        input.attemptId,
+        input.resolvedArtifactId,
+      );
+      if (isCurrentSender(binding)) return result;
+      try {
+        quarantine.cancelWebContents(binding.webContentsId);
+      } catch {
+        // Best effort teardown for a superseded sender.
+      }
+      return quarantineReject('attempt-superseded');
+    } catch {
+      return quarantineReject('recoverable-failure');
+    }
   });
 
   handleTrusted('html:save', async (event, args: { html?: string; defaultName?: string }) => {
