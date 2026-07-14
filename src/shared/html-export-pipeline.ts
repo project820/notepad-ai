@@ -146,6 +146,8 @@ export type HtmlExportQuarantineMeasurement = {
 type HtmlExportQuarantineVerdict = {
   readonly verdict: 'pass';
   readonly measurement: HtmlExportQuarantineMeasurement;
+  /** Set only by the IPC layer after quarantine PASS + finalize; pure pool never sets it. */
+  readonly finalizedArtifactId?: FinalizedArtifactId;
 };
 
 export type QuarantineMeasureRequest = {

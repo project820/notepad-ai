@@ -30,8 +30,50 @@ function createService() {
     beginAttempt: vi.fn(() => ({ ok: true as const, value: { attemptId: 'attempt-1' } })),
     sanitize: vi.fn(() => ({ ok: true as const, value: { artifact: { id: 'sanitized-1' } } })),
     resolve: vi.fn(() => ({ ok: true as const, value: { artifact: { id: 'resolved-1' } } })),
+    finalize: vi.fn(() => ({
+      ok: true as const,
+      value: {
+        artifact: {
+          id: 'finalized-1',
+          stage: 'finalized',
+          sha256: 'a'.repeat(64),
+          byteLength: 12,
+        },
+      },
+    })),
     invalidateAttempt: vi.fn(() => ({ ok: true as const, value: {} })),
     invalidateSender: vi.fn(),
+  };
+}
+function createQuarantine(pass = true) {
+  return {
+    measure: vi.fn(async () =>
+      pass
+        ? {
+            ok: true as const,
+            value: {
+              verdict: 'pass' as const,
+              measurement: {
+                nodeCount: 1,
+                maxDepth: 1,
+                documentWidth: 100,
+                documentHeight: 100,
+                viewportWidth: 100,
+                viewportHeight: 100,
+                horizontalOverflow: false,
+                activeRegionCount: 1,
+                printNavHidden: true,
+                printSectionsOrdered: true,
+              },
+            },
+          }
+        : {
+            ok: false as const,
+            error: { kind: 'layout-violation' as const, detail: 'HTML export quarantine error: layout-violation' },
+          },
+    ),
+    cancelWebContents: vi.fn(),
+    cancelAttempt: vi.fn(),
   };
 }
 function createAssetLifecycle(activeAttempt = 'attempt-old') {
@@ -683,5 +725,110 @@ describe('HTML export pipeline IPC', () => {
 
     expect(save).toStrictEqual({ saved: false });
     expect(open).toStrictEqual({ opened: false, error: 'Not an openable HTML file.' });
+  });
+  it('finalizes on quarantine PASS and returns finalizedArtifactId', async () => {
+    const service = createService();
+    const quarantine = createQuarantine(true);
+    const sender: Sender = { id: 71, once: vi.fn() };
+    registerHtmlExportIpc({
+      windowForWebContents: () => null,
+      pipelineService: service as never,
+      assetLifecycle: createNoopAssetLifecycle(),
+      quarantine,
+    });
+
+    const result = await ipc.handler('html:quarantine:measure')!(eventFor(sender), {
+      attemptId: 'attempt-1',
+      resolvedArtifactId: 'resolved-1',
+    });
+
+    expect(quarantine.measure).toHaveBeenCalledWith(71, 'attempt-1', 'resolved-1');
+    expect(service.finalize).toHaveBeenCalledWith(71, 'attempt-1', 'resolved-1');
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        verdict: 'pass',
+        finalizedArtifactId: 'finalized-1',
+      },
+    });
+    expect(quarantine.cancelAttempt).not.toHaveBeenCalled();
+  });
+
+  it('does not finalize when quarantine returns a typed error', async () => {
+    const service = createService();
+    const quarantine = createQuarantine(false);
+    const sender: Sender = { id: 72, once: vi.fn() };
+    registerHtmlExportIpc({
+      windowForWebContents: () => null,
+      pipelineService: service as never,
+      assetLifecycle: createNoopAssetLifecycle(),
+      quarantine,
+    });
+
+    const result = await ipc.handler('html:quarantine:measure')!(eventFor(sender), {
+      attemptId: 'attempt-1',
+      resolvedArtifactId: 'resolved-1',
+    });
+
+    expect(service.finalize).not.toHaveBeenCalled();
+    expect(result).toStrictEqual({
+      ok: false,
+      error: { kind: 'layout-violation', detail: 'HTML export quarantine error: layout-violation' },
+    });
+  });
+
+  it('returns recoverable-failure and cancels measure when finalize fails', async () => {
+    const service = createService();
+    service.finalize.mockReturnValueOnce({
+      ok: false,
+      error: { kind: 'pipeline-reject', detail: 'HTML export pipeline error: pipeline-reject' },
+    });
+    const quarantine = createQuarantine(true);
+    const sender: Sender = { id: 73, once: vi.fn() };
+    registerHtmlExportIpc({
+      windowForWebContents: () => null,
+      pipelineService: service as never,
+      assetLifecycle: createNoopAssetLifecycle(),
+      quarantine,
+    });
+
+    const result = await ipc.handler('html:quarantine:measure')!(eventFor(sender), {
+      attemptId: 'attempt-1',
+      resolvedArtifactId: 'resolved-1',
+    });
+
+    expect(service.finalize).toHaveBeenCalledWith(73, 'attempt-1', 'resolved-1');
+    expect(quarantine.cancelAttempt).toHaveBeenCalledWith(73, 'attempt-1');
+    expect(result).toStrictEqual({
+      ok: false,
+      error: {
+        kind: 'recoverable-failure',
+        detail: 'HTML export quarantine error: recoverable-failure',
+      },
+    });
+  });
+
+  it('returns quarantine-unavailable without finalize when quarantine dep is absent', async () => {
+    const service = createService();
+    const sender: Sender = { id: 74, once: vi.fn() };
+    registerHtmlExportIpc({
+      windowForWebContents: () => null,
+      pipelineService: service as never,
+      assetLifecycle: createNoopAssetLifecycle(),
+    });
+
+    const result = await ipc.handler('html:quarantine:measure')!(eventFor(sender), {
+      attemptId: 'attempt-1',
+      resolvedArtifactId: 'resolved-1',
+    });
+
+    expect(service.finalize).not.toHaveBeenCalled();
+    expect(result).toStrictEqual({
+      ok: false,
+      error: {
+        kind: 'quarantine-unavailable',
+        detail: 'HTML export quarantine error: quarantine-unavailable',
+      },
+    });
   });
 });

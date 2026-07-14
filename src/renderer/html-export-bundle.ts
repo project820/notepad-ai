@@ -21,7 +21,10 @@ import { stableHash, themeComponentClasses, toCssVariables, resolveHtmlExportSli
 import { renderContent } from './html-export-renderer';
 import { slideDimsFor, type PlannedSlide } from './html-export-layout';
 
-import { sha256Base64 } from './sha256';
+import {
+  HTML_EXPORT_CSP_META,
+  HTML_EXPORT_RUNTIME_JS,
+} from '../shared/html-export-runtime';
 
 /** Bump when the embedded manifest shape changes. */
 export const EXPORT_MANIFEST_SCHEMA_VERSION = 1;
@@ -182,55 +185,10 @@ export function buildExportStyle(
 }
 
 // ---------------------------------------------------------------------------
-// Minimal inline runtime — slide nav + resize-reflow hook (G005 extends).
-// Contains no remote URL, no fetch/XHR, no `url(` — stays self-contained.
+// Runtime + CSP live in src/shared/html-export-runtime.ts (G007 / PR-S4).
+// The legacy bundle consumes the shared canonical constants so output stays
+// byte-identical; swipe / CSP re-pin is a later slice.
 // ---------------------------------------------------------------------------
-
-const RUNTIME_JS = [
-  '(function(){',
-  'var root=document.querySelector("[data-he-reflow-root]");',
-  'if(!root)return;',
-  'var slides=Array.prototype.slice.call(root.querySelectorAll(".slide"));',
-  'var cur=0;',
-  'var curEl=root.querySelector("[data-he-current]");',
-  'var totEl=root.querySelector("[data-he-total]");',
-  'if(totEl)totEl.textContent=String(slides.length);',
-  'function show(i){if(!slides.length)return;cur=Math.max(0,Math.min(slides.length-1,i));for(var k=0;k<slides.length;k++){slides[k].classList.toggle("active",k===cur);}if(curEl)curEl.textContent=String(cur+1);sizeActive();}',
-  'function next(){show(cur+1);}function prev(){show(cur-1);}',
-  'var nb=root.querySelector("[data-he-next]");if(nb)nb.addEventListener("click",next);',
-  'var pb=root.querySelector("[data-he-prev]");if(pb)pb.addEventListener("click",prev);',
-  'if(root.getAttribute("data-he-layout")==="slides"){document.addEventListener("keydown",function(e){if(e.key==="ArrowRight"||e.key==="PageDown"||e.key===" "){next();}else if(e.key==="ArrowLeft"||e.key==="PageUp"){prev();}});show(0);}',
-  // Size the ACTIVE slide's scale-host to the engine-scaled footprint (an
-  // inactive slide is display:none → unmeasurable), and uniformly fit the fixed
-  // canvas to the viewport. Pure transforms: no remote URL, stays self-contained.
-  'function sizeActive(){var a=slides[cur];if(!a)return;var sc=a.querySelector(".he-scaler");if(!sc)return;var h=sc.parentNode;var s=parseFloat(sc.getAttribute("data-he-scale"))||1;h.style.width=(sc.offsetWidth*s)+"px";h.style.height=(sc.offsetHeight*s)+"px";}',
-  'function fitDeck(){if(root.getAttribute("data-he-layout")!=="slides")return;var cw=root.offsetWidth,ch=root.offsetHeight;if(!cw||!ch)return;var f=Math.min(window.innerWidth/cw,window.innerHeight/ch);if(f>0)root.style.transform="translate(-50%,-50%) scale("+f+")";}',
-  'function reflow(){sizeActive();fitDeck();}',
-  'var t;window.addEventListener("resize",function(){clearTimeout(t);t=setTimeout(reflow,120);});',
-  'fitDeck();',
-  'window.__heReflow=reflow;',
-  '})();',
-].join('');
-
-// Content-Security-Policy for the exported file (G006 defense-in-depth atop the
-// structural allowlist validator). Only the inline runtime — pinned by its
-// SHA-256 — may execute; default-src 'none' blocks every network fetch, and
-// img/font are limited to inline data: URIs. `style-src 'unsafe-inline'` is kept
-// because the document legitimately carries inline style attributes (and the
-// allowlist validator already forbids remote url() in styles).
-const RUNTIME_JS_SHA256 = sha256Base64(RUNTIME_JS);
-const EXPORT_CSP =
-  [
-    "default-src 'none'",
-    'img-src data:',
-    "style-src 'unsafe-inline'",
-    `script-src 'sha256-${RUNTIME_JS_SHA256}'`,
-    'font-src data:',
-    "base-uri 'none'",
-    "form-action 'none'",
-    "frame-ancestors 'none'",
-  ].join('; ') + ';';
-const CSP_META = `<meta http-equiv="Content-Security-Policy" content="${EXPORT_CSP}">`;
 
 /** Embed the manifest as inline JSON, escaping `<` so it can never break out of the script. */
 function embedManifest(manifest: ExportManifest): string {
@@ -285,7 +243,7 @@ export function bundleHtml(args: BundleArgs): BundleResult {
 
   const head = [
     '<meta charset="utf-8">',
-    CSP_META,
+    HTML_EXPORT_CSP_META,
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     rendered.headHtml,
     `<style>${style}</style>`,
@@ -296,7 +254,7 @@ export function bundleHtml(args: BundleArgs): BundleResult {
     '<!doctype html>\n' +
     `<html data-he-layout="${args.layout}" data-he-orientation="${args.orientation}">\n` +
     `<head>\n${head}\n</head>\n` +
-    `<body>\n${rendered.bodyHtml}\n<script>${RUNTIME_JS}</script>\n</body>\n` +
+    `<body>\n${rendered.bodyHtml}\n<script>${HTML_EXPORT_RUNTIME_JS}</script>\n</body>\n` +
     '</html>\n';
 
   return { html, manifest };

@@ -54,7 +54,7 @@ type HtmlExportIpcDeps = {
   windowForWebContents: (webContentsId: number) => BrowserWindow | null;
   pipelineService: Pick<
     HtmlExportPipelineService,
-    'beginAttempt' | 'sanitize' | 'resolve' | 'invalidateAttempt' | 'invalidateSender'
+    'beginAttempt' | 'sanitize' | 'resolve' | 'finalize' | 'invalidateAttempt' | 'invalidateSender'
   >;
   assetLifecycle: HtmlExportAssetLifecycle;
   quarantine?: HtmlExportQuarantineLifecycle;
@@ -416,13 +416,45 @@ export function registerHtmlExportIpc({
         input.attemptId,
         input.resolvedArtifactId,
       );
-      if (isCurrentSender(binding)) return result;
-      try {
-        quarantine.cancelWebContents(binding.webContentsId);
-      } catch {
-        // Best effort teardown for a superseded sender.
+      if (!isCurrentSender(binding)) {
+        try {
+          quarantine.cancelWebContents(binding.webContentsId);
+        } catch {
+          // Best effort teardown for a superseded sender.
+        }
+        return quarantineReject('attempt-superseded');
       }
-      return quarantineReject('attempt-superseded');
+      if (!result.ok) return result;
+
+      // PASS: finalize the exact resolved bytes into a FinalizedArtifactId.
+      const finalized = await pipelineService.finalize(
+        binding.webContentsId,
+        input.attemptId,
+        input.resolvedArtifactId,
+      );
+      if (!isCurrentSender(binding)) {
+        try {
+          quarantine.cancelWebContents(binding.webContentsId);
+        } catch {
+          // Best effort teardown for a superseded sender.
+        }
+        return quarantineReject('attempt-superseded');
+      }
+      if (!finalized.ok) {
+        try {
+          quarantine.cancelAttempt(binding.webContentsId, input.attemptId);
+        } catch {
+          // Best effort: cancel the measure if finalize fails.
+        }
+        return quarantineReject('recoverable-failure');
+      }
+      return {
+        ok: true,
+        value: {
+          ...result.value,
+          finalizedArtifactId: finalized.value.artifact.id,
+        },
+      };
     } catch {
       return quarantineReject('recoverable-failure');
     }

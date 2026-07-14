@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { bundleHtml, EXPORT_MANIFEST_SCHEMA_VERSION, type BundleArgs } from '../renderer/html-export-bundle';
 import { validateSelfContainedHtml } from '../renderer/html-export-validate';
-import { sha256Base64 } from '../renderer/sha256';
+import { sha256Base64 } from '../shared/sha256';
 import {
   parseDesignTheme,
   toCssVariables,

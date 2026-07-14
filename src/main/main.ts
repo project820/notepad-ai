@@ -24,6 +24,7 @@ import { HtmlExportAttemptRegistry } from './html-export-attempt-registry';
 import { HtmlExportAssetRegistry } from './html-export-asset-registry';
 import { HtmlExportParseHost } from './html-export-parse-host';
 import { HtmlExportPipelineService } from './html-export-pipeline-service';
+import { bundleSanitizedHtml } from './html-export-shell';
 import { HtmlExportQuarantinePool } from './html-export-quarantine';
 import { ElectronQuarantineHost } from './html-export-quarantine-host';
 import {
@@ -84,6 +85,7 @@ const htmlExportParseHost = new HtmlExportParseHost();
 const htmlExportPipelineService = new HtmlExportPipelineService({
   registry: htmlExportAttemptRegistry,
   parseHost: htmlExportParseHost,
+  resolver: async (payload) => bundleSanitizedHtml(payload).html,
 });
 // The pre-finalization quarantine pool is additive (PR-S3b) and not wired into
 // the live wizard. Its Electron host is constructed after app.whenReady(); the
