@@ -1,9 +1,10 @@
 import { app, BrowserWindow, dialog, shell } from 'electron';
-import { existsSync, promises as fs } from 'node:fs';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { OPENABLE_DOCUMENT_EXTS, CONVERTIBLE_EXTS as CONVERTIBLE_EXT_LIST } from '../shared/file-types';
 import { MAX_CONVERT_BYTES } from './converter-bounds';
 import { FileGrants } from './file-grants';
+import { nodeAssetReadFs, readFdBoundFile } from './asset-file-reader';
 import { isTrustedAppUrl, SECURITY_REASON } from './security';
 import { isAllowedExternalUrl } from './safe-external';
 import { ProjectWizardRootStore } from './project-wizard/access';
@@ -28,6 +29,8 @@ const APP_STORAGE_NAME = 'notepad-ai';
 const isDev = process.env.NODE_ENV === 'development';
 const convertible = new Set<string>(CONVERTIBLE_EXT_LIST);
 
+type OpenEnrollmentPolicy = 'consume-authorized' | 'enroll-os-open';
+
 type AppWindowsDeps = {
   registry: WindowRegistry;
   fileGrants: FileGrants;
@@ -43,7 +46,7 @@ type AppWindowsDeps = {
 
 type AppWindows = {
   createWindow: (opts?: CreateWindowOptions & { restore?: SessionWindowSnapshot }) => Promise<BrowserWindow>;
-  openFilePath: (path: string, win: BrowserWindow) => Promise<void>;
+  openFilePath: (path: string, win: BrowserWindow, enrollment?: OpenEnrollmentPolicy) => Promise<void>;
   handleOpen: () => Promise<void>;
   setReady: () => void;
   hasPendingOpenFiles: () => boolean;
@@ -101,10 +104,8 @@ export function createAppWindows({
   let ready = false;
   let launchWindowId: number | null = null;
   const pending: string[] = [];
-  let preserveSessionOnClose = false;
+  const sessionTargetStates = new Map<string, 'pending-commit' | 'committed-removed' | 'committed-preserved'>();
   const approvedCloseWindowIds = new Set<number>();
-  const discardedWindowKeys = new Set<string>();
-  const pendingDiscardedWindowKeys = new Set<string>();
   const coordinator = new CloseCoordinator();
   const pendingState = new Map<string, { webContentsId: number; resolve: (state: CloseGuardState | null) => void }>();
   const pendingSave = new Map<string, { webContentsId: number; resolve: (result: { saved: boolean; committedRevision: number | null }) => void }>();
@@ -115,7 +116,11 @@ export function createAppWindows({
   const pendingConsume = new Map<string, { webContentsId: number; resolve: (consumed: boolean) => void }>();
   const closeLeases = new Map<number, { id: string; invalidated: boolean }>();
   const quiesceReady = new Set<number>();
-  const pendingQuiesce = new Map<string, { webContentsId: number; resolve: (value: boolean) => void }>();
+  const pendingQuiesce = new Map<string, {
+    webContentsId: number;
+    phase: 'prepare' | 'rollback';
+    resolve: (value: boolean) => void;
+  }>();
   const activeQuiesce = new Map<number, { id: string; heartbeat: ReturnType<typeof setInterval> }>();
   const lateQuiesceRollbacks = new Map<string, number>();
 
@@ -220,8 +225,10 @@ export function createAppWindows({
       }
       return;
     }
+    const response = pending.phase === 'prepare' ? value.prepared : value.rolledBack;
+    if (typeof response !== 'boolean') return;
     pendingQuiesce.delete(id);
-    pending.resolve(value.prepared === true || value.rolledBack === true);
+    pending.resolve(response);
   });
   onTrusted('close:lease-invalidated', (event, raw: unknown) => {
     const value = raw as Record<string, unknown>;
@@ -377,6 +384,7 @@ export function createAppWindows({
       }, timeoutMs);
       pendingQuiesce.set(id, {
         webContentsId: win.webContents.id,
+        phase: channel === 'close:quiesce-prepare' ? 'prepare' : 'rollback',
         resolve: (value) => {
           clearTimeout(timer);
           resolve(value);
@@ -536,27 +544,32 @@ export function createAppWindows({
     }
 
     const discardedKeys = requestedDiscards.map((target) => target.windowKey);
-    if (discardedKeys.length > 0) {
-      for (const windowKey of discardedKeys) pendingDiscardedWindowKeys.add(windowKey);
+    for (const target of transaction.targets) {
+      sessionTargetStates.set(target.windowKey, 'pending-commit');
     }
+    const removedSessionKeys = transaction.intent === 'close'
+      ? transaction.targets.map((target) => target.windowKey)
+      : discardedKeys;
     try {
       if (transaction.intent === 'quit') {
         await commitQuitSession(discardedKeys);
-      } else if (discardedKeys.length > 0) {
-        await removeSessionWindows(discardedKeys);
+      } else if (removedSessionKeys.length > 0) {
+        await removeSessionWindows(removedSessionKeys);
       }
     } catch (error) {
       console.error('[session] failed to commit close transaction:', error);
       await rollback(transaction.targets);
-      for (const windowKey of discardedKeys) pendingDiscardedWindowKeys.delete(windowKey);
+      for (const target of transaction.targets) sessionTargetStates.delete(target.windowKey);
       return false;
     }
 
-    for (const windowKey of discardedKeys) {
-      pendingDiscardedWindowKeys.delete(windowKey);
-      discardedWindowKeys.add(windowKey);
+    for (const target of transaction.targets) {
+      sessionTargetStates.set(
+        target.windowKey,
+        removedSessionKeys.includes(target.windowKey) ? 'committed-removed' : 'committed-preserved',
+      );
     }
-    preserveSessionOnClose = transaction.intent === 'relaunch';
+
     for (const target of transaction.targets) {
       approvedCloseWindowIds.add(target.windowId);
       closeLeases.delete(target.windowId);
@@ -634,34 +647,58 @@ export function createAppWindows({
       const blank = reusable();
       if (blank) {
         launchWindowId = null;
-        await openFilePath(filePath, blank);
+        await openFilePath(filePath, blank, 'enroll-os-open');
         return;
       }
     }
     await createWindow({ openFilePath: filePath });
   };
 
-  const openFilePath = async (filePath: string, win: BrowserWindow) => {
+  const openFilePath = async (
+    filePath: string,
+    win: BrowserWindow,
+    enrollment: OpenEnrollmentPolicy = 'consume-authorized',
+  ) => {
     if (win.isDestroyed()) return;
-    fileGrants.grantFile(win.webContents.id, filePath);
     const rec = registry.getByWebContents(win.webContents.id);
     const sink = sinkFor(win);
     const send = (c: string, p: unknown) => rec ? sendWhenReady(rec, c, p, sink) : sink(c, p);
-    const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
+    const requestedExtension = filePath.split('.').pop()?.toLowerCase() ?? '';
+    const grant = (await fileGrants.authorizeExistingFile(win.webContents.id, filePath))?.grant
+      ?? (enrollment === 'enroll-os-open'
+        ? await fileGrants.grantExistingFile(
+          win.webContents.id,
+          filePath,
+          convertible.has(requestedExtension) ? 'conversion' : 'os-open',
+        )
+        : null);
+
+    if (!grant) {
+      send('file:opened', { filePath: null, content: '', error: 'Could not open the selected file.' });
+      return;
+    }
+    const canonicalPath = grant.realpath;
+    const ext = canonicalPath.split('.').pop()?.toLowerCase() ?? '';
     if (convertible.has(ext)) {
-      console.log(`[kordoc] converting ${ext.toUpperCase()}: ${filePath}`);
+      console.log(`[kordoc] converting ${ext.toUpperCase()}: ${canonicalPath}`);
       send('file:opened', { filePath: null, content: '', error: undefined, progress: `Converting ${ext.toUpperCase()}…` });
       try {
-        if ((await fs.stat(filePath)).size > MAX_CONVERT_BYTES) {
-          send('file:opened', { filePath: null, content: '', error: `Could not convert ${ext.toUpperCase()}: file is too large (max 25 MB).` });
+        const read = await readFdBoundFile(grant, nodeAssetReadFs, MAX_CONVERT_BYTES);
+        if (!read.ok) {
+          const error = read.error === 'too-large'
+            ? `Could not convert ${ext.toUpperCase()}: file is too large (max 25 MB).`
+            : `Failed to convert ${ext.toUpperCase()}: ${read.error}`;
+          send('file:opened', { filePath: null, content: '', error });
           return;
         }
-        const conv = await convertDocument(ext as 'hwp' | 'hwpx' | 'hwpml' | 'docx' | 'pdf' | 'xlsx' | 'xls', await fs.readFile(filePath));
+        const bytes = Buffer.from(read.bytes.buffer, read.bytes.byteOffset, read.bytes.byteLength);
+        const conv = await convertDocument(ext as 'hwp' | 'hwpx' | 'hwpml' | 'docx' | 'pdf' | 'xlsx' | 'xls', bytes);
         if (conv.ok && typeof conv.markdown === 'string') {
-          const baseName = filePath.replace(/\.[^/.]+$/, '.md');
-          send('file:opened', { filePath: baseName, content: conv.markdown, html: conv.html, converted: { from: ext.toUpperCase(), originalPath: filePath } });
-          if (rec) registry.claimPath(rec.windowId, baseName);
-          fileGrants.grantFile(win.webContents.id, baseName);
+          const baseName = canonicalPath.replace(/\.[^/.]+$/, '.md');
+          const saveTarget = await fileGrants.grantSaveTarget(win.webContents.id, baseName);
+          const convertedPath = saveTarget?.canonicalPath ?? null;
+          send('file:opened', { filePath: convertedPath, content: conv.markdown, html: conv.html, converted: { from: ext.toUpperCase(), originalPath: canonicalPath } });
+          if (rec && convertedPath) registry.claimPath(rec.windowId, convertedPath);
         } else {
           send('file:opened', { filePath: null, content: '', error: conv.error ?? `Could not convert ${ext.toUpperCase()}.` });
         }
@@ -670,9 +707,14 @@ export function createAppWindows({
       }
       return;
     }
-    const content = await fs.readFile(filePath, 'utf-8');
-    send('file:opened', { filePath, content });
-    if (rec) registry.claimPath(rec.windowId, filePath);
+    const read = await readFdBoundFile(grant, nodeAssetReadFs);
+    if (!read.ok) {
+      send('file:opened', { filePath: null, content: '', error: 'Could not open the selected file.' });
+      return;
+    }
+    const content = Buffer.from(read.bytes.buffer, read.bytes.byteOffset, read.bytes.byteLength).toString('utf-8');
+    send('file:opened', { filePath: canonicalPath, content });
+    if (rec) registry.claimPath(rec.windowId, canonicalPath);
   };
 
   const createWindow = async (opts: CreateWindowOptions & { restore?: SessionWindowSnapshot } = {}) => {
@@ -713,7 +755,7 @@ export function createAppWindows({
     if (shouldPublishLaunchWindow(opts) && launchWindowId == null) launchWindowId = win.id;
     if (opts.restore?.path) {
       registry.claimPath(win.id, opts.restore.path);
-      fileGrants.grantFile(win.webContents.id, opts.restore.path);
+      await fileGrants.grantExistingFile(win.webContents.id, opts.restore.path, 'session-restore');
     }
     win.on('focus', () => registry.touchFocus(win.id, Date.now()));
     let closeGuardPending = false;
@@ -743,7 +785,9 @@ export function createAppWindows({
       approvedCloseWindowIds.delete(win.id);
       closeLeases.delete(win.id);
       windowLocales.delete(win.id);
-      if (!preserveSessionOnClose && !discardedWindowKeys.has(record.windowKey)) {
+      const sessionState = sessionTargetStates.get(record.windowKey);
+      sessionTargetStates.delete(record.windowKey);
+      if (!sessionState) {
         void removeSessionWindow(record.windowKey).catch((error) => {
           console.error('[session] failed to remove closed window:', error);
         });
@@ -763,7 +807,7 @@ export function createAppWindows({
     } else {
       await win.loadFile(path.join(__dirname, '../renderer/index.html'));
     }
-    if (opts.openFilePath) await openFilePath(opts.openFilePath, win);
+    if (opts.openFilePath) await openFilePath(opts.openFilePath, win, 'enroll-os-open');
     return win;
   };
 
@@ -819,6 +863,6 @@ export function createAppWindows({
     approveClose,
     approveAllForQuit,
     clearCloseApprovals: () => approvedCloseWindowIds.clear(),
-    isSessionWriteFenced: (windowKey) => pendingDiscardedWindowKeys.has(windowKey) || discardedWindowKeys.has(windowKey),
+    isSessionWriteFenced: (windowKey) => sessionTargetStates.has(windowKey),
   };
 }

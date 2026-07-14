@@ -19,7 +19,9 @@ import { registerAuthIpc } from './ipc/auth-ipc';
 import { registerProviderAuthIpc } from './ipc/provider-auth-ipc';
 import { registerFileIpc } from './ipc/file-ipc';
 import { registerHtmlExportIpc } from './ipc/html-export-ipc';
+import { registerHtmlExportAssetIpc } from './ipc/html-export-asset-ipc';
 import { HtmlExportAttemptRegistry } from './html-export-attempt-registry';
+import { HtmlExportAssetRegistry } from './html-export-asset-registry';
 import { HtmlExportParseHost } from './html-export-parse-host';
 import { HtmlExportPipelineService } from './html-export-pipeline-service';
 import { registerOsIpc } from './ipc/os-ipc';
@@ -33,13 +35,30 @@ import { shouldPreventBeforeQuit } from './close-guard';
 import { buildMenu } from './menu';
 
 const registry = createWindowRegistry();
-const fileGrants = new FileGrants();
-const projectWizardRoots = new ProjectWizardRootStore();
-const saveMutex = new KeyedMutex();
 const nodeIdentityFs: IdentityFs = {
   realpath: (p) => fs.realpath(p),
-  stat: async (p) => { const s = await fs.stat(p); return { dev: s.dev, ino: s.ino }; },
+  stat: async (p) => {
+    const stat = await fs.stat(p, { bigint: true });
+    return {
+      dev: stat.dev,
+      ino: stat.ino,
+      isFile: () => stat.isFile(),
+      isDirectory: () => stat.isDirectory(),
+    };
+  },
+  lstat: async (p) => {
+    const stat = await fs.lstat(p, { bigint: true });
+    return {
+      dev: stat.dev,
+      ino: stat.ino,
+      isFile: () => stat.isFile(),
+      isDirectory: () => stat.isDirectory(),
+    };
+  },
 };
+const fileGrants = new FileGrants(nodeIdentityFs);
+const projectWizardRoots = new ProjectWizardRootStore();
+const saveMutex = new KeyedMutex();
 const documentAtomicBackend = nodeAtomicBackend();
 // Isolated integration runs must not touch the user's real macOS Keychain:
 // every new/unsigned Electron binary can re-trigger the "Safe Storage" access
@@ -51,6 +70,9 @@ configureAppIdentity();
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 const converterHost = createConverterHost();
 const htmlExportAttemptRegistry = new HtmlExportAttemptRegistry();
+const htmlExportAssetRegistry = new HtmlExportAssetRegistry({
+  isAttemptActive: (owner) => htmlExportAttemptRegistry.getActiveAttempt(owner.webContentsId) === owner.attemptId,
+});
 const htmlExportParseHost = new HtmlExportParseHost();
 const htmlExportPipelineService = new HtmlExportPipelineService({
   registry: htmlExportAttemptRegistry,
@@ -99,6 +121,18 @@ registerOsIpc();
 registerHtmlExportIpc({
   windowForWebContents: (id) => windows.windowFromRecord(registry.getByWebContents(id)),
   pipelineService: htmlExportPipelineService,
+  assetLifecycle: {
+    getActiveAttempt: (id) => htmlExportAttemptRegistry.getActiveAttempt(id),
+    invalidateAttempt: (owner) => htmlExportAssetRegistry.invalidateAttempt(owner),
+    releaseWebContents: (id) => htmlExportAssetRegistry.releaseWebContents(id),
+  },
+});
+registerHtmlExportAssetIpc({
+  windowForWebContents: (id) => windows.windowFromRecord(registry.getByWebContents(id)),
+  currentDocumentPathForWebContents: (id) => registry.getByWebContents(id)?.currentPath,
+  fileGrants,
+  assetRegistry: htmlExportAssetRegistry,
+  attemptRegistry: htmlExportAttemptRegistry,
 });
 
 let quitGuardPending = false;

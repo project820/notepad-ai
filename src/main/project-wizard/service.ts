@@ -1,4 +1,10 @@
 import path from 'node:path';
+import {
+  atomicWriteWithExclusiveTemp,
+  type DescriptorAtomicWriteBackend,
+  type ExclusiveTempFile,
+} from '../atomic-write';
+import { identityFromStat, type IdentityFs } from '../path-identity';
 import { repairOverviewDraft, renderOverviewMarkdown } from './overview-template';
 import { loadWizardState, saveWizardState, type StateFs } from './state-store';
 import type { ContextStatus, OverviewFrontmatter, WizardState } from './types';
@@ -27,11 +33,20 @@ export type ProjectWizardSaveApprovedDraftInput = {
   lastScanned: string | null;
 };
 
-type WizardServiceDeps = {
+export type WizardServiceDeps = {
   userDataPath: string;
   fs: ServiceFs;
   now: () => string;
   loadContextStack: (projectFolder: string, overviewPath: string) => Promise<ContextStackLoadResult>;
+  revalidateApprovedProjectWrite: () => Promise<boolean>;
+  /**
+   * Descriptor-bound write dependencies. They are deliberately absent by
+   * default so a service constructed outside the main-process IPC cannot write.
+   */
+  overviewWrite?: {
+    backend: DescriptorAtomicWriteBackend;
+    identityFs: IdentityFs;
+  };
 };
 
 export function createWizardService(deps: WizardServiceDeps) {
@@ -88,9 +103,25 @@ export function createWizardService(deps: WizardServiceDeps) {
       });
       const markdown = renderOverviewMarkdown(draft);
 
-      await deps.fs.mkdir(path.dirname(overviewPath), { recursive: true });
-      await ensureSafeOverviewTarget(input.projectFolder, overviewPath, deps.fs);
-      await deps.fs.writeFile(overviewPath, markdown, 'utf8');
+      const overviewWrite = deps.overviewWrite;
+      if (!overviewWrite?.identityFs.lstat) {
+        throw new Error('Project Wizard descriptor write dependencies are unavailable');
+      }
+      await atomicWriteWithExclusiveTemp(overviewPath, markdown, {
+        backend: overviewWrite.backend,
+        prepareDirectory: false,
+        beforeWrite: async () => {
+          if (!(await deps.revalidateApprovedProjectWrite())) {
+            throw new Error('Project folder is not authorized');
+          }
+        },
+        beforeRename: async (temp) => {
+          if (!(await deps.revalidateApprovedProjectWrite())) {
+            throw new Error('Project folder is not authorized');
+          }
+          await verifyExclusiveTempPath(temp, overviewWrite.identityFs);
+        },
+      });
 
       const loaded = await deps.loadContextStack(input.projectFolder, overviewPath);
       const status: ContextStatus =
@@ -155,38 +186,14 @@ async function canReadNonEmptyFile(filePath: string, fs: Pick<ServiceFs, 'readFi
     return false;
   }
 }
-async function ensureSafeOverviewTarget(
-  projectFolder: string,
-  overviewPath: string,
-  fs: Pick<ServiceFs, 'lstat' | 'realpath'>,
-): Promise<void> {
-  const projectRoot = await fs.realpath(projectFolder);
-  let existingTarget = false;
-  try {
-    const targetStat = await fs.lstat(overviewPath);
-    if (targetStat.isSymbolicLink()) {
-      throw new Error('Refusing to write Overview.md through a symbolic link');
-    }
-    existingTarget = true;
-  } catch (err) {
-    if (!isNotFoundError(err)) throw err;
+async function verifyExclusiveTempPath(temp: ExclusiveTempFile, fs: IdentityFs): Promise<void> {
+  if (!fs.lstat) {
+    throw new Error('Project Wizard descriptor write dependencies are unavailable');
   }
-
-  const targetRealpath = existingTarget
-    ? await fs.realpath(overviewPath)
-    : path.join(await fs.realpath(path.dirname(overviewPath)), path.basename(overviewPath));
-  if (!isPathWithinRoot(projectRoot, targetRealpath)) {
-    throw new Error('Overview.md target is outside the project folder');
+  const stat = await fs.lstat(temp.path);
+  if (!stat.isFile() || identityFromStat(stat) !== identityFromStat(temp.identity)) {
+    throw new Error('Project Wizard temporary file was replaced');
   }
-}
-
-function isNotFoundError(err: unknown): boolean {
-  return typeof err === 'object' && err !== null && 'code' in err && err.code === 'ENOENT';
-}
-
-function isPathWithinRoot(root: string, target: string): boolean {
-  const relative = path.relative(root, target);
-  return relative.length > 0 && !relative.startsWith('..') && !path.isAbsolute(relative);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

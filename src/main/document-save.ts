@@ -1,4 +1,8 @@
-import { atomicWrite, type AtomicWriteBackend } from './atomic-write';
+import {
+  atomicWriteWithExclusiveTemp,
+  type DescriptorAtomicWriteBackend,
+  type ExclusiveTempFile,
+} from './atomic-write';
 
 export interface DocumentSaveFs {
   stat(target: string): Promise<{ mode: number }>;
@@ -11,7 +15,12 @@ export interface DocumentSaveFs {
 export async function saveDocumentAtomically(
   target: string,
   content: string,
-  opts: { fs: DocumentSaveFs; backend: AtomicWriteBackend },
+  opts: {
+    fs: DocumentSaveFs;
+    backend: DescriptorAtomicWriteBackend;
+    beforeWrite?: () => Promise<void>;
+    beforeRename?: (temp: ExclusiveTempFile) => Promise<void>;
+  },
 ): Promise<void> {
   let mode = 0o644;
   try {
@@ -19,5 +28,11 @@ export async function saveDocumentAtomically(
   } catch (error) {
     if (!(error instanceof Error) || !('code' in error) || error.code !== 'ENOENT') throw error;
   }
-  await atomicWrite(target, content, { backend: opts.backend, mode });
+  await atomicWriteWithExclusiveTemp(target, content, {
+    backend: opts.backend,
+    prepareDirectory: false,
+    mode,
+    beforeWrite: opts.beforeWrite,
+    beforeRename: opts.beforeRename,
+  });
 }

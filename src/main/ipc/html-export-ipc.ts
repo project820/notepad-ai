@@ -8,8 +8,9 @@ import {
   isOpaqueHtmlExportId,
   type BeginAttemptRequest,
   type CancelAttemptRequest,
-  type CancelAttemptResult,
+  type HtmlExportAttemptId,
   type HtmlExportPipelineError,
+  type HtmlExportPipelineResult,
   type ResolveRequest,
   type ResolveResult,
   type SanitizeRequest,
@@ -24,13 +25,21 @@ import {
   parseDesignListFromContents,
 } from '../safe-external';
 
+type HtmlExportAssetLifecycle = {
+  getActiveAttempt(webContentsId: number): HtmlExportAttemptId | undefined | Promise<HtmlExportAttemptId | undefined>;
+  invalidateAttempt(owner: { webContentsId: number; attemptId: HtmlExportAttemptId }): void | Promise<void>;
+  releaseWebContents(webContentsId: number): void | Promise<void>;
+};
+
 type HtmlExportIpcDeps = {
   windowForWebContents: (webContentsId: number) => BrowserWindow | null;
   pipelineService: Pick<
     HtmlExportPipelineService,
     'beginAttempt' | 'sanitize' | 'resolve' | 'invalidateAttempt' | 'invalidateSender'
   >;
+  assetLifecycle: HtmlExportAssetLifecycle;
 };
+
 
 /** GET a small text resource with a hard timeout and body cap (never throws past the promise). */
 function fetchTextLimited(url: string, opts: { timeoutMs: number; maxBytes: number }): Promise<string> {
@@ -79,6 +88,39 @@ function pipelineReject(): { ok: false; error: HtmlExportPipelineError } {
   return { ok: false, error: createHtmlExportPipelineError('pipeline-reject') };
 }
 
+function canonicalPipelineError(kind: unknown): HtmlExportPipelineError {
+  switch (kind) {
+    case 'unknown-artifact':
+    case 'stale-artifact':
+    case 'wrong-sender':
+    case 'attempt-superseded':
+    case 'pipeline-oversize':
+    case 'pipeline-reject':
+      return createHtmlExportPipelineError(kind);
+    default:
+      return createHtmlExportPipelineError('pipeline-reject');
+  }
+}
+
+function normalizePipelineResult<T>(result: HtmlExportPipelineResult<T>): HtmlExportPipelineResult<T> {
+  if (result.ok) return result;
+  return { ok: false, error: canonicalPipelineError(result.error.kind) };
+}
+
+async function containsPipelineException<T>(
+  operation: () => HtmlExportPipelineResult<T> | Promise<HtmlExportPipelineResult<T>>,
+  afterSuccess?: () => void | Promise<void>,
+): Promise<HtmlExportPipelineResult<T>> {
+  try {
+    const result = await operation();
+    if (!result.ok) return normalizePipelineResult(result);
+    await afterSuccess?.();
+    return result;
+  } catch {
+    return pipelineReject();
+  }
+}
+
 function isExactPlainObject(input: unknown): input is Record<string, unknown> {
   return !!input
     && typeof input === 'object'
@@ -116,13 +158,96 @@ function isCancelAttemptRequest(input: unknown): input is CancelAttemptRequest {
   return hasExactStringFields(input, ['attemptId']) && isOpaqueHtmlExportId(input.attemptId);
 }
 
-export function registerHtmlExportIpc({ windowForWebContents, pipelineService }: HtmlExportIpcDeps): void {
-  const boundSenders = new WeakSet<object>();
+export function registerHtmlExportIpc({
+  windowForWebContents,
+  pipelineService,
+  assetLifecycle,
+}: HtmlExportIpcDeps): void {
 
-  const bindSenderInvalidation = (sender: WebContents): void => {
-    if (boundSenders.has(sender)) return;
-    boundSenders.add(sender);
-    sender.once('destroyed', () => pipelineService.invalidateSender(sender.id));
+  type SenderBinding = {
+    readonly sender: WebContents;
+    readonly webContentsId: number;
+    readonly generation: number;
+  };
+  const senderBindings = new Map<number, SenderBinding>();
+  const pendingSenderCleanup = new Map<number, Promise<boolean>>();
+  let nextSenderGeneration = 0;
+
+  const clearSenderState = (webContentsId: number): Promise<boolean> => {
+    let pipelineCleanup: void | Promise<void> = undefined;
+    let assetCleanup: void | Promise<void> = undefined;
+    let invoked = true;
+    try {
+      pipelineCleanup = pipelineService.invalidateSender(webContentsId);
+    } catch {
+      invoked = false;
+    }
+    try {
+      assetCleanup = assetLifecycle.releaseWebContents(webContentsId);
+    } catch {
+      invoked = false;
+    }
+    return Promise.allSettled([pipelineCleanup, assetCleanup]).then(
+      (results) => invoked && results.every((result) => result.status === 'fulfilled'),
+    );
+  };
+  const startSenderCleanup = (webContentsId: number): Promise<boolean> => {
+    const pending = pendingSenderCleanup.get(webContentsId);
+    if (pending) return pending;
+    let cleanup!: Promise<boolean>;
+    cleanup = clearSenderState(webContentsId).then(
+      (succeeded) => {
+        if (succeeded && pendingSenderCleanup.get(webContentsId) === cleanup) {
+          pendingSenderCleanup.delete(webContentsId);
+        }
+        return succeeded;
+      },
+      () => false,
+    );
+    pendingSenderCleanup.set(webContentsId, cleanup);
+    return cleanup;
+  };
+
+  const isCurrentSender = (binding: SenderBinding): boolean => {
+    const current = senderBindings.get(binding.webContentsId);
+    return current?.sender === binding.sender && current.generation === binding.generation;
+  };
+
+  const bindSenderInvalidation = async (sender: WebContents): Promise<SenderBinding | null> => {
+    const webContentsId = sender.id;
+    const pendingCleanup = pendingSenderCleanup.get(webContentsId);
+    if (pendingCleanup && !(await pendingCleanup)) return null;
+    const current = senderBindings.get(webContentsId);
+    if (current?.sender === sender) return current;
+    if (current) {
+      senderBindings.delete(webContentsId);
+      if (!(await startSenderCleanup(webContentsId))) return null;
+    }
+
+    const binding: SenderBinding = {
+      sender,
+      webContentsId,
+      generation: ++nextSenderGeneration,
+    };
+    senderBindings.set(webContentsId, binding);
+    try {
+      sender.once('destroyed', () => {
+        if (!isCurrentSender(binding)) return;
+        senderBindings.delete(webContentsId);
+        void startSenderCleanup(webContentsId);
+      });
+      return binding;
+    } catch {
+      if (isCurrentSender(binding)) senderBindings.delete(webContentsId);
+      return null;
+    }
+  };
+
+  const invalidateAttemptBestEffort = async (webContentsId: number, attemptId: HtmlExportAttemptId): Promise<void> => {
+    await Promise.allSettled([
+      Promise.resolve().then(() => pipelineService.invalidateAttempt(webContentsId, attemptId)),
+      Promise.resolve().then(() => assetLifecycle.invalidateAttempt({ webContentsId, attemptId })),
+    ]);
   };
 
 
@@ -157,28 +282,81 @@ export function registerHtmlExportIpc({ windowForWebContents, pipelineService }:
       return { ok: false as const, error: err instanceof Error ? err.message : 'Could not load the design list.' };
     }
   });
-  handleTrusted('html:attempt:generate', (event, input: unknown) => {
-    bindSenderInvalidation(event.sender);
+  handleTrusted('html:attempt:generate', async (event, input: unknown) => {
+    const binding = await bindSenderInvalidation(event.sender);
+    if (!binding) return pipelineReject();
     if (!isBeginAttemptRequest(input)) return pipelineReject();
-    return pipelineService.beginAttempt(event.sender.id);
+    let priorAttemptId: HtmlExportAttemptId | undefined;
+    return await containsPipelineException(
+      async () => {
+        priorAttemptId = await assetLifecycle.getActiveAttempt(binding.webContentsId);
+        if (!isCurrentSender(binding)) return pipelineReject();
+        const result = await pipelineService.beginAttempt(binding.webContentsId);
+        if (isCurrentSender(binding)) return result;
+        if (result.ok) await invalidateAttemptBestEffort(binding.webContentsId, result.value.attemptId);
+        return pipelineReject();
+      },
+      async () => {
+        if (priorAttemptId && isCurrentSender(binding)) {
+          await assetLifecycle.invalidateAttempt({
+            webContentsId: binding.webContentsId,
+            attemptId: priorAttemptId,
+          });
+        }
+      },
+    );
   });
 
   handleTrusted('html:pipeline:sanitize', async (event, input: unknown): Promise<SanitizeResult> => {
-    bindSenderInvalidation(event.sender);
+    const binding = await bindSenderInvalidation(event.sender);
+    if (!binding) return pipelineReject();
     if (!isSanitizeRequest(input)) return pipelineReject();
-    return pipelineService.sanitize(event.sender.id, input.attemptId, input.rawArtifactId);
+    return await containsPipelineException(async () => {
+      const result = await pipelineService.sanitize(
+        binding.webContentsId,
+        input.attemptId,
+        input.rawArtifactId,
+      );
+      if (isCurrentSender(binding)) return result;
+      await invalidateAttemptBestEffort(binding.webContentsId, input.attemptId);
+      return pipelineReject();
+    });
   });
 
   handleTrusted('html:pipeline:resolve', async (event, input: unknown): Promise<ResolveResult> => {
-    bindSenderInvalidation(event.sender);
+    const binding = await bindSenderInvalidation(event.sender);
+    if (!binding) return pipelineReject();
     if (!isResolveRequest(input)) return pipelineReject();
-    return pipelineService.resolve(event.sender.id, input.attemptId, input.sanitizedCandidateId);
+    return await containsPipelineException(async () => {
+      const result = await pipelineService.resolve(
+        binding.webContentsId,
+        input.attemptId,
+        input.sanitizedCandidateId,
+      );
+      if (isCurrentSender(binding)) return result;
+      await invalidateAttemptBestEffort(binding.webContentsId, input.attemptId);
+      return pipelineReject();
+    });
   });
 
-  handleTrusted('html:attempt:cancel', (event, input: unknown): CancelAttemptResult => {
-    bindSenderInvalidation(event.sender);
+  handleTrusted('html:attempt:cancel', async (event, input: unknown) => {
+    const binding = await bindSenderInvalidation(event.sender);
+    if (!binding) return pipelineReject();
     if (!isCancelAttemptRequest(input)) return pipelineReject();
-    return pipelineService.invalidateAttempt(event.sender.id, input.attemptId);
+    return containsPipelineException(
+      async () => {
+        const result = await pipelineService.invalidateAttempt(binding.webContentsId, input.attemptId);
+        return isCurrentSender(binding) ? result : pipelineReject();
+      },
+      async () => {
+        if (isCurrentSender(binding)) {
+          await assetLifecycle.invalidateAttempt({
+            webContentsId: binding.webContentsId,
+            attemptId: input.attemptId,
+          });
+        }
+      },
+    );
   });
 
   handleTrusted('html:save', async (event, args: { html?: string; defaultName?: string }) => {
