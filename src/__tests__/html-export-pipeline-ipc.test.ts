@@ -13,6 +13,7 @@ const ipc = vi.hoisted(() => {
 
 vi.mock('../main/ipc-guard', () => ({ handleTrusted: ipc.handleTrusted }));
 vi.mock('electron', () => ({ dialog: {}, shell: {} }));
+import { dialog } from 'electron';
 
 import { registerHtmlExportIpc } from '../main/ipc/html-export-ipc';
 
@@ -39,6 +40,14 @@ function createService() {
           sha256: 'a'.repeat(64),
           byteLength: 12,
         },
+      },
+    })),
+    readFinalizedArtifact: vi.fn(() => ({
+      ok: true as const,
+      value: {
+        bytes: Buffer.from('<!doctype html><p>final</p>', 'utf8'),
+        sha256: 'b'.repeat(64),
+        byteLength: 27,
       },
     })),
     invalidateAttempt: vi.fn(() => ({ ok: true as const, value: {} })),
@@ -829,6 +838,243 @@ describe('HTML export pipeline IPC', () => {
         kind: 'quarantine-unavailable',
         detail: 'HTML export quarantine error: quarantine-unavailable',
       },
+    });
+  });
+
+  describe('html:save-finalized (AC-M1d)', () => {
+    function createSaveBackend() {
+      const writes: Array<{ path: string; data: string; mode?: number }> = [];
+      const backend = {
+        mkdir: vi.fn(async () => {}),
+        writeFile: vi.fn(async (p: string, data: string | Buffer, mode?: number) => {
+          writes.push({ path: p, data: Buffer.isBuffer(data) ? data.toString('utf8') : String(data), mode });
+        }),
+        fsyncFile: vi.fn(async () => {}),
+        rename: vi.fn(async () => {}),
+        unlink: vi.fn(async () => {}),
+        fsyncDir: vi.fn(async () => {}),
+        randomId: vi.fn(() => 'testid'),
+      };
+      return Object.assign(backend, { writes });
+    }
+    const fakeWin = {} as never;
+    function setDialog(impl: unknown) {
+      (dialog as unknown as { showSaveDialog: unknown }).showSaveDialog = impl;
+    }
+
+    it('atomic-writes the main-held finalized bytes and returns the finalized digest', async () => {
+      const service = createService();
+      const backend = createSaveBackend();
+      setDialog(vi.fn(async () => ({ canceled: false, filePath: '/tmp/out.html' })));
+      const sender: Sender = { id: 81, once: vi.fn() };
+      registerHtmlExportIpc({
+        windowForWebContents: () => fakeWin,
+        pipelineService: service as never,
+        assetLifecycle: createNoopAssetLifecycle(),
+        saveBackend: backend as never,
+      });
+
+      const result = await ipc.handler('html:save-finalized')!(eventFor(sender), {
+        attemptId: 'attempt-1',
+        finalizedArtifactId: 'finalized-1',
+        defaultName: 'report.html',
+      });
+
+      expect(result).toStrictEqual({ saved: true, filePath: '/tmp/out.html', sha256: 'b'.repeat(64) });
+      expect(service.readFinalizedArtifact).toHaveBeenCalledWith(81, 'attempt-1', 'finalized-1');
+      expect(backend.writes).toHaveLength(1);
+      expect(backend.writes[0]!.data).toBe('<!doctype html><p>final</p>');
+      // Atomic write path: temp then rename (never a direct write to target).
+      expect(backend.rename).toHaveBeenCalledWith('/tmp/out.html.testid.tmp', '/tmp/out.html');
+      // Exported HTML is user-shareable (0o644), not the 0o600 secret-store default.
+      expect(backend.writes[0]!.mode).toBe(0o644);
+    });
+
+    it('appends .html when the chosen path lacks the extension', async () => {
+      const service = createService();
+      const backend = createSaveBackend();
+      setDialog(vi.fn(async () => ({ canceled: false, filePath: '/tmp/report' })));
+      const sender: Sender = { id: 82, once: vi.fn() };
+      registerHtmlExportIpc({
+        windowForWebContents: () => fakeWin,
+        pipelineService: service as never,
+        assetLifecycle: createNoopAssetLifecycle(),
+        saveBackend: backend as never,
+      });
+
+      const result = await ipc.handler('html:save-finalized')!(eventFor(sender), {
+        attemptId: 'attempt-1',
+        finalizedArtifactId: 'finalized-1',
+      });
+
+      expect(result).toStrictEqual({ saved: true, filePath: '/tmp/report.html', sha256: 'b'.repeat(64) });
+    });
+
+    it('never writes and never opens a dialog when the finalized artifact is unresolved', async () => {
+      const service = createService();
+      service.readFinalizedArtifact.mockReturnValueOnce({
+        ok: false,
+        error: { kind: 'unknown-artifact', detail: 'HTML export pipeline error: unknown-artifact' },
+      } as never);
+      const backend = createSaveBackend();
+      const dialogSpy = vi.fn(async () => ({ canceled: false, filePath: '/tmp/out.html' }));
+      setDialog(dialogSpy);
+      const sender: Sender = { id: 83, once: vi.fn() };
+      registerHtmlExportIpc({
+        windowForWebContents: () => fakeWin,
+        pipelineService: service as never,
+        assetLifecycle: createNoopAssetLifecycle(),
+        saveBackend: backend as never,
+      });
+
+      const result = await ipc.handler('html:save-finalized')!(eventFor(sender), {
+        attemptId: 'attempt-1',
+        finalizedArtifactId: 'finalized-1',
+      });
+
+      expect(result).toStrictEqual({ saved: false });
+      expect(dialogSpy).not.toHaveBeenCalled();
+      expect(backend.writes).toHaveLength(0);
+    });
+
+    it('returns saved:false without writing when the save dialog is canceled', async () => {
+      const service = createService();
+      const backend = createSaveBackend();
+      setDialog(vi.fn(async () => ({ canceled: true, filePath: undefined })));
+      const sender: Sender = { id: 84, once: vi.fn() };
+      registerHtmlExportIpc({
+        windowForWebContents: () => fakeWin,
+        pipelineService: service as never,
+        assetLifecycle: createNoopAssetLifecycle(),
+        saveBackend: backend as never,
+      });
+
+      const result = await ipc.handler('html:save-finalized')!(eventFor(sender), {
+        attemptId: 'attempt-1',
+        finalizedArtifactId: 'finalized-1',
+      });
+
+      expect(result).toStrictEqual({ saved: false });
+      expect(backend.writes).toHaveLength(0);
+    });
+
+    it('rejects a byte-bearing or malformed request before touching the pipeline', async () => {
+      const service = createService();
+      const backend = createSaveBackend();
+      const dialogSpy = vi.fn(async () => ({ canceled: false, filePath: '/tmp/out.html' }));
+      setDialog(dialogSpy);
+      const sender: Sender = { id: 85, once: vi.fn() };
+      registerHtmlExportIpc({
+        windowForWebContents: () => fakeWin,
+        pipelineService: service as never,
+        assetLifecycle: createNoopAssetLifecycle(),
+        saveBackend: backend as never,
+      });
+
+      for (const malformed of [
+        { attemptId: 'attempt-1', finalizedArtifactId: 'finalized-1', html: '<p>bytes</p>' },
+        { attemptId: 'attempt-1', finalizedArtifactId: 'finalized-1', defaultName: 42 },
+        { attemptId: 'attempt-1' },
+        { attemptId: 'a b', finalizedArtifactId: 'finalized-1' },
+      ]) {
+        const result = await ipc.handler('html:save-finalized')!(eventFor(sender), malformed);
+        expect(result).toStrictEqual({ saved: false });
+      }
+      expect(service.readFinalizedArtifact).not.toHaveBeenCalled();
+      expect(dialogSpy).not.toHaveBeenCalled();
+      expect(backend.writes).toHaveLength(0);
+    });
+
+    it('reports a failed atomic write without leaving a partial file (saved:false + error)', async () => {
+      const service = createService();
+      const backend = createSaveBackend();
+      backend.writeFile.mockRejectedValueOnce(new Error('disk full'));
+      setDialog(vi.fn(async () => ({ canceled: false, filePath: '/tmp/out.html' })));
+      const sender: Sender = { id: 86, once: vi.fn() };
+      registerHtmlExportIpc({
+        windowForWebContents: () => fakeWin,
+        pipelineService: service as never,
+        assetLifecycle: createNoopAssetLifecycle(),
+        saveBackend: backend as never,
+      });
+
+      const result = await ipc.handler('html:save-finalized')!(eventFor(sender), {
+        attemptId: 'attempt-1',
+        finalizedArtifactId: 'finalized-1',
+      });
+
+      expect(result).toStrictEqual({ saved: false, error: 'write-failed' });
+      // The temp file is unlinked on failure; the target is never renamed into place.
+      expect(backend.unlink).toHaveBeenCalledWith('/tmp/out.html.testid.tmp');
+      expect(backend.rename).not.toHaveBeenCalled();
+    });
+
+
+    it('re-reads the finalized artifact after the dialog and fails closed if it was superseded', async () => {
+      const service = createService();
+      const backend = createSaveBackend();
+      const okValue = {
+        ok: true as const,
+        value: { bytes: Buffer.from('<!doctype html><p>final</p>', 'utf8'), sha256: 'b'.repeat(64), byteLength: 27 },
+      };
+      // Preflight read succeeds (dialog opens); the post-dialog re-read fails
+      // because the attempt was superseded/tombstoned while the dialog was open.
+      service.readFinalizedArtifact
+        .mockReturnValueOnce(okValue as never)
+        .mockReturnValueOnce({
+          ok: false,
+          error: { kind: 'stale-artifact', detail: 'HTML export pipeline error: stale-artifact' },
+        } as never);
+      setDialog(vi.fn(async () => ({ canceled: false, filePath: '/tmp/out.html' })));
+      const sender: Sender = { id: 87, once: vi.fn() };
+      registerHtmlExportIpc({
+        windowForWebContents: () => fakeWin,
+        pipelineService: service as never,
+        assetLifecycle: createNoopAssetLifecycle(),
+        saveBackend: backend as never,
+      });
+
+      const result = await ipc.handler('html:save-finalized')!(eventFor(sender), {
+        attemptId: 'attempt-1',
+        finalizedArtifactId: 'finalized-1',
+      });
+
+      expect(result).toStrictEqual({ saved: false });
+      expect(service.readFinalizedArtifact).toHaveBeenCalledTimes(2);
+      expect(backend.writes).toHaveLength(0);
+      expect(backend.rename).not.toHaveBeenCalled();
+    });
+
+    it('rejects a request whose required ids are prototype-inherited, not own keys', async () => {
+      const service = createService();
+      const backend = createSaveBackend();
+      const dialogSpy = vi.fn(async () => ({ canceled: false, filePath: '/tmp/out.html' }));
+      setDialog(dialogSpy);
+      const sender: Sender = { id: 88, once: vi.fn() };
+      registerHtmlExportIpc({
+        windowForWebContents: () => fakeWin,
+        pipelineService: service as never,
+        assetLifecycle: createNoopAssetLifecycle(),
+        saveBackend: backend as never,
+      });
+
+      const inherited = Object.create({ attemptId: 'attempt-1', finalizedArtifactId: 'finalized-1' }) as object;
+      const result = await ipc.handler('html:save-finalized')!(eventFor(sender), inherited);
+
+      expect(result).toStrictEqual({ saved: false });
+      expect(service.readFinalizedArtifact).not.toHaveBeenCalled();
+      expect(dialogSpy).not.toHaveBeenCalled();
+    });
+
+    it('keeps the legacy html:save handler registered alongside the finalized path', async () => {
+      const service = createService();
+      registerHtmlExportIpc({
+        windowForWebContents: () => null,
+        pipelineService: service as never,
+        assetLifecycle: createNoopAssetLifecycle(),
+      });
+      expect(ipc.handler('html:save')).toBeDefined();
+      expect(ipc.handler('html:save-finalized')).toBeDefined();
     });
   });
 });

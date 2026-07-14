@@ -13,6 +13,7 @@ import {
   type ResolveResult,
   type SanitizeResult,
   type ResolvedArtifactId,
+  type FinalizedArtifactId,
 } from '../shared/html-export-pipeline';
 import { HtmlExportAttemptRegistry } from './html-export-attempt-registry';
 import { HtmlExportParseHost, type HtmlExportParseValue } from './html-export-parse-host';
@@ -283,6 +284,35 @@ export class HtmlExportPipelineService {
     if (!transitioned.ok) return transitioned;
     const checked = this.verifyTransition(transitioned.value, verified.value);
     return checked.ok ? { ok: true, value: { artifact: checked.value } } : checked;
+  }
+
+  /**
+   * Read the immutable finalized bytes for a `FinalizedArtifactId` so the save
+   * IPC (PR-M1d) can atomicWrite them. Re-verifies the registry digest and the
+   * whole-document byte cap (defense-in-depth); the renderer never supplies
+   * these bytes. Returns the digest so the caller can assert preview == save.
+   */
+  readFinalizedArtifact(
+    webContentsId: number,
+    attemptId: HtmlExportAttemptId,
+    finalizedArtifactId: FinalizedArtifactId,
+  ): HtmlExportPipelineResult<{ bytes: Buffer; sha256: string; byteLength: number }> {
+    const finalized = this.registry.read(webContentsId, attemptId, finalizedArtifactId, 'finalized');
+    if (!finalized.ok) return finalized;
+    if (!this.hasExpectedDigest(finalized.value.ref, finalized.value.bytes)) {
+      return reject('Finalized artifact digest or byte length does not match its registry metadata');
+    }
+    if (finalized.value.bytes.byteLength > HTML_EXPORT_PIPELINE_STAGE_MAX_BYTES) {
+      return oversize(`Finalized payload exceeds ${HTML_EXPORT_PIPELINE_STAGE_MAX_BYTES} bytes`);
+    }
+    return {
+      ok: true,
+      value: {
+        bytes: finalized.value.bytes,
+        sha256: finalized.value.ref.sha256,
+        byteLength: finalized.value.ref.byteLength,
+      },
+    };
   }
 
   invalidateAttempt(

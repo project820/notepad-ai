@@ -241,6 +241,7 @@ export const ko: Dict = {
     'he.error.containment': '선택한 레이아웃 안에 콘텐츠를 배치할 수 없습니다. 요약 강도를 낮추거나 스크롤 레이아웃을 사용해보세요.',
     'he.error.notSelfContained': '생성된 문서가 완전한 단일 파일이 아니어서 저장하지 않았습니다. 다시 시도해주세요.',
     'he.assets.select': '시스템 파일 선택기에서 이미지 선택',
+    'he.picker.openRouterExcluded': 'OpenRouter 모델은 HTML 내보내기에서 사용할 수 없습니다.',
     'he.assets.hintsTitle': '이 Markdown 문서에서 참조하는 이미지',
     'he.assets.assign': '선택한 파일 직접 지정',
     'he.assets.ambiguous': '이름이 같은 파일이 여러 개여서 직접 선택해야 합니다.',
