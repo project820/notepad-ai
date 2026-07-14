@@ -8,6 +8,7 @@
     "scripts/converter-e2e-runner.mjs",
     "scripts/html-export-containment-runner.mjs",
     "scripts/html-export-quarantine-smoke-runner.mjs",
+    "scripts/html-export-direct-harness.mjs",
     "scripts/security-e2e-runner.mjs",
     "scripts/he-harness.ts"
   ],
