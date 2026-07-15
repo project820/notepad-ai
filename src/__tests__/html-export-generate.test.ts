@@ -115,4 +115,69 @@ describe('createHtmlExportGenerator', () => {
     expect(aborted).toBe(true);
     expect(result.state).toBe('cancelled');
   });
+
+  it('uses resolveTransport when provided and falls back to the static route otherwise', async () => {
+    const stream = async (_req: AiChatRequest, onEvent: (e: AiChatEvent) => void) => {
+      onEvent({ kind: 'delta', text: '<html>ok</html>' });
+      onEvent({ kind: 'done', text: '' });
+    };
+    const grokModel = { provider: 'grok' as const, id: 'grok-4.5' };
+
+    const withOverride = createHtmlExportGenerator({
+      pipeline: fakePipeline(),
+      stream,
+      quarantine: async () => ({ ok: true }),
+      resolveTransport: async () => 'api',
+    });
+    const overridden = await withOverride.run(7, { prompt: 'p', model: grokModel });
+    expect(overridden.state).toBe('final');
+    if (overridden.state === 'final') {
+      expect(overridden.route).toEqual({ provider: 'grok', model: 'grok-4.5', transport: 'api' });
+    }
+
+    const withoutOverride = createHtmlExportGenerator({
+      pipeline: fakePipeline(),
+      stream,
+      quarantine: async () => ({ ok: true }),
+    });
+    const fallback = await withoutOverride.run(7, { prompt: 'p', model: grokModel });
+    expect(fallback.state).toBe('final');
+    if (fallback.state === 'final') {
+      expect(fallback.route).toEqual({ provider: 'grok', model: 'grok-4.5', transport: 'cli' });
+    }
+  });
+
+  it('forwards abort during quarantine to the injected seam', async () => {
+    let quarantineSignal: AbortSignal | undefined;
+    const quarantine = vi.fn(async ({ signal }: { signal: AbortSignal }) => {
+      quarantineSignal = signal;
+      await new Promise<void>((resolve) => {
+        if (signal.aborted) {
+          resolve();
+          return;
+        }
+        signal.addEventListener('abort', () => resolve(), { once: true });
+      });
+      return { ok: false as const, kind: 'quarantine-cancelled' as const };
+    });
+    const stream = async (_req: AiChatRequest, onEvent: (e: AiChatEvent) => void) => {
+      onEvent({ kind: 'delta', text: '<html>ok</html>' });
+      onEvent({ kind: 'done', text: '' });
+    };
+    const gen = createHtmlExportGenerator({
+      pipeline: fakePipeline(),
+      stream,
+      quarantine,
+    });
+
+    const running = gen.run(7, { prompt: 'p', model: MODEL });
+    // Wait until quarantine is entered, then cancel.
+    await vi.waitFor(() => expect(quarantine).toHaveBeenCalled());
+    expect(quarantineSignal).toBeDefined();
+    gen.cancel(7);
+    const result = await running;
+
+    expect(quarantineSignal?.aborted).toBe(true);
+    expect(result.state).toBe('cancelled');
+  });
 });

@@ -110,9 +110,28 @@ const htmlExportGenerator = createHtmlExportGenerator({
   pipeline: htmlExportPipelineService,
   stream: (req, onEvent) => getRegistry().streamProviderChat(req, onEvent),
   maxOutputTokens: (m) => htmlExportMaxTokens(m.provider, m.id),
-  quarantine: async ({ webContentsId, attemptId, resolvedArtifactId }) => {
-    const measured = await htmlExportQuarantine.measure(webContentsId, attemptId, resolvedArtifactId);
-    return measured.ok ? { ok: true as const } : { ok: false as const, kind: measured.error.kind };
+  quarantine: async ({ webContentsId, attemptId, resolvedArtifactId, signal }) => {
+    const onAbort = () => htmlExportQuarantine.cancelAttempt(webContentsId, attemptId);
+    if (signal.aborted) {
+      onAbort();
+      return { ok: false as const, kind: 'quarantine-cancelled' as const };
+    }
+    signal.addEventListener('abort', onAbort, { once: true });
+    try {
+      const measured = await htmlExportQuarantine.measure(webContentsId, attemptId, resolvedArtifactId);
+      return measured.ok ? { ok: true as const } : { ok: false as const, kind: measured.error.kind };
+    } finally {
+      signal.removeEventListener('abort', onAbort);
+    }
+  },
+  resolveTransport: async (m) => {
+    if (m.provider === 'grok') {
+      const g = getRegistry().getProvider('grok');
+      if (g && typeof (g as { htmlSurfaceTransport?: unknown }).htmlSurfaceTransport === 'function') {
+        return (g as unknown as { htmlSurfaceTransport(): Promise<'api' | 'cli'> }).htmlSurfaceTransport();
+      }
+    }
+    return undefined;
   },
 });
 const testCloseChoice = process.env.NOTEPAD_AI_CLOSE_DIALOG_CHOICE;

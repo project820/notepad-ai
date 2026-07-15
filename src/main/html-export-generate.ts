@@ -35,6 +35,13 @@ export type HtmlExportGeneratorDeps = {
   stream: PinnedTransportStream;
   /** Escalated HTML-export output cap for the selected model. */
   maxOutputTokens?: (model: HtmlGenerateModel) => number | undefined;
+  /**
+   * Optional override for the pinned route's transport label.
+   * Used so Grok can report 'api' when the xAI key is connected (matching
+   * ComposedGrokProvider's html-surface pick) instead of the static 'cli' default.
+   * Returning `undefined` falls through to `routeTransport`.
+   */
+  resolveTransport?: (model: HtmlGenerateModel) => Promise<'cli' | 'api' | undefined> | 'cli' | 'api' | undefined;
 };
 
 export type HtmlExportGenerator = {
@@ -57,9 +64,15 @@ export function createHtmlExportGenerator(deps: HtmlExportGeneratorDeps): HtmlEx
       const controller = new AbortController();
       controllers.set(webContentsId, controller);
 
+      // Only await the resolver when one is actually injected — the default path
+      // stays synchronous so orchestrator.run() starts (and the stream registers
+      // its abort listener) before any supersede/cancel can land.
+      const transport = deps.resolveTransport
+        ? (await deps.resolveTransport(input.model)) ?? routeTransport(input.model.provider)
+        : routeTransport(input.model.provider);
       const generate = createHtmlExportTransport({
         model: input.model,
-        transport: routeTransport(input.model.provider),
+        transport,
         stream: deps.stream,
         instructions: input.instructions,
         maxOutputTokens: deps.maxOutputTokens?.(input.model),

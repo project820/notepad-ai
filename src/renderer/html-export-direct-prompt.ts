@@ -12,6 +12,7 @@
  */
 
 import type { DirectExportConfig } from '../shared/html-export-direct-config';
+import { resolveSummaryChartPolicy } from './html-export-model';
 
 /** design.md is clamped so the prompt stays bounded (matches legacy). */
 const DESIGN_CHARS = 8000;
@@ -89,6 +90,31 @@ function configDirectiveLines(config: DirectExportConfig): string[] {
     `- ${modeLine(config.mode)}`,
     `- ${densityLine(config.density)}`,
   ];
+
+  if (config.customPurpose) {
+    lines.push(`- custom purpose brief (weight heavily): ${config.customPurpose}`);
+  }
+
+  if (config.summaryChartMode) {
+    const policy = resolveSummaryChartPolicy(config.summaryChartMode);
+    lines.push(
+      `- summary/chart strength: ${policy.mode} (${policy.label})`,
+      `- summarization directive: ${policy.summarization}`,
+      `- chart directive: ${policy.chartPolicy}`,
+    );
+  }
+
+  if (config.readableWidth) {
+    lines.push(`- readable width: ${config.readableWidth.toUpperCase()} reading measure`);
+  }
+
+  if (typeof config.interactive === 'boolean') {
+    lines.push(
+      config.interactive
+        ? '- interactivity: allow tasteful CSS-only interactions (no JavaScript)'
+        : '- interactivity: static document only (no interactive affordances)',
+    );
+  }
 
   if (config.designId) {
     lines.push(`- designId: ${config.designId}`);
