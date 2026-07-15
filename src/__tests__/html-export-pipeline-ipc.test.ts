@@ -713,11 +713,10 @@ describe('HTML export pipeline IPC', () => {
     expect(assetLifecycle.releaseWebContents).not.toHaveBeenCalled();
     expect(ipc.handler('design:fetch')).toBeDefined();
     expect(ipc.handler('design:list')).toBeDefined();
-    expect(ipc.handler('html:save')).toBeDefined();
     expect(ipc.handler('html:open-saved')).toBeDefined();
   });
 
-  it('keeps legacy save and open behavior fail-closed', async () => {
+  it('keeps open-saved behavior fail-closed', async () => {
     const service = createService();
     const sender: Sender = { id: 45, once: vi.fn() };
     registerHtmlExportIpc({
@@ -726,13 +725,8 @@ describe('HTML export pipeline IPC', () => {
       assetLifecycle: createNoopAssetLifecycle(),
     });
 
-    const save = await ipc.handler('html:save')!(eventFor(sender), {
-      html: '<!doctype html><p>legacy</p>',
-      defaultName: 'legacy.html',
-    });
     const open = await ipc.handler('html:open-saved')!(eventFor(sender), 'not-html.txt');
 
-    expect(save).toStrictEqual({ saved: false });
     expect(open).toStrictEqual({ opened: false, error: 'Not an openable HTML file.' });
   });
   it('finalizes on quarantine PASS and returns finalizedArtifactId', async () => {
@@ -1066,15 +1060,49 @@ describe('HTML export pipeline IPC', () => {
       expect(dialogSpy).not.toHaveBeenCalled();
     });
 
-    it('keeps the legacy html:save handler registered alongside the finalized path', async () => {
+    it('registers the finalized save handler (the raw html:save path is removed at cutover)', async () => {
       const service = createService();
       registerHtmlExportIpc({
         windowForWebContents: () => null,
         pipelineService: service as never,
         assetLifecycle: createNoopAssetLifecycle(),
       });
-      expect(ipc.handler('html:save')).toBeDefined();
       expect(ipc.handler('html:save-finalized')).toBeDefined();
+    });
+
+    it('html:generate hard-excludes OpenRouter (and non-allowlisted providers) but forwards an allowed provider', async () => {
+      const service = createService();
+      const generateHtml = vi.fn(async () => ({
+        state: 'final' as const,
+        attemptId: 'attempt-1',
+        finalizedArtifactId: 'finalized-1',
+        resolvedArtifactId: 'resolved-1',
+        sanitizedArtifactId: 'sanitized-1',
+        route: { provider: 'chatgpt', model: 'gpt-5.4-mini', transport: 'api' as const },
+      }));
+      const sender: Sender = { id: 91, once: vi.fn() };
+      registerHtmlExportIpc({
+        windowForWebContents: () => fakeWin,
+        pipelineService: service as never,
+        assetLifecycle: createNoopAssetLifecycle(),
+        generateHtml: generateHtml as never,
+      });
+
+      // OpenRouter is opaque multi-vendor routing → rejected before reaching the generator.
+      const rejected = await ipc.handler('html:generate')!(eventFor(sender), {
+        prompt: 'make it',
+        model: { provider: 'openrouter', id: 'anthropic/claude-sonnet-4.5' },
+      });
+      expect(rejected).toStrictEqual({ state: 'failed', stage: 'begin', kind: 'pipeline-reject' });
+      expect(generateHtml).not.toHaveBeenCalled();
+
+      // An allowlisted provider is forwarded to the main-owned generator.
+      const ok = await ipc.handler('html:generate')!(eventFor(sender), {
+        prompt: 'make it',
+        model: { provider: 'chatgpt', id: 'gpt-5.4-mini' },
+      });
+      expect(generateHtml).toHaveBeenCalledTimes(1);
+      expect(ok).toMatchObject({ state: 'final', finalizedArtifactId: 'finalized-1' });
     });
   });
 });

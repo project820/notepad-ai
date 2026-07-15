@@ -27,6 +27,8 @@ import { HtmlExportPipelineService } from './html-export-pipeline-service';
 import { bundleSanitizedHtml } from './html-export-shell';
 import { HtmlExportQuarantinePool } from './html-export-quarantine';
 import { ElectronQuarantineHost } from './html-export-quarantine-host';
+import { createHtmlExportGenerator } from './html-export-generate';
+import { htmlExportMaxTokens } from './ai/output-budget';
 import {
   createHtmlExportQuarantineError,
   type HtmlExportAttemptId,
@@ -92,9 +94,14 @@ const htmlExportPipelineService = new HtmlExportPipelineService({
 // module-level holder lets the IPC layer resolve it lazily.
 let htmlExportQuarantinePool: HtmlExportQuarantinePool | undefined;
 const htmlExportQuarantine = {
-  measure: (webContentsId: number, attemptId: HtmlExportAttemptId, resolvedArtifactId: ResolvedArtifactId) =>
+  measure: (
+    webContentsId: number,
+    attemptId: HtmlExportAttemptId,
+    resolvedArtifactId: ResolvedArtifactId,
+    viewport?: { width: number; height: number },
+  ) =>
     htmlExportQuarantinePool
-      ? htmlExportQuarantinePool.measure(webContentsId, attemptId, resolvedArtifactId)
+      ? htmlExportQuarantinePool.measure(webContentsId, attemptId, resolvedArtifactId, viewport)
       : Promise.resolve({
           ok: false as const,
           error: createHtmlExportQuarantineError('quarantine-unavailable'),
@@ -103,6 +110,47 @@ const htmlExportQuarantine = {
   cancelAttempt: (webContentsId: number, attemptId: HtmlExportAttemptId) =>
     htmlExportQuarantinePool?.cancelAttempt(webContentsId, attemptId),
 };
+
+const htmlExportGenerator = createHtmlExportGenerator({
+  pipeline: htmlExportPipelineService,
+  stream: (req, onEvent) => getRegistry().streamProviderChat(req, onEvent),
+  maxOutputTokens: (m) => htmlExportMaxTokens(m.provider, m.id),
+  quarantine: async ({ webContentsId, attemptId, resolvedArtifactId, signal, viewport }) => {
+    const onAbort = () => htmlExportQuarantine.cancelAttempt(webContentsId, attemptId);
+    if (signal.aborted) {
+      onAbort();
+      return { ok: false as const, kind: 'quarantine-cancelled' as const };
+    }
+    signal.addEventListener('abort', onAbort, { once: true });
+    try {
+      const measured = await htmlExportQuarantine.measure(
+        webContentsId,
+        attemptId,
+        resolvedArtifactId,
+        viewport,
+      );
+      if (!measured.ok) return { ok: false as const, kind: measured.error.kind };
+      // The quarantine gate must reject a document that renders but overflows its
+      // viewport horizontally (a broken/uncontained layout) — otherwise an
+      // overflowing export is finalized as a success. See #29 review (P1).
+      if (measured.value.measurement.horizontalOverflow) {
+        return { ok: false as const, kind: 'layout-violation' as const };
+      }
+      return { ok: true as const };
+    } finally {
+      signal.removeEventListener('abort', onAbort);
+    }
+  },
+  resolveTransport: async (m) => {
+    if (m.provider === 'grok') {
+      const g = getRegistry().getProvider('grok');
+      if (g && typeof (g as { htmlSurfaceTransport?: unknown }).htmlSurfaceTransport === 'function') {
+        return (g as unknown as { htmlSurfaceTransport(): Promise<'api' | 'cli'> }).htmlSurfaceTransport();
+      }
+    }
+    return undefined;
+  },
+});
 const testCloseChoice = process.env.NOTEPAD_AI_CLOSE_DIALOG_CHOICE;
 const windows = createAppWindows({
   registry,
@@ -152,6 +200,8 @@ registerHtmlExportIpc({
     releaseWebContents: (id) => htmlExportAssetRegistry.releaseWebContents(id),
   },
   quarantine: htmlExportQuarantine,
+  generateHtml: (webContentsId, input) => htmlExportGenerator.run(webContentsId, input),
+  cancelGenerateHtml: (webContentsId) => htmlExportGenerator.cancel(webContentsId),
 });
 registerHtmlExportAssetIpc({
   windowForWebContents: (id) => windows.windowFromRecord(registry.getByWebContents(id)),

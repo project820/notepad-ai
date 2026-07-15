@@ -23,6 +23,14 @@ export type DirectExportConfig = {
   designMd?: string;
   userRequest?: string;
   model?: string;
+  /** A/B/C/D summary/visualization strength — the wizard's core control. */
+  summaryChartMode?: 'A' | 'B' | 'C' | 'D';
+  /** Advanced knob: preferred reading measure for scroll/document layouts. */
+  readableWidth?: 'narrow' | 'normal' | 'wide';
+  /** Advanced knob: allow tasteful CSS-only interactivity vs a static document. */
+  interactive?: boolean;
+  /** Free-text purpose override when the wizard purpose is a custom brief. */
+  customPurpose?: string;
 };
 
 export const PURPOSE_DEFAULTS: Record<
@@ -54,6 +62,10 @@ export function resolveDirectExportConfig(input: {
   designMd?: string;
   userRequest?: string;
   model?: string;
+  summaryChartMode?: 'A' | 'B' | 'C' | 'D';
+  readableWidth?: 'narrow' | 'normal' | 'wide';
+  interactive?: boolean;
+  customPurpose?: string;
 }): DirectExportConfig {
   const defaults = PURPOSE_DEFAULTS[input.purpose];
   const config: DirectExportConfig = {
@@ -72,5 +84,10 @@ export function resolveDirectExportConfig(input: {
   if (designMd) config.designMd = designMd;
   if (userRequest) config.userRequest = userRequest;
   if (model) config.model = model;
+  if (input.summaryChartMode) config.summaryChartMode = input.summaryChartMode;
+  if (input.readableWidth) config.readableWidth = input.readableWidth;
+  if (typeof input.interactive === 'boolean') config.interactive = input.interactive;
+  const customPurpose = input.customPurpose?.trim();
+  if (customPurpose) config.customPurpose = customPurpose;
   return config;
 }

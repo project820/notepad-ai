@@ -12,7 +12,10 @@ import type {
   ResolveResult,
   SanitizeRequest,
   SanitizeResult,
+  SaveFinalizedRequest,
+  SaveFinalizedResult,
 } from '../shared/html-export-pipeline';
+import type { GenerationAttemptResult } from './html-export-generation-orchestrator';
 import type {
   HtmlExportAssetApi,
   PickHtmlAssetsRequest,
@@ -296,8 +299,6 @@ const api = {
     designs?: { slug: string; name: string; pageUrl: string }[];
     error?: string;
   }> => ipcRenderer.invoke('design:list'),
-  saveHtml: (args: { html: string; defaultName?: string }): Promise<{ saved: boolean; filePath?: string; error?: string }> =>
-    ipcRenderer.invoke('html:save', args),
   openSavedHtml: (filePath: string): Promise<{ opened: boolean; error?: string }> =>
     ipcRenderer.invoke('html:open-saved', filePath),
   beginHtmlExportAttempt: (request: BeginAttemptRequest): Promise<BeginAttemptResult> =>
@@ -310,6 +311,17 @@ const api = {
     ipcRenderer.invoke('html:attempt:cancel', request),
   pickHtmlExportAssets: (request: PickHtmlAssetsRequest): Promise<PickHtmlAssetsResponse> =>
     ipcRenderer.invoke('html:asset:pick', request),
+  generateHtmlExport: (
+    request: {
+      prompt: string;
+      model: { provider: AiProviderId; id: string };
+      instructions?: string;
+      viewport?: { width: number; height: number };
+    },
+  ): Promise<GenerationAttemptResult> => ipcRenderer.invoke('html:generate', request),
+  cancelHtmlGeneration: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('html:generate:cancel'),
+  saveHtmlFinalized: (request: SaveFinalizedRequest): Promise<SaveFinalizedResult> =>
+    ipcRenderer.invoke('html:save-finalized', request),
 
   // OS integration (⑥) — default .md editor handler
   mdHandlerStatus: (): Promise<{ supported: boolean; registered?: boolean }> =>

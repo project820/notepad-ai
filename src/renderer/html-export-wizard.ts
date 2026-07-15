@@ -3,19 +3,19 @@
  *
  * The user makes four core selections — orientation, layout, a design.md, and
  * summary/chart strength (A/B/C/D) — plus one free-text requirement. "Generate"
- * composes ALL of them into the SINGLE content-model prompt
- * (`buildHtmlExportContentPrompt`) and validates the AI reply with
- * `parseContentModel`. The AI authors NO HTML — only the JSON content model;
- * the `generated` step then renders it deterministically (measure→paginate→scale
- * in the real DOM, theme, bundle, self-containment-validate) and saves a single
- * offline .html. Purpose/density/width/interactive are demoted to an optional,
- * collapsed "advanced options" panel.
+ * composes ALL of them into the SINGLE direct-authoring prompt
+ * (`buildDirectHtmlPrompt`) and calls the main-owned generator, which streams the
+ * model, drives the sanitize→resolve→quarantine→finalize pipeline, and returns an
+ * opaque FinalizedArtifactId. The model authors the HTML/CSS directly; the renderer
+ * never touches bytes. "Save" submits only the opaque IDs to the main atomic writer.
+ * Purpose/density/width/interactive are demoted to an optional, collapsed
+ * "advanced options" panel.
  */
 
 import {
   htmlExportReducer,
   initialHtmlExportState,
-  resolvePurposeConfig,
+
   type HtmlExportEvent,
   type HtmlExportState,
   type HtmlPurpose,
@@ -24,40 +24,27 @@ import {
 } from './html-export-state';
 
 import {
-  buildHtmlExportContentPrompt,
-} from './html-export-content-prompt';
-import {
-  parseContentModel,
   resolveSummaryChartPolicy,
   SUMMARY_CHART_MODES,
   type SummaryChartMode,
-  type HtmlExportRequest,
 } from './html-export-model';
+import {
+  resolveDirectExportConfig,
+  type DirectExportDensity,
+  type DirectExportPurpose,
+} from '../shared/html-export-direct-config';
+import { buildDirectHtmlPrompt } from './html-export-direct-prompt';
+import type { GenerationAttemptResult } from '../main/html-export-generation-orchestrator';
+import type { FinalizedArtifactId, HtmlExportAttemptId } from '../shared/html-export-pipeline';
 
 import { formatContextWindow } from '../main/ai/output-budget';
-import { applyModelDisplayPolicy } from '../main/ai/model-display-policy';
-import { isAiProviderId, type ModelRef } from '../main/ai/types';
+import { isAiProviderId, type AiProviderId } from '../main/ai/types';
 import { modelKey, parseModelKey } from './model-key';
-import { planSlides, slideDimsFor, type PlannedSlide } from './html-export-layout';
-
-import { createDomMeasure, domFontsReady } from './html-export-measure-dom';
-import { bundleHtml, buildExportStyle } from './html-export-bundle';
-import { validateSelfContainedHtml, validateExportDom } from './html-export-validate';
-import {
-  parseDesignTheme,
-  toCssVariables,
-  themeComponentClasses,
-  evaluateDesignChecklist,
-  resolveHtmlExportSlideGeometry,
-
-} from './html-export-theme';
 import { defaultHtmlFileName } from './html-export-prompt';
 
 /** A model choice for HTML generation (provider + id, with optional context size). */
 type HtmlModelChoice = { provider: string; id: string; label?: string; contextWindow?: number };
 
-/** A running AI generation: a promise for the full reply plus a cancel hook. */
-type AiGenerateJob = { result: Promise<string>; cancel: () => void };
 
 export type HtmlExportDeps = {
   getMarkdown: () => string;
@@ -77,12 +64,19 @@ export type HtmlExportDeps = {
   fetchDesignMd: (input: string) => Promise<{ ok: boolean; designMd?: string; rawUrl?: string; error?: string }>;
   /** List available getdesign designs (the catalog index). Omitted → text input only. */
   listDesigns?: () => Promise<{ ok: boolean; designs?: { slug: string; name: string; pageUrl: string }[]; error?: string }>;
-  /** Save the rendered single-file .html via the native save dialog. */
-  saveHtml?: (args: { html: string; defaultName?: string }) => Promise<{ saved: boolean; filePath?: string }>;
+  /** Save the main-held finalized artifact as a single .html via the native save dialog. */
+  saveHtmlFinalized: (args: { attemptId: HtmlExportAttemptId; finalizedArtifactId: FinalizedArtifactId; defaultName?: string }) => Promise<{ saved: boolean; filePath?: string; error?: string }>;
   /** Open a previously saved .html in the user's browser. */
   openSavedHtml?: (filePath: string) => Promise<{ opened: boolean; error?: string }>;
-  /** Generate the content model for `prompt` using `model` (falls back to the main model when omitted). */
-  aiGenerate: (prompt: string, model?: HtmlModelChoice) => AiGenerateJob;
+  /** Main-owned generation: streams the model, drives the pipeline, and finalizes. */
+  generateHtmlExport: (request: {
+    prompt: string;
+    model: { provider: AiProviderId; id: string };
+    instructions?: string;
+    viewport?: { width: number; height: number };
+  }) => Promise<GenerationAttemptResult>;
+  /** Cancel/abandon the in-flight or finalized main-owned generation for this window. */
+  cancelHtmlGeneration?: () => void;
   /** Open an external URL (the getdesign.md gallery). */
   openExternal?: (url: string) => void;
   /** Called when the user cancels the wizard. */
@@ -123,8 +117,11 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
   const t = deps.t;
   let state = htmlExportReducer(initialHtmlExportState, { type: 'START' });
   let disposed = false;
-  let currentJob: AiGenerateJob | null = null;
-  /** Prompt computed at requirement submission, consumed when generation actually starts. */
+  /** True while a main-owned generation is streaming for this window. */
+  let generating = false;
+  /** Monotonic generation token so a stale result never lands after a newer start/cancel. */
+  let generationToken = 0;
+  /** Direct-export prompt computed at requirement submission, consumed when generation starts. */
   let pendingPrompt = '';
   /** Model chosen for this generation (read from the picker at requirement submission). */
   let pendingModel: HtmlModelChoice | undefined;
@@ -141,15 +138,12 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
       .listHtmlModels()
       .then((ms) => {
         if (disposed) return;
-        const current = deps.getDefaultModel?.();
-        const currentSelection = current
-          ? typeof current === 'string'
-            ? { provider: 'chatgpt' as const, id: current }
-            : isAiProviderId(current.provider)
-              ? { provider: current.provider, id: current.id }
-              : undefined
-          : undefined;
-        htmlModels = applyModelDisplayPolicy((Array.isArray(ms) ? ms : []) as ModelRef[], { currentSelection });
+        // The list is already HTML-allowlist-filtered by the caller
+        // (filterHtmlExportModels). Do NOT re-apply the general chat display
+        // policy here — it drops allowlisted local providers (e.g. LM Studio)
+        // that are not the current selection, hiding them from the HTML picker
+        // even though they are valid HTML-export targets (#29 review).
+        htmlModels = (Array.isArray(ms) ? ms : []) as HtmlModelChoice[];
         if (state.step === 'summary-requirement') render();
       })
       .catch(() => {
@@ -266,51 +260,102 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
     }
   }
 
-  /** Compose the single content-model request from the current selections. */
-  function buildRequest(freeRequirement: string, summaryChartMode: SummaryChartMode, model: HtmlModelChoice | undefined): HtmlExportRequest {
-    return {
-      orientation: state.orientation!,
-      layout: state.layout!,
-      designSource: state.designSource ?? (state.design ? 'getdesign' : 'default'),
-      designMd: state.design?.designMd ?? '',
-      summaryChartMode,
-      freeRequirement,
-      markdown: deps.getMarkdown(),
-      model: model ? modelKey(model) : undefined,
-    };
+  function mapPurpose(p?: HtmlPurpose): DirectExportPurpose {
+    switch (p) {
+      case 'presentation': return 'presentation';
+      case 'report': return 'report';
+      case 'landing': return 'landing';
+      default: return 'document';
+    }
+  }
+  function mapDensity(d?: Density): DirectExportDensity | undefined {
+    switch (d) {
+      case 'compact': return 'minimal';
+      case 'normal': return 'balanced';
+      case 'roomy': return 'full';
+      default: return undefined;
+    }
+  }
+  /** Non-core wizard purposes collapse to DOCUMENT in the 4-value direct model;
+   *  carry their intent forward as a purpose hint so the preset is not silently
+   *  lost (blog/portfolio/proposal). #29 review (P2). */
+  function purposePresetHint(p?: HtmlPurpose): string | undefined {
+    switch (p) {
+      case 'blog': return 'a blog post / editorial article';
+      case 'portfolio': return 'a portfolio / showcase page';
+      case 'proposal': return 'a proposal / pitch document';
+      default: return undefined;
+    }
+  }
+
+  /** Build the direct HTML-authoring prompt from the current selections + document. */
+  function buildDirectPrompt(): { prompt: string; withinSinglePass: boolean } {
+    // Advanced knobs only apply in the DETAIL advanced mode; in AUTO they must not
+    // leak a prior detail selection into the prompt. custom-purpose only applies
+    // when the chosen purpose is actually 'custom'. summary/chart mode is a core
+    // control and always applies.
+    const detail = state.mode === 'detail';
+    const config = resolveDirectExportConfig({
+      purpose: mapPurpose(state.purpose),
+      orientation: state.orientation === 'horizontal' ? 'landscape' : 'portrait',
+      mode: state.layout === 'slides' ? 'slide' : 'scroll',
+      density: detail ? mapDensity(state.density) : undefined,
+      designMd: state.design?.designMd,
+      userRequest: state.freeRequirement,
+      model: pendingModel ? modelKey(pendingModel) : undefined,
+      summaryChartMode: state.summaryChartMode,
+      readableWidth: detail ? state.readableWidth : undefined,
+      interactive: detail ? state.interactive : undefined,
+      customPurpose:
+        state.purpose === 'custom' ? state.customPurpose : purposePresetHint(state.purpose),
+    });
+    const limit = deps.maxSourceCharsForModel?.(pendingModel);
+    const { prompt, coverage } = buildDirectHtmlPrompt(
+      config,
+      deps.getMarkdown(),
+      limit && limit > 0 ? { singlePassLimit: limit } : undefined,
+    );
+    return { prompt, withinSinglePass: coverage.withinSinglePass };
   }
 
   function submitRequirement() {
     if (!state.orientation || !state.layout) return;
     // Guard against a double-submit: once we leave the step the first submission
-    // already started generation; a second must not orphan a job.
+    // already started generation; a second must not orphan a run.
     if (state.step !== 'summary-requirement') return;
     const freeRequirement = field<HTMLTextAreaElement>('free-requirement')?.value.trim() ?? '';
     const summaryChartMode = state.summaryChartMode ?? DEFAULT_SUMMARY_MODE;
     // Advanced (optional) knobs — read only if the advanced panel rendered them.
     const purpose = ((field<HTMLSelectElement>('purpose')?.value as HtmlPurpose) || state.purpose) ?? undefined;
-    const customPurpose = field<HTMLInputElement>('custom-purpose')?.value.trim() || state.customPurpose;
+    // Distinguish an absent control (advanced panel not rendered → keep prior state)
+    // from a present-but-cleared input (user emptied it → clear it, no stale fallback).
+    const customPurposeField = field<HTMLInputElement>('custom-purpose');
+    const customPurpose = customPurposeField ? customPurposeField.value.trim() : state.customPurpose;
     const density = ((field<HTMLSelectElement>('density')?.value as Density) || state.density) ?? undefined;
     const readableWidth =
       ((field<HTMLSelectElement>('readable-width')?.value as ReadableWidth) || state.readableWidth) ?? undefined;
     const interactive = field<HTMLInputElement>('interactive')?.checked ?? state.interactive;
     pendingModel = readSelectedModel();
     if (pendingModel) deps.onModelChosen?.(pendingModel);
-    const built = buildHtmlExportContentPrompt(buildRequest(freeRequirement, summaryChartMode, pendingModel), {
-      maxSourceChars: deps.maxSourceCharsForModel?.(pendingModel),
-    });
-    pendingPrompt = built.prompt;
     dispatch({
       type: 'SUBMIT_REQUIREMENT',
       freeRequirement,
       summaryChartMode,
-      tokenWarning: built.warning,
+      tokenWarning: false,
       purpose,
       customPurpose,
       density,
       readableWidth,
       interactive,
     });
+    const built = buildDirectPrompt();
+    if (!built.withinSinglePass) {
+      // Fail-fast: single-pass export cannot host >30k source (outline/batch is deferred).
+      pendingPrompt = '';
+      dispatch({ type: 'AI_ERROR', error: t('he.error.tooLongSinglePass') });
+      return;
+    }
+    pendingPrompt = built.prompt;
     maybeStartGeneration();
   }
 
@@ -321,126 +366,92 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
 
   function regenerate() {
     if (!state.orientation || !state.layout) return;
-    // Rebuild from stored selections; the user already confirmed any token warning.
     const summaryChartMode = state.summaryChartMode ?? DEFAULT_SUMMARY_MODE;
     const freeRequirement = state.freeRequirement ?? '';
-    const built = buildHtmlExportContentPrompt(buildRequest(freeRequirement, summaryChartMode, pendingModel), {
-      maxSourceChars: deps.maxSourceCharsForModel?.(pendingModel),
-    });
-    pendingPrompt = built.prompt;
     dispatch({ type: 'SUBMIT_REQUIREMENT', freeRequirement, summaryChartMode, tokenWarning: false });
+    const built = buildDirectPrompt();
+    if (!built.withinSinglePass) {
+      // Regenerate runs from the generated step, where a finalized attempt is
+      // held. SUBMIT_REQUIREMENT already cleared it from UI state, but this
+      // preflight returns WITHOUT starting a new generation (which would
+      // otherwise supersede it), so invalidate the prior finalized attempt now
+      // instead of leaking it in main memory until window cleanup.
+      deps.cancelHtmlGeneration?.();
+      pendingPrompt = '';
+      dispatch({ type: 'AI_ERROR', error: t('he.error.tooLongSinglePass') });
+      return;
+    }
+    pendingPrompt = built.prompt;
     maybeStartGeneration();
   }
 
+  /** Kick off one main-owned generation attempt: main streams the model, drives the
+   *  pipeline (sanitize→resolve→quarantine→finalize), and returns opaque IDs. */
   function maybeStartGeneration() {
-    if (state.step !== 'generating' || !pendingPrompt) return;
-    const job = deps.aiGenerate(pendingPrompt, pendingModel);
-    currentJob = job;
-    job.result.then(
-      (text) => {
-        if (disposed || currentJob !== job) return;
-        currentJob = null;
-        // The AI must return a JSON content model — never HTML. Reject anything else.
-        const parsed = parseContentModel(text);
-        if (!parsed.ok) {
-          dispatch({ type: 'AI_ERROR', error: parsed.error });
-          return;
+    if (state.step !== 'generating' || !pendingPrompt || generating) return;
+    const model = pendingModel;
+    if (!model || !isAiProviderId(model.provider)) {
+      dispatch({ type: 'AI_ERROR', error: t('he.error.generate') });
+      return;
+    }
+    const provider = model.provider;
+    generating = true;
+    const token = ++generationToken;
+    // Quarantine measures at the selected export viewport (overflow gate only).
+    const viewport =
+      state.orientation === 'horizontal'
+        ? { width: 1280, height: 720 }
+        : { width: 720, height: 1280 };
+    deps
+      .generateHtmlExport({ prompt: pendingPrompt, model: { provider, id: model.id }, viewport })
+      .then((result) => {
+        if (disposed || token !== generationToken) return;
+        generating = false;
+        if (result.state === 'final') {
+          dispatch({
+            type: 'AI_DONE',
+            finalized: { attemptId: result.attemptId, finalizedArtifactId: result.finalizedArtifactId },
+          });
+        } else {
+          // partial / failed / cancelled → drop the non-final attempt so rejected
+          // model output cannot linger if the user backs out of the error screen.
+          deps.cancelHtmlGeneration?.();
+          dispatch({ type: 'AI_ERROR', error: t('he.error.generate') });
         }
-        dispatch({ type: 'AI_DONE', model: parsed.model });
-      },
-      (err) => {
-        if (disposed || currentJob !== job) return;
-        currentJob = null;
-        dispatch({ type: 'AI_ERROR', error: errMessage(err, t('he.error.generate')) });
-      },
-    );
+      })
+      .catch(() => {
+        if (disposed || token !== generationToken) return;
+        generating = false;
+        deps.cancelHtmlGeneration?.();
+        dispatch({ type: 'AI_ERROR', error: t('he.error.generate') });
+      });
   }
 
-  /** Render + save the validated ContentModel as a single self-contained .html.
-   *  The DETERMINISTIC engine owns layout: measure→paginate→scale (slides) in the
-   *  REAL DOM, render the planned deck, bundle, then hard-gate self-containment.
-   *  The AI never authored any HTML — only the JSON content model. */
+  /** Save the main-held finalized artifact as a single self-contained .html.
+   *  The renderer submits only the opaque IDs; main atomic-writes the gate-passed
+   *  bytes and reports the saved path (or a renderer-safe error). */
   async function saveHtmlDocument() {
-    const model = state.contentModel;
-    if (saving || !model || !state.orientation || !state.layout) return;
+    const finalized = state.finalized;
+    if (saving || !finalized) return;
     saving = true;
     saveError = null;
     savedPath = null;
     render();
     try {
-      const orientation = state.orientation;
-      const requestedLayout = state.layout;
-      const designSource = state.designSource ?? (state.design ? 'getdesign' : 'default');
-      const designMd = state.design?.designMd ?? '';
-      const summaryChartMode = state.summaryChartMode ?? DEFAULT_SUMMARY_MODE;
-      const freeRequirement = state.freeRequirement ?? '';
-      const theme = parseDesignTheme(designMd);
-      const presentation = resolvePurposeConfig({
-        purpose: state.purpose,
-        customPurpose: state.customPurpose,
-        density: state.density,
-        readableWidth: state.readableWidth,
-        interactive: state.interactive,
-      });
-      const themeCss = toCssVariables(theme, presentation);
-      const componentCss = themeComponentClasses(theme);
-      const checklist = evaluateDesignChecklist({ designMd, theme, css: `${themeCss}\n${componentCss}` });
-
-
-      let effectiveLayout = requestedLayout;
-      let plan: readonly PlannedSlide[] | undefined;
-      if (requestedLayout === 'slides') {
-        const res = await planSlides({
-          model,
-          orientation,
-          dims: slideDimsFor(orientation, resolveHtmlExportSlideGeometry(theme, presentation)),
-          includeCover: true,
-          measure: createDomMeasure({ doc: document, styleCss: buildExportStyle(theme, orientation, requestedLayout, presentation) }),
-
-          fontsReady: domFontsReady(document),
-        });
-        if (disposed) return;
-        // A readability-floor miss is not a reason to deny the user's export.
-        // Preserve containment by emitting the same document as a scroll layout,
-        // where vertical overflow is intentional and horizontal containment remains
-        // checked by the exported CSS and self-containment validators.
-        if (!res.ok) effectiveLayout = 'scroll';
-        else plan = res.slides;
-      }
-
-      const { html } = bundleHtml({
-        model,
-        theme,
-        orientation,
-        layout: effectiveLayout,
-        summaryChartMode,
-        designSource,
-        designMd,
-        freeRequirement,
-        checklist,
-        plan,
-        presentation,
-      });
-      const verdict = validateSelfContainedHtml(html);
-      // Structural allowlist pass (G006): the regex denylist above plus a DOM
-      // walk that rejects forbidden tags, on* handlers, and non-allowlisted URLs.
-      const domVerdict = validateExportDom(html);
-      if (!verdict.ok || !domVerdict.ok) {
-        saving = false;
-        saveError = t('he.error.notSelfContained');
-        render();
-        return;
-      }
-
       const defaultName = defaultHtmlFileName({
         currentPath: deps.getCurrentPath?.() ?? null,
         pendingTitle: deps.getPendingTitle?.() ?? null,
-        aiHtml: html,
+        aiHtml: '',
       });
-      const result = await deps.saveHtml?.({ html, defaultName });
+      const result = await deps.saveHtmlFinalized({
+        attemptId: finalized.attemptId,
+        finalizedArtifactId: finalized.finalizedArtifactId,
+        defaultName,
+      });
       if (disposed) return;
       saving = false;
-      if (result?.saved) savedPath = result.filePath ?? null;
+      if (result.saved) savedPath = result.filePath ?? null;
+      else if (result.error) saveError = t('he.error.save');
       render();
     } catch (err) {
       if (disposed) return;
@@ -505,12 +516,17 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
         if (savedPath) deps.openSavedHtml?.(savedPath);
         return;
       case 'back':
+        // Leaving the generated step abandons the saveable finalized attempt.
+        if (state.step === 'generated') {
+          deps.cancelHtmlGeneration?.();
+        }
         return dispatch({ type: 'BACK' });
       case 'cancel':
         // Abort any in-flight generation so a slow AI request doesn't keep
         // streaming in the background after the user cancels the wizard.
-        currentJob?.cancel();
-        currentJob = null;
+        generationToken++;
+        generating = false;
+        deps.cancelHtmlGeneration?.();
         dispatch({ type: 'CANCEL' });
         deps.onCancel?.();
         return;
@@ -637,8 +653,6 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
 
       case 'generated': {
         if (saving) return spinner(t('he.saving'));
-        const m = state.contentModel;
-        const title = (m?.title || '').trim();
         const savedRow = savedPath ? `<div class="he-card-saved">${esc(t('he.result.saved'))}</div>` : '';
         const errRow = saveError ? `<div class="he-error">${esc(saveError)}</div>` : '';
         const openBtn = savedPath
@@ -647,7 +661,6 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
         return `
           <div class="he-card">
             <div class="he-card-title">${esc(t('he.result.modelReady'))}</div>
-            ${title ? `<div class="he-card-name">${esc(title)}</div>` : ''}
             <div class="he-hint">${esc(t('he.result.readyToSave'))}</div>
           </div>
           ${savedRow}${errRow}
@@ -684,8 +697,9 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
   return {
     destroy() {
       disposed = true;
-      currentJob?.cancel();
-      currentJob = null;
+      generationToken++;
+      generating = false;
+      deps.cancelHtmlGeneration?.();
       host.removeEventListener('click', onClick);
       host.removeEventListener('change', onModelChange);
       host.removeEventListener('input', onInput);

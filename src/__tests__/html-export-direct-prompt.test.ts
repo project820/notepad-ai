@@ -103,6 +103,12 @@ describe('HTML_EXPORT_DIRECT_INSTRUCTIONS — forbids JSON / ContentModel', () =
     expect(HTML_EXPORT_DIRECT_INSTRUCTIONS).toMatch(/ContentModel/i);
     expect(HTML_EXPORT_DIRECT_INSTRUCTIONS).not.toMatch(/output ONLY a JSON/i);
   });
+
+  it('forbids work narration / file-writing answers (issue #27)', () => {
+    expect(HTML_EXPORT_DIRECT_INSTRUCTIONS).toMatch(/never work narration/i);
+    expect(HTML_EXPORT_DIRECT_INSTRUCTIONS).toMatch(/never a file path/i);
+    expect(HTML_EXPORT_DIRECT_INSTRUCTIONS).toMatch(/non-HTML answers are rejected/i);
+  });
 });
 
 describe('buildDirectHtmlPrompt — 1:1 config mapping + full source', () => {
@@ -119,7 +125,25 @@ describe('buildDirectHtmlPrompt — 1:1 config mapping + full source', () => {
     const { prompt, coverage } = buildDirectHtmlPrompt(config, source);
 
     expect(prompt).toContain(HTML_EXPORT_DIRECT_INSTRUCTIONS);
+    expect(prompt).toMatch(/Do NOT use tools, write files, or describe steps/i);
+    expect(prompt).toMatch(/NEVER narrate progress, write files, or return a path/i);
     expect(prompt).toContain('DIRECT AUTHORING DESIGN GUIDE');
+    expect(prompt).toMatch(/Use ONLY the supported HTML tag vocabulary/i);
+    expect(prompt).toMatch(/unsupported tags are unwrapped/i);
+    expect(prompt).toMatch(/\bmain\b/);
+    expect(prompt).toMatch(/\baside\b/);
+    expect(prompt).toMatch(/conversational preamble/i);
+    expect(prompt).toMatch(/Sure, here is/i);
+    expect(prompt).toMatch(/I hope this helps/i);
+    expect(prompt).toMatch(/whether bare text or wrapped in an element/i);
+    // Image contract (aligned with main #31): an <img> src may ONLY be an app-issued
+    // opaque asset ID (asset:…); data: URIs and remote/relative URLs are forbidden, and
+    // with no asset IDs provided the model must emit no <img>. The sanitizer enforces the
+    // asset: src policy, so the prompt must state it and must NOT promise data: images.
+    expect(prompt).toMatch(/asset:/i);
+    expect(prompt).toMatch(/only.{0,40}asset ID/i);
+    expect(prompt).toMatch(/never.{0,40}data: URIs|NEVER emit data:/i);
+    expect(prompt).not.toMatch(/inline data: images/i);
     // The legacy content-model guidance that forbids encoding HTML/CSS must NOT
     // appear in a direct-authoring prompt (AC-M1a contradiction guard).
     expect(prompt).not.toMatch(/never encode CSS, HTML/i);
@@ -212,6 +236,21 @@ describe('buildDirectHtmlPrompt — 30k single-pass boundary + no silent truncat
     expect(over.coverage.complete).toBe(true);
     expect(under.prompt).toContain(source);
     expect(over.prompt).toContain(source);
+  });
+
+  it('clamps a per-model singlePassLimit to the frozen 30k ceiling (never raises it)', () => {
+    // A large-context model budget must NOT lift the single-pass window above
+    // SINGLE_PASS_SOURCE_LIMIT: this direct path has no outline/batch fallback,
+    // so a >30k source still trips the fail-fast gate.
+    const source = 'q'.repeat(SINGLE_PASS_SOURCE_LIMIT + 1);
+    const config = resolveDirectExportConfig({ purpose: 'document' });
+    const huge = buildDirectHtmlPrompt(config, source, { singlePassLimit: SINGLE_PASS_SOURCE_LIMIT + 500_000 });
+    expect(huge.coverage.withinSinglePass).toBe(false);
+    expect(huge.coverage.complete).toBe(true);
+    expect(huge.prompt).toContain(source);
+    // A smaller per-model budget still tightens below the ceiling.
+    const tight = buildDirectHtmlPrompt(config, 'q'.repeat(60), { singlePassLimit: 50 });
+    expect(tight.coverage.withinSinglePass).toBe(false);
   });
 });
 

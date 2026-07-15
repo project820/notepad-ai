@@ -1,12 +1,16 @@
 import { EditorSelection } from '@codemirror/state';
 import { mountHtmlExportWizard, type HtmlExportWizardHandle } from './html-export-wizard';
-import { HTML_EXPORT_CONTENT_INSTRUCTIONS } from './html-export-content-prompt';
 import { clampChatWidth } from './chat-layout';
 import { guardVerdict } from './humanize-guards';
 import { styleDirective, detectLanguage, type Naturalness } from './humanize-engine';
 import { t } from './i18n';
 import { modelContextWindowTokens } from '../main/ai/output-budget';
-import { isAiProviderId, type AiProviderId } from '../main/ai/types';
+import { isAiProviderId, type AiProviderId, type ProviderAuthStatus } from '../main/ai/types';
+import {
+  filterHtmlExportModels,
+  htmlCapableProviderIds,
+  isHtmlExportModelProviderAllowed,
+} from '../main/ai/html-export-model-allowlist';
 import { openSettingsModal, triggerCliOnboarding } from './settings-modal';
 import { savePrefs, type Prefs } from './prefs';
 import { buildUnifiedChatInstructions } from './unified-chat-prompt-handler';
@@ -23,6 +27,26 @@ import type { AppContext } from './app-context';
 import type { AuthSnapshot } from '../shared/auth-protocol';
 import type { Quality } from './quality';
 import type { RendererModel } from './model-cache';
+
+/** Last successful HTML-capable provider set for this renderer session. */
+let lastHtmlCapableProviderIds: Set<AiProviderId> | null = null;
+
+/**
+ * Resolve the effective HTML-capable provider set with last-known-safe continuity.
+ * - Successful status fetch → use (and cache) the live set.
+ * - Failed fetch + non-null cache → reuse the cached set (fail-closed continuity).
+ * - Failed fetch + null cache → null (pre-gate fallback: entry opens, picker allowlist-only).
+ */
+export function resolveHtmlCapableProviderIds(
+  statuses: ProviderAuthStatus[] | null,
+  cache: Set<AiProviderId> | null,
+): { capable: Set<AiProviderId> | null; nextCache: Set<AiProviderId> | null } {
+  if (statuses) {
+    const capable = htmlCapableProviderIds(statuses);
+    return { capable, nextCache: capable };
+  }
+  return { capable: cache, nextCache: cache };
+}
 
 export type UnifiedChatWiring = {
   unifiedChat: UnifiedChatHandle;
@@ -235,57 +259,26 @@ export function initUnifiedChatWiring(ctx: AppContext, deps: UnifiedChatWiringDe
     return Math.floor(ctxTokens * 3 * 0.6);
   }
 
-  function runHtmlGeneration(prompt: string, model?: { provider: AiProviderId; id: string }): { result: Promise<string>; cancel: () => void } {
-    const modelArg = model ?? currentModelArg();
-    let cancelled = false;
-    let activeCancel = () => {};
-    const isTransient = (m: string) => /terminated|network|stream error|econnreset|socket hang/i.test(m);
-    const attempt = (): Promise<string> => new Promise<string>((resolve, reject) => {
-      const id = ucId();
-      let buffer = '';
-      const cleanup = window.api.onAiChatEvent(id, (e) => {
-        if (e.kind === 'delta' && e.text) {
-          buffer += e.text;
-        } else if (e.kind === 'done') {
-          cleanup();
-          resolve(e.text ?? buffer);
-        } else if (e.kind === 'error') {
-          cleanup();
-          reject(new Error(e.message ?? t('status.aiError')));
-        }
-      });
-      activeCancel = () => {
-        void window.api.aiCancel(id);
-        cleanup();
-      };
-      window.api.aiChat({
-        id,
-        instructions: HTML_EXPORT_CONTENT_INSTRUCTIONS,
-        history: [],
-        userText: prompt,
-        model: modelArg,
-        surfaceMode: 'html',
-      }).catch((err) => {
-        cleanup();
-        reject(err instanceof Error ? err : new Error(String(err)));
-      });
-    });
-    const result = (async () => {
-      try {
-        return await attempt();
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (!cancelled && isTransient(msg)) return await attempt();
-        throw err;
-      }
-    })();
-    return { result, cancel: () => { cancelled = true; activeCancel(); } };
-  }
-
   async function startHtmlExportWizard(guard: ToolPanelGuard) {
     const hasAuth = await window.api.aiHasAnyAuth().catch(() => true);
     if (!guard.isCurrent()) return;
     if (!hasAuth) {
+      setUnifiedChatOpen(true);
+      unifiedChat.addMessage('assistant', t('chat.noProvider'));
+      ctx.setStatus(t('status.connectProvider'));
+      triggerCliOnboarding(openSettings);
+      return;
+    }
+    // §5.3 honesty: generic auth is not enough — only open the wizard when at
+    // least one provider can actually pin an HTML transport (Claude needs CLI).
+    // Status-fetch failure reuses the last successful capable set (fail-closed
+    // continuity). Cold failure (no cache yet) keeps the hasAuth gate so a
+    // transient probe does not hard-break entry.
+    const statuses = await window.api.aiProvidersStatus().catch(() => null);
+    if (!guard.isCurrent()) return;
+    const entryCapable = resolveHtmlCapableProviderIds(statuses, lastHtmlCapableProviderIds);
+    lastHtmlCapableProviderIds = entryCapable.nextCache;
+    if (entryCapable.capable && entryCapable.capable.size === 0) {
       setUnifiedChatOpen(true);
       unifiedChat.addMessage('assistant', t('chat.noProvider'));
       ctx.setStatus(t('status.connectProvider'));
@@ -306,7 +299,7 @@ export function initUnifiedChatWiring(ctx: AppContext, deps: UnifiedChatWiringDe
       maxSourceCharsForModel: (m) => htmlExportSourceCharBudget(m ?? currentModelArg()),
       listHtmlModels: async () => {
         const ms = await deps.loadModelsCached(true);
-        return ms.map((m) => {
+        const mapped = ms.map((m) => {
           const provider = m.provider ?? 'chatgpt';
           return {
             provider,
@@ -315,8 +308,40 @@ export function initUnifiedChatWiring(ctx: AppContext, deps: UnifiedChatWiringDe
             contextWindow: isAiProviderId(provider) ? modelContextWindowTokens(provider, m.id, m.contextWindow) : undefined,
           };
         });
+        // §5.3 / AC-M1c-d: the HTML surface pins ONE no-fallback transport, so
+        // OpenRouter (and any non-allowlisted provider) is hard-excluded from the
+        // picker even if the general chat policy would reinject a current selection.
+        const allowlisted = filterHtmlExportModels(mapped);
+        // Drop models whose provider cannot run HTML right now (e.g. API-only Claude).
+        // Status-fetch failure reuses the last successful capable set; only a cold
+        // failure (no cache yet) falls back to allowlist-only.
+        const liveStatuses = await window.api.aiProvidersStatus().catch(() => null);
+        const pickerCapable = resolveHtmlCapableProviderIds(liveStatuses, lastHtmlCapableProviderIds);
+        lastHtmlCapableProviderIds = pickerCapable.nextCache;
+        if (!pickerCapable.capable) return allowlisted;
+        return allowlisted.filter((m) => isAiProviderId(m.provider) && pickerCapable.capable!.has(m.provider));
       },
-      getDefaultModel: () => deps.prefs.htmlModel ?? currentModelArg(),
+      // Never preselect a provider the HTML surface forbids (fail-closed): a
+      // persisted OpenRouter htmlModel/main model resolves to no default here.
+      // Also drop an allowlisted-but-not-currently-HTML-capable default (e.g.
+      // API-only Claude with no usable CLI) when the capable set is known (the
+      // entry gate populates it), so a quick Generate cannot submit a default
+      // that only fails at the CLI/main rejection. Cold (no cache) keeps
+      // allowlist-only, matching the picker/entry continuity policy.
+      getDefaultModel: () => {
+        const d = deps.prefs.htmlModel ?? currentModelArg();
+        if (!d) return undefined;
+        const provider = typeof d === 'string' ? 'chatgpt' : d.provider;
+        if (!isHtmlExportModelProviderAllowed(provider)) return undefined;
+        if (
+          lastHtmlCapableProviderIds &&
+          isAiProviderId(provider) &&
+          !lastHtmlCapableProviderIds.has(provider)
+        ) {
+          return undefined;
+        }
+        return d;
+      },
       onModelChosen: (m) => {
         if (isAiProviderId(m.provider)) {
           deps.prefs.htmlModel = { provider: m.provider, id: m.id };
@@ -327,9 +352,10 @@ export function initUnifiedChatWiring(ctx: AppContext, deps: UnifiedChatWiringDe
       getPendingTitle: () => ctx.pendingTitle,
       fetchDesignMd: (input) => window.api.fetchDesignMd(input),
       listDesigns: () => window.api.listDesigns(),
-      saveHtml: (args) => window.api.saveHtml(args),
+      saveHtmlFinalized: (args) => window.api.saveHtmlFinalized(args),
       openSavedHtml: (filePath) => window.api.openSavedHtml(filePath),
-      aiGenerate: (prompt, model) => runHtmlGeneration(prompt, model && isAiProviderId(model.provider) ? { provider: model.provider, id: model.id } : undefined),
+      generateHtmlExport: (request) => window.api.generateHtmlExport(request),
+      cancelHtmlGeneration: () => void window.api.cancelHtmlGeneration(),
       openExternal: (url) => void window.api.openExternal(url),
       onCancel: () => ctx.setStatus(t('status.htmlExportCanceled')),
       t,

@@ -11,7 +11,7 @@
  * single cutover.
  */
 
-import type { AiProviderId } from './types';
+import type { AiProviderId, ProviderAuthStatus } from './types';
 
 /** The five providers an HTML export attempt may pin (OpenRouter excluded). */
 export const HTML_EXPORT_MODEL_PROVIDERS = [
@@ -41,4 +41,42 @@ export function isHtmlExportModelProviderAllowed(
  */
 export function filterHtmlExportModels<T extends { provider?: string }>(models: readonly T[]): T[] {
   return models.filter((model) => isHtmlExportModelProviderAllowed(model.provider));
+}
+
+/**
+ * True when a provider status is usable for the HTML-export surface's pinned
+ * no-fallback transport. Fail-closed: uncertain Claude CLI readiness is not
+ * capable (HTML is CLI-only for Claude; API-key-only auth is insufficient).
+ */
+export function isHtmlExportProviderUsable(status: ProviderAuthStatus): boolean {
+  if (!isHtmlExportModelProviderAllowed(status.provider)) return false;
+  if (status.provider === 'claude') {
+    // Claude HTML always routes through the CLI (never the Anthropic API).
+    // getAuthStatus can report connected:true for API-only auth — reject that.
+    if (
+      status.errorCode === 'claude_cli_setup_required'
+      || status.cliStatus?.errorCode === 'claude_cli_setup_required'
+    ) {
+      return false;
+    }
+    // Pure CLI session: connectionSource is set only when CLI probe succeeded.
+    if (status.connectionSource === 'cli') return true;
+    // Dual API+CLI: top-level source stays 'api_key', but nested cliStatus is ready.
+    if (status.cliStatus?.installed === true && status.cliStatus.authState === 'succeeded') {
+      return true;
+    }
+    return false;
+  }
+  return status.connected === true;
+}
+
+/** Provider ids whose current auth status can actually run an HTML export. */
+export function htmlCapableProviderIds(
+  statuses: readonly ProviderAuthStatus[],
+): Set<AiProviderId> {
+  const capable = new Set<AiProviderId>();
+  for (const status of statuses) {
+    if (isHtmlExportProviderUsable(status)) capable.add(status.provider);
+  }
+  return capable;
 }

@@ -22,6 +22,6 @@ jobs:
       - run: npm run build
       - run: npm run test:security-e2e
       - run: npm run test:converter-e2e
-      - run: npm run test:html-export
+      - run: npm run test:html-export-direct
       - run: npm run test:roundtrip-smoke
       - run: npm run knip

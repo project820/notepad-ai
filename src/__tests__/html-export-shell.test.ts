@@ -13,6 +13,9 @@ function payload(over: Partial<HtmlExportSanitizedPayload> = {}): HtmlExportSani
     documentHtml: over.documentHtml ?? '<html><body><div data-he-content><p>safe</p></div></body></html>',
     contentCss: over.contentCss ?? '@layer he-authored{[data-he-content] p{color:red}}',
     counts: over.counts ?? { nodeCount: 3, maxDepth: 2, attributeCount: 1 },
+    ...(over.contentRootClass ? { contentRootClass: over.contentRootClass } : {}),
+    ...(over.contentRootId ? { contentRootId: over.contentRootId } : {}),
+    ...(over.contentRootAttrs ? { contentRootAttrs: over.contentRootAttrs } : {}),
   };
 }
 
@@ -146,6 +149,97 @@ describe('bundleSanitizedHtml — canonical shell contract', () => {
     expect(body).toContain('<h1>Hello shell</h1>');
     // Runtime script follows the body content.
     expect(body.indexOf('<h1>Hello shell</h1>')).toBeLessThan(body.indexOf('<script>'));
+  });
+
+  it('wraps the sanitized body in the [data-he-content] scope root so sanitized CSS matches', () => {
+    // The real sanitizer emits inner body content with no wrapper; the shell must
+    // add the [data-he-content] content root that every scoped selector targets,
+    // or the export renders unstyled (#29 P1).
+    const { html } = bundleSanitizedHtml(payload({ bodyHtml: '<h1>Styled</h1>' }));
+    expect(html).toMatch(/<body>\s*<div data-he-content>\s*<h1>Styled<\/h1>/);
+    const bodyInner = html.match(/<body>([\s\S]*?)<\/body>/)?.[1] ?? '';
+    // The runtime script stays outside (after) the content root.
+    expect(bodyInner.indexOf('</div>')).toBeLessThan(bodyInner.indexOf('<script>'));
+  });
+  it('transfers sanitized content-root class so [data-he-content].dark selectors match', () => {
+    const contentCss = '@layer he-authored{[data-he-content].dark>.card{color:red}}';
+    const { html } = bundleSanitizedHtml(
+      payload({
+        bodyHtml: '<div class="card">x</div>',
+        contentCss,
+        contentRootClass: 'dark',
+      }),
+    );
+    expect(html).toMatch(/<body>\s*<div data-he-content class="dark">\s*<div class="card">x<\/div>/);
+    // Runtime script stays outside the content root.
+    const bodyInner = html.match(/<body>([\s\S]*?)<\/body>/)?.[1] ?? '';
+    expect(bodyInner.indexOf('</div>')).toBeLessThan(bodyInner.indexOf('<script>'));
+    // The rewritten selector is present and the wrapper carries the matching class.
+    expect(html).toContain('[data-he-content].dark>.card{color:red}');
+    expect(html).toContain('data-he-content class="dark"');
+  });
+
+  it('emits id before class when both content-root identity fields are present', () => {
+    const { html } = bundleSanitizedHtml(
+      payload({ contentRootId: 'app', contentRootClass: 'dark theme' }),
+    );
+    expect(html).toContain('<div data-he-content id="app" class="dark theme">');
+  });
+  it('HTML-escapes content-root class/id attribute values (& " < > \')', () => {
+    const { html } = bundleSanitizedHtml(
+      payload({
+        contentRootId: `a&b"'c<d>e`,
+        contentRootClass: `x&y"'z<w>v`,
+      }),
+    );
+    expect(html).toContain('id="a&amp;b&quot;&#39;c&lt;d&gt;e"');
+    expect(html).toContain('class="x&amp;y&quot;&#39;z&lt;w&gt;v"');
+    // Raw unescaped metacharacters must not remain in the attribute values.
+    expect(html).not.toContain('id="a&b');
+    expect(html).not.toContain('class="x&y');
+    expect(html).not.toContain('<d>');
+    expect(html).not.toContain('<w>');
+  });
+
+  it('keeps the bare content-root wrapper when class/id are absent', () => {
+    const { html } = bundleSanitizedHtml(payload({ bodyHtml: '<p>x</p>' }));
+    expect(html).toMatch(/<body>\s*<div data-he-content>\s*<p>x<\/p>/);
+    expect(html).not.toMatch(/<div data-he-content (?:id|class)=/);
+  });
+  it('transfers safe content-root attrs in deterministic order after id/class', () => {
+    const { html } = bundleSanitizedHtml(
+      payload({
+        contentRootId: 'app',
+        contentRootClass: 'dark',
+        contentRootAttrs: { role: 'main', lang: 'ko', dir: 'rtl', title: 'Doc' },
+      }),
+    );
+    // Order: data-he-content, id, class, then lang → dir → title → role.
+    expect(html).toContain(
+      '<div data-he-content id="app" class="dark" lang="ko" dir="rtl" title="Doc" role="main">',
+    );
+  });
+
+  it('HTML-escapes content-root attr values (& " < > \')', () => {
+    const { html } = bundleSanitizedHtml(
+      payload({
+        contentRootAttrs: {
+          lang: `k&o"'x<y>z`,
+          title: `a&b"'c<d>e`,
+        },
+      }),
+    );
+    expect(html).toContain('lang="k&amp;o&quot;&#39;x&lt;y&gt;z"');
+    expect(html).toContain('title="a&amp;b&quot;&#39;c&lt;d&gt;e"');
+    expect(html).not.toContain('lang="k&o');
+    expect(html).not.toContain('title="a&b');
+  });
+
+  it('keeps the bare content-root wrapper when contentRootAttrs is absent', () => {
+    const { html } = bundleSanitizedHtml(payload({ bodyHtml: '<p>x</p>' }));
+    expect(html).toMatch(/<body>\s*<div data-he-content>\s*<p>x<\/p>/);
+    expect(html).not.toMatch(/<div data-he-content [^>]*\blang=/);
+    expect(html).not.toMatch(/<div data-he-content [^>]*\bdir=/);
   });
 
   it('does not introduce http(s) or protocol-relative // origins via the shell wrapper', () => {

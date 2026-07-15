@@ -45,6 +45,20 @@ describe('html export CSS sanitizer', () => {
       declarationCount: 2,
     });
   });
+  it('accepts main and aside type selectors scoped to the content root', () => {
+    expect(sanitizeStylesheet('main{color:red}')).toEqual({
+      ok: true,
+      css: '[data-he-content] main{color:red}',
+      ruleCount: 1,
+      declarationCount: 1,
+    });
+    expect(sanitizeStylesheet('aside{color:red}')).toEqual({
+      ok: true,
+      css: '[data-he-content] aside{color:red}',
+      ruleCount: 1,
+      declarationCount: 1,
+    });
+  });
 
   it('parses inline declarations and preserves duplicate shorthand/longhand order', () => {
     expect(sanitizeDeclarationList('margin:1px;margin-left:4px;color:red;color:blue')).toEqual({
@@ -68,10 +82,10 @@ describe('html export CSS sanitizer', () => {
   });
 
   it('enforces the frozen selector, pseudo, and at-rule grammar', () => {
-    expect(failureCode(sanitizeStylesheet('body{color:red}'))).toBe('css_reserved_selector');
+    expect(failureCode(sanitizeStylesheet('head{color:red}'))).toBe('css_reserved_selector');
+    expect(failureCode(sanitizeStylesheet('style{color:red}'))).toBe('css_reserved_selector');
     expect(failureCode(sanitizeStylesheet('[data-he-layout]{color:red}'))).toBe('css_reserved_selector');
     expect(failureCode(sanitizeStylesheet('.he-scaler{color:red}'))).toBe('css_reserved_selector');
-    expect(failureCode(sanitizeStylesheet('*{color:red}'))).toBe('css_disallowed_selector');
     expect(failureCode(sanitizeStylesheet('p:active{color:red}'))).toBe('css_disallowed_selector');
     expect(failureCode(sanitizeStylesheet('p::placeholder{color:red}'))).toBe('css_disallowed_selector');
     expect(failureCode(sanitizeStylesheet('@layer model{p{color:red}}'))).toBe('css_disallowed_at_rule');
@@ -253,5 +267,110 @@ describe('html export CSS sanitizer', () => {
   it('returns parse diagnostics without throwing', () => {
     expect(() => sanitizeStylesheet('p{color:red}}')).not.toThrow();
     expect(failureCode(sanitizeStylesheet('p{color:red}}'))).toBe('css_parse_error');
+  });
+});
+describe('global selector rewrite', () => {
+  it('scopes exact universal selectors under the content root', () => {
+    const result = sanitizeStylesheet('*{box-sizing:border-box}');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.css).toContain('[data-he-content] *');
+  });
+
+  it('rewrites html/body selector lists to the content root without double-scoping', () => {
+    const result = sanitizeStylesheet('html,body{margin:0}');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.css).toContain('[data-he-content]');
+    expect(result.css).not.toContain('[data-he-content] body');
+    expect(result.css).not.toContain('[data-he-content] html');
+  });
+
+  it('accepts body rules with layout properties intact', () => {
+    const result = sanitizeStylesheet('body{background:#fff}');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.css).toBe('[data-he-content]{background:#fff}');
+  });
+
+  it('still hard-fails custom properties after :root rewrite', () => {
+    const result = sanitizeStylesheet(':root{--brand:#4f46e5}');
+    expect(result.ok).toBe(false);
+    expect(failureCode(result)).toBe(CSS_VIOLATION_CODES.customProperty);
+  });
+
+  it('rewrites compound global-root selectors without doubled content-root prefixes', () => {
+    const result = sanitizeStylesheet('body>.card{color:red}');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.css).not.toContain('[data-he-content] [data-he-content]');
+    expect(result.css).toContain('[data-he-content]>.card');
+  });
+
+  it('rejects model-authored content-root forgery as reserved', () => {
+    expect(failureCode(sanitizeStylesheet('[data-he-content] .x{color:red}'))).toBe(CSS_VIOLATION_CODES.reservedSelector);
+  });
+
+  it('is deterministic for rewritten global selectors', () => {
+    const input = 'html,body{margin:0}*{box-sizing:border-box}body>.card{color:red}';
+    const first = sanitizeStylesheet(input);
+    const second = sanitizeStylesheet(input);
+    expect(first).toEqual(second);
+  });
+
+  it('rejects root-led sibling combinators that would escape the content root', () => {
+    expect(failureCode(sanitizeStylesheet('body+*{color:red}'))).toBe(CSS_VIOLATION_CODES.disallowedSelector);
+    expect(failureCode(sanitizeStylesheet('body~.x{color:red}'))).toBe(CSS_VIOLATION_CODES.disallowedSelector);
+  });
+
+  it('rejects the functional :root(...) pseudo (laundering guard)', () => {
+    expect(failureCode(sanitizeStylesheet(':root([data-he-content]){color:red}'))).toBe(
+      CSS_VIOLATION_CODES.disallowedSelector,
+    );
+  });
+
+  it('rejects escaped reserved identifiers (canonicalized before the reserved check)', () => {
+    // `\\64 ` is the CSS hex escape for `d`, so this decodes to `.data-he-content`.
+    expect(failureCode(sanitizeStylesheet('.\\64 ata-he-content{color:red}'))).toBe(
+      CSS_VIOLATION_CODES.reservedSelector,
+    );
+    expect(failureCode(sanitizeStylesheet('[class=\\64 ata-he-content]{color:red}'))).toBe(
+      CSS_VIOLATION_CODES.reservedSelector,
+    );
+  });
+
+  it('rejects global roots outside the leading position (non-leading / repeated / nested)', () => {
+    expect(failureCode(sanitizeStylesheet('.x:root{color:red}'))).toBe(CSS_VIOLATION_CODES.disallowedSelector);
+    expect(failureCode(sanitizeStylesheet('html body{margin:0}'))).toBe(CSS_VIOLATION_CODES.disallowedSelector);
+  });
+
+  it('keeps rejecting nesting selectors', () => {
+    expect(failureCode(sanitizeStylesheet('&{color:red}'))).toBe(CSS_VIOLATION_CODES.disallowedSelector);
+  });
+
+  it('emits exact bytes for accepted leading-root shapes', () => {
+    const r = sanitizeStylesheet('body.dark>.card{color:red}');
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.css).toBe('[data-he-content].dark>.card{color:red}');
+  });
+
+  it('canonicalizes CRLF-terminated hex escapes before the reserved check', () => {
+    // css-tree/browsers consume `\\r\\n` as one escape terminator, so both decode to
+    // `.data-he-content` / class value `data-he-content`.
+    expect(failureCode(sanitizeStylesheet('.\\64\r\nata-he-content{color:red}'))).toBe(
+      CSS_VIOLATION_CODES.reservedSelector,
+    );
+    expect(failureCode(sanitizeStylesheet('[class=\\64\r\nata-he-content]{color:red}'))).toBe(
+      CSS_VIOLATION_CODES.reservedSelector,
+    );
+  });
+
+  it('rejects global roots hidden in :nth-child(... of S) selector fields', () => {
+    expect(failureCode(sanitizeStylesheet(':nth-child(1 of body){color:red}'))).toBe(
+      CSS_VIOLATION_CODES.disallowedSelector,
+    );
+    expect(failureCode(sanitizeStylesheet('body:nth-child(1 of :root){color:red}'))).toBe(
+      CSS_VIOLATION_CODES.disallowedSelector,
+    );
   });
 });

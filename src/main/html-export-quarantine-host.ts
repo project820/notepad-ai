@@ -14,13 +14,15 @@ import type {
   QuarantineHost,
   QuarantineHostOutcome,
   QuarantineSlotSession,
+  QuarantineViewport,
 } from './html-export-quarantine';
+import { normalizeQuarantineViewport } from './html-export-quarantine';
 import type { HtmlExportQuarantineMeasurement } from '../shared/html-export-pipeline';
 
 const LOCAL_URL_RE = /^(file:|data:|blob:|about:)/i;
 const MAX_NODE_COUNT = 20_000;
 const MAX_DEPTH = 64;
-const DEFAULT_VIEWPORT = { width: 1280, height: 720 } as const;
+// DEFAULT_VIEWPORT lives in html-export-quarantine.ts (shared fallback + clamp).
 
 /**
  * Single bounded DOM measurement. Returns a plain serializable object matching
@@ -126,20 +128,22 @@ class ElectronQuarantineSlot implements QuarantineSlotSession {
 
   async measure(
     html: string,
-    opts: { deadlineMs: number; signal: AbortSignal },
+    opts: { deadlineMs: number; signal: AbortSignal; viewport?: QuarantineViewport },
   ): Promise<QuarantineHostOutcome> {
     try {
       if (opts.signal.aborted) return { kind: 'recoverable-failure' };
       if (this.measuring) return { kind: 'recoverable-failure' };
       this.measuring = true;
+      const viewport = normalizeQuarantineViewport(opts.viewport);
+
 
       const ses = this.ensureSession();
       await this.discardWindow();
 
       const win = new BrowserWindow({
         show: false,
-        width: DEFAULT_VIEWPORT.width,
-        height: DEFAULT_VIEWPORT.height,
+        width: viewport.width,
+        height: viewport.height,
         useContentSize: true,
         webPreferences: {
           session: ses,
@@ -203,7 +207,7 @@ class ElectronQuarantineSlot implements QuarantineSlotSession {
           },
         );
 
-        void this.runMeasurePipeline(win, html, opts.deadlineMs, opts.signal, finish).catch(() => {
+        void this.runMeasurePipeline(win, html, opts.deadlineMs, opts.signal, viewport, finish).catch(() => {
           if (!settled) finish({ kind: 'recoverable-failure' });
         });
       });
@@ -292,6 +296,7 @@ class ElectronQuarantineSlot implements QuarantineSlotSession {
     html: string,
     deadlineMs: number,
     signal: AbortSignal,
+    viewport: QuarantineViewport,
     finish: (outcome: QuarantineHostOutcome) => void,
   ): Promise<void> {
     const started = Date.now();
@@ -330,7 +335,7 @@ class ElectronQuarantineSlot implements QuarantineSlotSession {
 
     // Force a content resize then one more frame so layout settles.
     try {
-      win.setContentSize(DEFAULT_VIEWPORT.width, DEFAULT_VIEWPORT.height);
+      win.setContentSize(viewport.width, viewport.height);
     } catch {
       /* ignore */
     }

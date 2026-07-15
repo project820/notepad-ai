@@ -12,12 +12,12 @@ import {
   type HtmlExportParse,
 } from '../main/html-export-sanitize';
 
-function sanitize(html: string) {
-  return sanitizeHtmlExport({ html });
+function sanitize(html: string, opts: { requireStructuralDocument?: boolean } = {}) {
+  return sanitizeHtmlExport({ html, ...opts });
 }
 
-function failureCode(html: string): string {
-  const result = sanitize(html);
+function failureCode(html: string, opts: { requireStructuralDocument?: boolean } = {}): string {
+  const result = sanitize(html, opts);
   expect(result.ok).toBe(false);
   return result.ok ? '' : result.violations[0].code;
 }
@@ -206,7 +206,8 @@ describe('sanitizeHtmlExport', () => {
   it('pre-registers keyframes across style blocks before sanitizing forward animation references', () => {
     const result = sanitize(
       '<style>.animated{animation:spin 100ms}</style>' +
-      '<style>@keyframes spin{from{opacity:0}to{opacity:1}}</style>',
+      '<style>@keyframes spin{from{opacity:0}to{opacity:1}}</style>' +
+      '<p class="animated">x</p>',
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -280,14 +281,14 @@ describe('sanitizeHtmlExport', () => {
   });
 
   it('enforces CSS rule and keyframe caps across separate style blocks', () => {
-    const withinRuleCap = Array.from({ length: CSS_MAX_RULES }, (_, index) => `<style>.r${index}{color:red}</style>`).join('');
+    const withinRuleCap = Array.from({ length: CSS_MAX_RULES }, (_, index) => `<style>.r${index}{color:red}</style>`).join('') + '<p>x</p>';
     expect(sanitize(withinRuleCap).ok).toBe(true);
     const pastRuleCap = `${withinRuleCap}<style>.overflow{color:red}</style>`;
     expect(failureCode(pastRuleCap)).toBe('css_rejected');
 
     const keyframe = (index: number) => `<style>@keyframes k${index}{from{opacity:0}to{opacity:1}}</style>`;
-    expect(sanitize(Array.from({ length: CSS_MAX_KEYFRAMES }, (_, index) => keyframe(index)).join('')).ok).toBe(true);
-    expect(failureCode(Array.from({ length: CSS_MAX_KEYFRAMES + 1 }, (_, index) => keyframe(index)).join(''))).toBe('css_rejected');
+    expect(sanitize(Array.from({ length: CSS_MAX_KEYFRAMES }, (_, index) => keyframe(index)).join('') + '<p>x</p>').ok).toBe(true);
+    expect(failureCode(Array.from({ length: CSS_MAX_KEYFRAMES + 1 }, (_, index) => keyframe(index)).join('') + '<p>x</p>')).toBe('css_rejected');
   });
 
   it('is deterministic for malformed HTML', () => {
@@ -297,7 +298,28 @@ describe('sanitizeHtmlExport', () => {
   });
 
   it('accepts the exact node cap and rejects cap plus one', () => {
-    expect(sanitizeHtmlExport({ html: '', parse: injectedParse(documentWithTextNodes(HTML_SANITIZER_LIMITS.maxNodes - 1)) }).ok).toBe(true);
+    // Pure text-node trees have zero body elements; the structural gate (#27)
+    // would reject them first. Use one element + (maxNodes-2) text children so
+    // countParsedTree hits the exact cap with a structural body.
+    const exactCapDoc: DefaultTreeAdapterTypes.Document = {
+      nodeName: '#document',
+      mode: 'no-quirks',
+      childNodes: [
+        {
+          nodeName: 'p',
+          tagName: 'p',
+          namespaceURI: 'http://www.w3.org/1999/xhtml',
+          attrs: [],
+          childNodes: Array.from({ length: HTML_SANITIZER_LIMITS.maxNodes - 2 }, () => ({
+            nodeName: '#text',
+            value: 'x',
+            parentNode: null,
+          })),
+          parentNode: null,
+        },
+      ],
+    } as DefaultTreeAdapterTypes.Document;
+    expect(sanitizeHtmlExport({ html: '', parse: injectedParse(exactCapDoc) }).ok).toBe(true);
     expect(failureCodeWithParse(documentWithTextNodes(HTML_SANITIZER_LIMITS.maxNodes))).toBe('html_cap');
   });
 
@@ -404,5 +426,217 @@ describe('sanitizeHtmlExport', () => {
     document.childNodes[0].namespaceURI = 'http://www.w3.org/2000/svg';
     document.childNodes[0].attrs = [{ name: 'href', value: '#p', prefix: 'xlink', namespace: 'http://www.w3.org/1999/xlink' }];
     expect(failureCodeWithParse(document)).toBe('html_reserved_namespace');
+  });
+});
+describe('sanitizeHtmlExport — fail-closed structural gate (issue #27)', () => {
+  const structural = { requireStructuralDocument: true } as const;
+
+  it('rejects a model narration / prose response as non-structural (never finalizes)', () => {
+    // The captured Grok failure: work commentary + a markdown-ish table + a temp path,
+    // no HTML. parse5 wraps it as a body of text nodes with zero elements.
+    const narration = [
+      'Creating a landscape slide-deck for your document.',
+      '',
+      '| Section | Status |',
+      '| --- | --- |',
+      '| Intro | done |',
+      '',
+      'Saved the full 52KB document to the OS temp directory.',
+    ].join('\n');
+    const result = sanitize(narration, structural);
+    expect(result.ok).toBe(false);
+    expect(failureCode(narration, structural)).toBe(HTML_VIOLATION_CODES.noStructure);
+    // Without the pipeline flag the sanitizer remains a pure filter.
+    expect(sanitize(narration).ok).toBe(true);
+  });
+
+  it('rejects a document whose body falls below the element-node floor', () => {
+    // Empty body / pure whitespace — zero elements after sanitize.
+    expect(failureCode('<!doctype html><html><body>   \n  </body></html>', structural)).toBe(
+      HTML_VIOLATION_CODES.noStructure,
+    );
+    // A single structural element is the floor and is accepted.
+    expect(sanitize('<!doctype html><html><body><p>one block</p></body></html>', structural).ok).toBe(true);
+  });
+
+  it('accepts a structural HTML document at or above the element-node floor', () => {
+    const doc = '<!doctype html><html><body><section><h1>Title</h1><p>Body copy.</p></section></body></html>';
+    const result = sanitize(doc, structural);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.bodyHtml).toContain('<h1>Title</h1>');
+  });
+
+  it('rejects mixed narration / code-fence siblings of otherwise-valid HTML', () => {
+    // Provider responses that wrap valid HTML in a fence or chat preamble still
+    // have bodyElementCount >= 1; top-level non-whitespace text must still fail closed.
+    const fenced = ['```html', '<h1>Title</h1>', '<p>Body copy.</p>', '```'].join('\n');
+    const withPreamble =
+      'Sure, here is the document:\n\n<section><h1>Title</h1><p>Body copy.</p></section>';
+    expect(failureCode(fenced, structural)).toBe(HTML_VIOLATION_CODES.noStructure);
+    expect(failureCode(withPreamble, structural)).toBe(HTML_VIOLATION_CODES.noStructure);
+    // Without the pipeline flag the sanitizer remains a pure filter.
+    expect(sanitize(withPreamble).ok).toBe(true);
+  });
+
+  it('accepts whitespace-only text between top-level structural elements', () => {
+    const doc =
+      '<!doctype html><html><body>\n  <h1>Title</h1>\n  <p>Body copy.</p>\n</body></html>';
+    const result = sanitize(doc, structural);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.bodyHtml).toContain('<h1>Title</h1>');
+      expect(result.bodyHtml).toContain('<p>Body copy.</p>');
+    }
+  });
+  it('rejects NBSP-only top-level text under HTML-ASCII whitespace rules', () => {
+    // String.trim() strips U+00A0, so the old gate treated NBSP as whitespace.
+    // HTML-ASCII whitespace is only U+0009/0A/0C/0D/20 — NBSP must fail closed.
+    expect(failureCode('\u00A0<section><p>x</p></section>', structural)).toBe(
+      HTML_VIOLATION_CODES.noStructure,
+    );
+  });
+
+  it('accepts normal spaces/newlines between top-level structural elements', () => {
+    const doc = '<section><p>a</p></section>\n  <aside><p>b</p></aside>';
+    const result = sanitize(doc, structural);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.bodyHtml).toContain('<section>');
+      expect(result.bodyHtml).toContain('<aside>');
+    }
+  });
+
+  it('preserves main and aside semantic containers with class/id intact', () => {
+    const result = sanitize(
+      '<main class="container"><p>Primary</p></main><aside id="notes"><p>Side</p></aside>',
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bodyHtml).toContain('<main class="container">');
+    expect(result.bodyHtml).toContain('<aside id="notes">');
+    expect(result.bodyHtml).toContain('<p>Primary</p>');
+    expect(result.bodyHtml).toContain('<p>Side</p>');
+  });
+  it('surfaces safe body/html class and id on the content-root identity fields', () => {
+    const result = sanitize(
+      '<!doctype html><html class="theme"><body class="dark" id="app"><p class="card">x</p></body></html>',
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Body children still unwrap; root attrs are not left on the body output.
+    expect(result.bodyHtml).toBe('<p class="card">x</p>');
+    // html+body classes merge; body id wins.
+    expect(result.contentRootClass).toBe('theme dark');
+    expect(result.contentRootId).toBe('app');
+  });
+
+  it('does not transfer a reserved body class onto contentRootClass', () => {
+    // Shared class/id gate rejects reserved tokens fail-closed (same path as
+    // sanitizeAttributes), so the document never succeeds with a reserved root class.
+    expect(failureCode('<body class="he-shell"><p>x</p></body>')).toBe(
+      HTML_VIOLATION_CODES.reservedNamespace,
+    );
+    // A safe body class alone still surfaces; reserved sibling tokens cannot slip through.
+    const safe = sanitize('<body class="dark"><p>x</p></body>');
+    expect(safe.ok).toBe(true);
+    if (!safe.ok) return;
+    expect(safe.contentRootClass).toBe('dark');
+    expect(safe.contentRootId).toBeUndefined();
+  });
+
+  it('omits content-root identity fields when html/body carry no safe class or id', () => {
+    const result = sanitize('<p>plain</p>');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.contentRootClass).toBeUndefined();
+    expect(result.contentRootId).toBeUndefined();
+  });
+  it('transfers safe body/html inline styles onto [data-he-content] rules in contentCss', () => {
+    const result = sanitize(
+      '<!doctype html><html style="font-size:16px"><body style="background:#111;color:#eee"><p>x</p></body></html>',
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Wrapper itself stays free of a raw style="" attribute (shell adds only class/id).
+    expect(result.bodyHtml).toBe('<p>x</p>');
+    // html first, body second so body wins by cascade order.
+    expect(result.contentCss).toContain('[data-he-content]{font-size:16px}');
+    expect(result.contentCss).toContain('[data-he-content]{background:#111;color:#eee}');
+    const htmlIdx = result.contentCss.indexOf('[data-he-content]{font-size:16px}');
+    const bodyIdx = result.contentCss.indexOf('[data-he-content]{background:#111;color:#eee}');
+    expect(htmlIdx).toBeGreaterThanOrEqual(0);
+    expect(bodyIdx).toBeGreaterThan(htmlIdx);
+  });
+
+  it('rejects unsafe root inline styles via the shared declaration sanitizer', () => {
+    // Network function in a body style is hard-failed by sanitizeDeclarationList.
+    expect(failureCode('<body style="background:url(https://evil.test/x.png)"><p>x</p></body>')).toBe(
+      HTML_VIOLATION_CODES.cssRejected,
+    );
+    // Custom properties are also rejected on root styles (same path as element styles).
+    expect(failureCode('<html style="color:var(--accent)"><body><p>x</p></body></html>')).toBe(
+      HTML_VIOLATION_CODES.cssRejected,
+    );
+  });
+
+  it('emits no content-root style rule when html/body have no style attribute', () => {
+    const result = sanitize('<body class="dark"><p>x</p></body>');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.contentCss).not.toContain('[data-he-content]{');
+    // Identity transfer still works; only style rules are absent.
+    expect(result.contentRootClass).toBe('dark');
+  });
+  it('surfaces safe html/body lang/dir/title/role on contentRootAttrs', () => {
+    const result = sanitize(
+      '<!doctype html><html lang="ko"><body dir="rtl" role="main" title="Doc"><p>x</p></body></html>',
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bodyHtml).toBe('<p>x</p>');
+    expect(result.contentRootAttrs).toEqual({
+      lang: 'ko',
+      dir: 'rtl',
+      title: 'Doc',
+      role: 'main',
+    });
+  });
+
+  it('does not transfer disallowed or non-inert root attributes onto contentRootAttrs', () => {
+    // data-*/element-specific attrs are not in the inert root allowlist; body
+    // still sanitizes (survives=false skips isAllowedAttribute for html/body).
+    const result = sanitize(
+      '<!doctype html><html lang="en" data-evil="x" colspan="2"><body dir="ltr" alt="n" width="1" data-section-id="s1"><p>x</p></body></html>',
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.contentRootAttrs).toEqual({ lang: 'en', dir: 'ltr' });
+    expect(result.contentRootAttrs).not.toHaveProperty('data-evil');
+    expect(result.contentRootAttrs).not.toHaveProperty('data-section-id');
+    expect(result.contentRootAttrs).not.toHaveProperty('colspan');
+    expect(result.contentRootAttrs).not.toHaveProperty('alt');
+    expect(result.contentRootAttrs).not.toHaveProperty('width');
+    expect(result.contentRootAttrs).not.toHaveProperty('style');
+  });
+
+  it('body inert root attrs win over html on conflict', () => {
+    const result = sanitize(
+      '<!doctype html><html lang="en" dir="ltr" title="Html" role="document"><body lang="ko" dir="rtl" title="Body" role="main"><p>x</p></body></html>',
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.contentRootAttrs).toEqual({
+      lang: 'ko',
+      dir: 'rtl',
+      title: 'Body',
+      role: 'main',
+    });
+  });
+
+  it('omits contentRootAttrs when html/body carry no safe inert root attributes', () => {
+    const result = sanitize('<p>plain</p>');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.contentRootAttrs).toBeUndefined();
   });
 });

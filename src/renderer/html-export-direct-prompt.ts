@@ -12,6 +12,7 @@
  */
 
 import type { DirectExportConfig } from '../shared/html-export-direct-config';
+import { resolveSummaryChartPolicy } from './html-export-model';
 
 /** design.md is clamped so the prompt stays bounded (matches legacy). */
 const DESIGN_CHARS = 8000;
@@ -24,7 +25,7 @@ const USER_REQUEST_CHARS = 4000;
  * model (contrast with `HTML_EXPORT_CONTENT_INSTRUCTIONS`).
  */
 export const HTML_EXPORT_DIRECT_INSTRUCTIONS =
-  'You are a direct HTML/CSS author for a self-contained HTML export. You author a COMPLETE, self-contained HTML document with inline CSS — never a JSON content model, never Markdown, never code fences, never a ContentModel. A main-process pipeline sanitizes and validates your output before it is saved.';
+  'You are a direct HTML/CSS author for a self-contained HTML export. You author a COMPLETE, self-contained HTML document with inline CSS — never a JSON content model, never Markdown, never code fences, never a ContentModel, never work narration, never a file path, and never a claim that you wrote a file. A main-process pipeline sanitizes and validates your output before it is saved; non-HTML answers are rejected.';
 
 /** Frozen 30k single-pass source boundary (§5.14 / AC-M1a). */
 export const SINGLE_PASS_SOURCE_LIMIT = 30_000;
@@ -90,6 +91,31 @@ function configDirectiveLines(config: DirectExportConfig): string[] {
     `- ${densityLine(config.density)}`,
   ];
 
+  if (config.customPurpose) {
+    lines.push(`- custom purpose brief (weight heavily): ${config.customPurpose}`);
+  }
+
+  if (config.summaryChartMode) {
+    const policy = resolveSummaryChartPolicy(config.summaryChartMode);
+    lines.push(
+      `- summary/chart strength: ${policy.mode} (${policy.label})`,
+      `- summarization directive: ${policy.summarization}`,
+      `- chart directive: ${policy.chartPolicy}`,
+    );
+  }
+
+  if (config.readableWidth) {
+    lines.push(`- readable width: ${config.readableWidth.toUpperCase()} reading measure`);
+  }
+
+  if (typeof config.interactive === 'boolean') {
+    lines.push(
+      config.interactive
+        ? '- interactivity: allow tasteful CSS-only interactions (no JavaScript)'
+        : '- interactivity: static document only (no interactive affordances)',
+    );
+  }
+
   if (config.designId) {
     lines.push(`- designId: ${config.designId}`);
   }
@@ -139,6 +165,8 @@ const HTML_EXPORT_DIRECT_DESIGN_KNOWLEDGE = [
   '2. Preserve the source reading order and distinguish titles, prose, lists, tables, quotations, code, and data with real semantic HTML; keep evidence adjacent to its claim.',
   '3. Name the layout problem (flow, repetition, comparison, or primary/supporting context) and choose HTML structure + CSS that solves it: restrained flow for explanation, parallel items for repeated facts, tables for comparison.',
   '4. Author complete, self-contained HTML with inline CSS — no scripts, no external fonts/assets. IMAGES: an <img> src may ONLY be an app-issued opaque asset ID (src="asset:…") explicitly listed in this prompt; NEVER emit data: URIs, remote URLs, or invented images. When no asset ID is provided, author without <img> and express any decoration in CSS. Every visual choice — layout, spacing, color, type scale — is yours to encode in CSS, honoring the design authority above.',
+  '5. Use only LITERAL CSS values. CSS custom properties (`--name`) and `var()` are NOT supported and will be rejected — write concrete values inline. Global element selectors (html/body/:root/*) are allowed (scoped to the export content root) but prefer authoring styles against document content.',
+  '6. Use ONLY the supported HTML tag vocabulary (structural: section, article, main, aside, nav, header, footer, div, h1–h6, p, ul/ol/li, dl/dt/dd, figure/figcaption, blockquote, table/thead/tbody/tfoot/tr/th/td/caption, img/picture/source, svg; inline: span, strong/em/b/i/u/s, small, mark, sub/sup, code/pre/kbd/samp, abbr, time, a, br, hr). Attach classes, ids, and inline styles ONLY to these tags — unsupported tags are unwrapped and their attributes dropped, which orphans any CSS that targets them.',
 ].join('\n');
 
 function designKnowledgeBlock(): string[] {
@@ -169,9 +197,13 @@ export function buildDirectHtmlPrompt(
   source: string,
   opts?: { singlePassLimit?: number },
 ): { prompt: string; coverage: SourceCoverage } {
+  // A per-model budget may only TIGHTEN the single-pass window, never raise it
+  // above the frozen 30k ceiling: this direct path has no outline/batch fallback
+  // (that is deferred), so a source over SINGLE_PASS_SOURCE_LIMIT must still trip
+  // the fail-fast within-single-pass gate even for a large-context model.
   const limit =
     typeof opts?.singlePassLimit === 'number' && opts.singlePassLimit > 0
-      ? Math.floor(opts.singlePassLimit)
+      ? Math.min(Math.floor(opts.singlePassLimit), SINGLE_PASS_SOURCE_LIMIT)
       : SINGLE_PASS_SOURCE_LIMIT;
   const body = typeof source === 'string' ? source : '';
   const coverage = fullSourceCoverage(body, limit);
@@ -181,8 +213,9 @@ export function buildDirectHtmlPrompt(
     '',
     '=== EXPORT REQUEST ===',
     'Author a COMPLETE, self-contained HTML document with inline CSS that re-expresses the SOURCE DOCUMENT below.',
-    'Output ONLY the HTML document. Do NOT output a JSON content model, ContentModel, Markdown, prose commentary, or code fences.',
-    'A main-process pipeline will sanitize and validate your HTML before it is saved.',
+    'Output ONLY the HTML document. Do NOT output a JSON content model, ContentModel, Markdown, prose commentary, tool narration, temp/file paths, or code fences.',
+    'Do NOT use tools, write files, or describe steps. Your sole response must be the HTML document itself.',
+    'A main-process pipeline will sanitize and validate your HTML before it is saved; narration is rejected as failure.',
     '',
     ...configDirectiveLines(config),
     '',
@@ -192,6 +225,8 @@ export function buildDirectHtmlPrompt(
     '- Output a single complete HTML document (doctype, html, head with inline <style>, body).',
     '- NEVER return a JSON content model or ContentModel — that path is obsolete for this request.',
     '- NEVER wrap the document in Markdown code fences.',
+    '- NEVER narrate progress, write files, or return a path instead of the document.',
+    '- NEVER include conversational preamble, acknowledgements, closing remarks, or narration (no "Sure, here is...", no "I hope this helps"), whether bare text or wrapped in an element.',
     '- Honor orientation, mode, density, and purpose exactly as directed above.',
     '- Treat design.md as visual authority when present; realize its hierarchy, mood, and signature elements in HTML/CSS.',
     '- Preserve critical facts, numbers, names, quotes, and code from the source.',

@@ -61,6 +61,32 @@ function escapeStyleText(css: string): string {
   return css.replace(/<\/(style)/gi, '<\\/$1');
 }
 
+/** Escape a value for a double-quoted HTML attribute (content-root id/class). */
+function escapeAttr(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/'/g, '&#39;');
+}
+
+/** Build the reserved content-root wrapper, optionally carrying sanitized root identity. */
+function contentRootOpenTag(payload: HtmlExportSanitizedPayload): string {
+  let tag = '<div data-he-content';
+  if (payload.contentRootId) tag += ` id="${escapeAttr(payload.contentRootId)}"`;
+  if (payload.contentRootClass) tag += ` class="${escapeAttr(payload.contentRootClass)}"`;
+  // Deterministic order for transferred inert globals (matches sanitizer allowlist order).
+  const attrs = payload.contentRootAttrs;
+  if (attrs) {
+    for (const name of ['lang', 'dir', 'title', 'role'] as const) {
+      const value = attrs[name];
+      if (value) tag += ` ${name}="${escapeAttr(value)}"`;
+    }
+  }
+  return `${tag}>`;
+}
+
 /**
  * Assemble a single self-contained offline `.html` document from a sanitized
  * pipeline payload. Returns the document string and the embedded manifest
@@ -90,7 +116,13 @@ export function bundleSanitizedHtml(
     '<!doctype html>\n' +
     '<html>\n' +
     `<head>\n${head}\n</head>\n` +
-    `<body>\n${payload.bodyHtml}\n<script>${HTML_EXPORT_RUNTIME_JS}</script>\n</body>\n` +
+    // The sanitizer scopes every model-authored selector and inline style under
+    // `[data-he-content]` (a reserved attribute model output cannot set), so the
+    // shell MUST wrap the body in that content root or none of the sanitized CSS
+    // matches and the export renders unstyled. See #29 review (P1).
+    // Safe class/id from source <html>/<body> are transferred so rewritten
+    // selectors like `[data-he-content].dark` still match (Codex P2).
+    `<body>\n${contentRootOpenTag(payload)}\n${payload.bodyHtml}\n</div>\n<script>${HTML_EXPORT_RUNTIME_JS}</script>\n</body>\n` +
     '</html>\n';
 
   return { html, manifest };

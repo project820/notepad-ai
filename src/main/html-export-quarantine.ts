@@ -17,6 +17,34 @@ import {
   type QuarantineMeasureResult,
   type ResolvedArtifactId,
 } from '../shared/html-export-pipeline';
+export type QuarantineViewport = { width: number; height: number };
+
+/** Fallback measurement viewport (landscape 720p). Hosts and callers share this. */
+export const DEFAULT_VIEWPORT: QuarantineViewport = { width: 1280, height: 720 };
+
+const VIEWPORT_MIN = 320;
+const VIEWPORT_MAX = 4096;
+
+/**
+ * Validate/clamp a renderer- or caller-supplied viewport. Invalid/absent input
+ * falls back to {@link DEFAULT_VIEWPORT}. Never pass unclamped values to Electron.
+ */
+export function normalizeQuarantineViewport(input: unknown): QuarantineViewport {
+  if (!input || typeof input !== 'object') return { ...DEFAULT_VIEWPORT };
+  const rec = input as Record<string, unknown>;
+  const width = clampViewportDim(rec.width);
+  const height = clampViewportDim(rec.height);
+  if (width === undefined || height === undefined) return { ...DEFAULT_VIEWPORT };
+  return { width, height };
+}
+
+function clampViewportDim(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+  const n = Math.trunc(value);
+  if (n < VIEWPORT_MIN || n > VIEWPORT_MAX) return undefined;
+  return n;
+}
+
 
 /** Host-side measurement outcome. Bytes and native detail stay inside the host. */
 export type QuarantineHostOutcome =
@@ -31,7 +59,7 @@ export type QuarantineHostOutcome =
 export interface QuarantineSlotSession {
   measure(
     html: string,
-    opts: { deadlineMs: number; signal: AbortSignal },
+    opts: { deadlineMs: number; signal: AbortSignal; viewport?: QuarantineViewport },
   ): Promise<QuarantineHostOutcome>;
   reset(): Promise<void>;
 }
@@ -118,6 +146,7 @@ export class HtmlExportQuarantinePool {
     webContentsId: number,
     attemptId: HtmlExportAttemptId,
     resolvedArtifactId: ResolvedArtifactId,
+    viewport?: QuarantineViewport,
   ): Promise<QuarantineMeasureResult> {
     // (a)(b) Admission + reservation are fully synchronous so a re-entrant call is rejected.
     if (this.inFlightByWebContents.has(webContentsId)) {
@@ -165,7 +194,7 @@ export class HtmlExportQuarantinePool {
       }
 
       // (f) Host measure raced against deadline and external cancel.
-      result = await this.runHostMeasure(slotId, html, abortController.signal);
+      result = await this.runHostMeasure(slotId, html, abortController.signal, viewport);
       return result;
     } catch {
       // Unexpected throw outside the host race → recoverable, then teardown.
@@ -203,6 +232,7 @@ export class HtmlExportQuarantinePool {
     slotId: SlotId,
     html: string,
     signal: AbortSignal,
+    viewport?: QuarantineViewport,
   ): Promise<QuarantineMeasureResult> {
     const session = this.host.slot(slotId);
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -212,6 +242,7 @@ export class HtmlExportQuarantinePool {
       const hostPromise = session.measure(html, {
         deadlineMs: this.deadlineMs,
         signal,
+        ...(viewport ? { viewport } : {}),
       });
 
       const raced = await new Promise<

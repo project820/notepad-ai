@@ -261,4 +261,12 @@ describe('ComposedGrokProvider restricted transport routing', () => {
     expect(h.apiCalls()).toBe(1);
     expect(h.cliCalls()).toBe(0);
   });
+
+  it('htmlSurfaceTransport mirrors the html streamChat api/cli pick', async () => {
+    const connected = harness(true, []);
+    await expect(connected.provider.htmlSurfaceTransport()).resolves.toBe('api');
+
+    const disconnected = harness(false, []);
+    await expect(disconnected.provider.htmlSurfaceTransport()).resolves.toBe('cli');
+  });
 });

@@ -1,4 +1,4 @@
-import { generate, lexer, parse, walk } from 'css-tree';
+import { generate, ident, lexer, List, parse, walk } from 'css-tree';
 
 /** Frozen resource limits for model-authored export CSS. */
 export const CSS_MAX_STYLESHEET_BYTES = 128 * 1024;
@@ -123,7 +123,7 @@ const PROPERTY_SET = new Set<string>(CSS_ALLOWED_PROPERTIES);
 const FUNCTION_SET = new Set<string>(CSS_ALLOWED_FUNCTIONS.map((name) => name.toLowerCase()));
 const AT_RULE_SET = new Set<string>(CSS_ALLOWED_AT_RULES);
 const TYPE_SELECTORS = new Set([
-  'section', 'div', 'article', 'header', 'footer', 'nav', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+  'section', 'div', 'article', 'main', 'aside', 'header', 'footer', 'nav', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
   'p', 'span', 'strong', 'em', 'b', 'i', 'u', 's', 'small', 'mark', 'sub', 'sup', 'br', 'hr',
   'ul', 'ol', 'li', 'dl', 'dt', 'dd', 'blockquote', 'figure', 'figcaption', 'img', 'picture',
   'source', 'svg', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'caption', 'code',
@@ -183,8 +183,167 @@ function valueNodes(node: any): any[] {
   return result;
 }
 
+/** Decode CSS identifier escapes (`\XX ` hex, `\c` literal) so reserved-name and
+ *  allowlist comparisons see the canonical value the browser would resolve — an
+ *  escaped reserved name (e.g. `\64 ata-he-content`) must not evade the check. */
+function decodeCssEscapes(s: string): string {
+  return s.replace(/\\([0-9a-fA-F]{1,6})(?:\r\n|[ \t\n\r\f])?|\\([^0-9a-fA-F])/g, (_m, hex, ch) => {
+    if (hex) {
+      const code = parseInt(hex, 16);
+      if (code === 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) return '\uFFFD';
+      return String.fromCodePoint(code);
+    }
+    return ch;
+  });
+}
+
+function canonicalizeIdent(raw: string): string {
+  const s = String(raw);
+  if (s.indexOf('\\') === -1) return s;
+  // Prefer the parser's own escape decoder (handles CRLF terminators, surrogate/
+  // over-range guards, etc.); fall back to a CRLF-aware regex if it ever throws.
+  try {
+    return ident.decode(s);
+  } catch {
+    return decodeCssEscapes(s);
+  }
+}
+
 function hasReservedName(name: string): boolean {
-  return RESERVED_NAME.test(name) || name.toLowerCase() === 'data-he-content';
+  const n = canonicalizeIdent(name).toLowerCase();
+  return RESERVED_NAME.test(n) || n === 'data-he-content';
+}
+
+const CONTENT_ROOT_ATTR = 'data-he-content';
+const CONTENT_ROOT_SELECTOR = `[${CONTENT_ROOT_ATTR}]`;
+
+function isGlobalRootAtom(node: any): boolean {
+  if (node?.type === 'TypeSelector') {
+    const name = String(node.name).toLowerCase();
+    return name === 'html' || name === 'body';
+  }
+  // Only the non-functional `:root` atom is a rewrite target; `:root(...)` is a
+  // functional pseudo whose arguments are never validated — never treat it as root.
+  if (node?.type === 'PseudoClassSelector') {
+    return String(node.name).toLowerCase() === 'root' && node.children == null;
+  }
+  return false;
+}
+
+function isUniversalAtom(node: any): boolean {
+  if (node?.type === 'UniversalSelector') return true;
+  return node?.type === 'TypeSelector' && String(node.name) === '*';
+}
+
+function contentRootAttributeSelector(): any {
+  return {
+    type: 'AttributeSelector',
+    name: { type: 'Identifier', name: CONTENT_ROOT_ATTR },
+    matcher: null,
+    value: null,
+    flags: null,
+  };
+}
+
+/** Deep-clone a css-tree node / List so rewrite does not mutate the validated original. */
+function cloneCssNode(node: any): any {
+  if (node == null || typeof node !== 'object') return node;
+  if (node instanceof List || (typeof node.forEach === 'function' && typeof node.appendData === 'function' && typeof node.toArray === 'function')) {
+    const list = new List();
+    node.forEach((child: any) => {
+      list.appendData(cloneCssNode(child));
+    });
+    return list;
+  }
+  if (Array.isArray(node)) return node.map(cloneCssNode);
+  const out: any = {};
+  for (const key of Object.keys(node)) {
+    if (key === 'loc') continue;
+    out[key] = cloneCssNode(node[key]);
+  }
+  return out;
+}
+
+/** Replace model-authored html/body/:root atoms with the sanitizer content-root attribute. */
+function rewriteGlobalRootAtoms(node: any): void {
+  if (!node || typeof node !== 'object') return;
+  if (isGlobalRootAtom(node)) {
+    for (const key of Object.keys(node)) delete node[key];
+    Object.assign(node, contentRootAttributeSelector());
+    return;
+  }
+  if (node.children && typeof node.children.forEach === 'function') {
+    node.children.forEach((child: any) => rewriteGlobalRootAtoms(child));
+  }
+}
+
+function isExactGlobalRootSelector(selector: any): boolean {
+  const nodes = children(selector);
+  return nodes.length === 1 && isGlobalRootAtom(nodes[0]);
+}
+
+function isExactUniversalSelector(selector: any): boolean {
+  const nodes = children(selector);
+  return nodes.length === 1 && isUniversalAtom(nodes[0]);
+}
+
+function selectorBeginsWithGlobalRoot(selector: any): boolean {
+  const nodes = children(selector);
+  return nodes.length > 0 && isGlobalRootAtom(nodes[0]);
+}
+
+/**
+ * Scope one validated selector to the export content root.
+ * Global root atoms rewrite in-place; exact `*` becomes a descendant universal.
+ * Never rewrites model-authored `[data-he-content]` — those fail reserved validation first.
+ */
+function scopeSelector(selector: any): string {
+  if (isExactGlobalRootSelector(selector)) return CONTENT_ROOT_SELECTOR;
+  if (isExactUniversalSelector(selector)) return `${CONTENT_ROOT_SELECTOR} *`;
+  const beginsAtRoot = selectorBeginsWithGlobalRoot(selector);
+  const rewritten = cloneCssNode(selector);
+  rewriteGlobalRootAtoms(rewritten);
+  const text = generated(rewritten);
+  return beginsAtRoot ? text : `${CONTENT_ROOT_SELECTOR} ${text}`;
+}
+
+/** Collect every non-functional global-root atom anywhere in the selector tree,
+ *  using the parser's structural walk so selector-bearing fields (e.g. the
+ *  `of S` list on `:nth-child(... of S)`, stored on `Nth.selector`, not `.children`)
+ *  are covered — a root hidden there must not evade the shape check. */
+function collectRootAtoms(node: any, acc: any[]): void {
+  if (!node || typeof node !== 'object') return;
+  walk(node, {
+    enter(current: any) {
+      if (isGlobalRootAtom(current)) acc.push(current);
+    },
+  });
+}
+
+/**
+ * Minimal safe global-root grammar (security): a non-functional html/body/:root
+ * atom may appear ONLY as the single leading atom of a selector whose combinators
+ * are descendant/child. Reject roots that are nested, repeated, non-leading, or
+ * joined by sibling combinators (`+` / `~`) — those escape the content root or
+ * silently mis-scope. Runs AFTER validateSelector (which rejects functional :root).
+ */
+function validateGlobalRootShape(selector: any): Failure | null {
+  const roots: any[] = [];
+  collectRootAtoms(selector, roots);
+  if (roots.length === 0) return null;
+  if (roots.length > 1) {
+    return fail(CSS_VIOLATION_CODES.disallowedSelector, 'multiple global-root selectors');
+  }
+  const top = children(selector);
+  if (top[0] !== roots[0]) {
+    return fail(CSS_VIOLATION_CODES.disallowedSelector, 'global-root selector must be the leading atom');
+  }
+  for (const atom of top) {
+    if (atom?.type === 'Combinator' && (atom.name === '+' || atom.name === '~')) {
+      return fail(CSS_VIOLATION_CODES.disallowedSelector, 'global-root selector with sibling combinator');
+    }
+  }
+  return null;
 }
 
 function violationResult(failure: Failure): CssSanitizeResult {
@@ -272,20 +431,25 @@ function validateSelectorAtom(node: any): Failure | null {
   const type = node?.type;
   if (type === 'TypeSelector') {
     const name = String(node.name).toLowerCase();
-    if (['html', 'body', 'head', 'style'].includes(name)) return fail(CSS_VIOLATION_CODES.reservedSelector, `reserved type selector ${name}`);
+    // html/body/* are rewrite targets (scoped to [data-he-content]); head/style stay reserved.
+    if (name === 'html' || name === 'body' || name === '*') return null;
+    if (name === 'head' || name === 'style') return fail(CSS_VIOLATION_CODES.reservedSelector, `reserved type selector ${name}`);
     if (!TYPE_SELECTORS.has(name)) return fail(CSS_VIOLATION_CODES.disallowedSelector, `type selector ${name}`);
-  } else if (type === 'UniversalSelector' || type === 'NestingSelector') {
-    return fail(CSS_VIOLATION_CODES.disallowedSelector, type === 'UniversalSelector' ? 'universal selector' : 'nesting selector');
+  } else if (type === 'UniversalSelector') {
+    // Rewrite/scope target — accepted and rewritten in scopeSelector.
+    return null;
+  } else if (type === 'NestingSelector') {
+    return fail(CSS_VIOLATION_CODES.disallowedSelector, 'nesting selector');
   } else if (type === 'ClassSelector' || type === 'IdSelector') {
     const name = String(node.name);
-    if (hasReservedName(name) || (type === 'IdSelector' && name.toLowerCase().startsWith('he-'))) {
+    if (hasReservedName(name) || (type === 'IdSelector' && canonicalizeIdent(name).toLowerCase().startsWith('he-'))) {
       return fail(CSS_VIOLATION_CODES.reservedSelector, `reserved selector ${name}`);
     }
   } else if (type === 'AttributeSelector') {
     const name = String(node.name?.name ?? node.name ?? '').toLowerCase();
     if (hasReservedName(name)) return fail(CSS_VIOLATION_CODES.reservedSelector, `reserved attribute ${name}`);
     const selectedValue = node.value ? generated(node.value).replace(/^['"]|['"]$/g, '').toLowerCase() : '';
-    if ((name === 'class' && hasReservedName(selectedValue)) || (name === 'id' && (hasReservedName(selectedValue) || selectedValue.startsWith('he-')))) {
+    if ((name === 'class' && hasReservedName(selectedValue)) || (name === 'id' && (hasReservedName(selectedValue) || canonicalizeIdent(selectedValue).startsWith('he-')))) {
       return fail(CSS_VIOLATION_CODES.reservedSelector, `reserved attribute selector ${name}`);
     }
     if (!SAFE_ATTRIBUTE_SELECTOR_NAMES.has(name) && !name.startsWith('aria-')) {
@@ -293,7 +457,12 @@ function validateSelectorAtom(node: any): Failure | null {
     }
   } else if (type === 'PseudoClassSelector') {
     const name = String(node.name).toLowerCase();
-    if (name === 'root') return fail(CSS_VIOLATION_CODES.reservedSelector, 'reserved pseudo-class :root');
+    // Only the non-functional `:root` atom is a rewrite target; `:root(...)` is a
+    // functional pseudo whose arguments are never validated and must be rejected.
+    if (name === 'root') {
+      if (node.children != null) return fail(CSS_VIOLATION_CODES.disallowedSelector, 'functional pseudo-class :root()');
+      return null;
+    }
     if (!PSEUDO_CLASSES.has(name)) return fail(CSS_VIOLATION_CODES.disallowedSelector, `pseudo-class :${name}`);
   } else if (type === 'PseudoElementSelector') {
     const name = String(node.name).toLowerCase();
@@ -565,7 +734,9 @@ function sanitizeRule(rule: any, context: CssSanitizeContext, counts: Counts): s
   for (const selector of selectors) {
     const selectorFailure = validateSelector(selector);
     if (selectorFailure) return selectorFailure;
-    outputSelectors.push(`[data-he-content] ${generated(selector)}`);
+    const shapeFailure = validateGlobalRootShape(selector);
+    if (shapeFailure) return shapeFailure;
+    outputSelectors.push(scopeSelector(selector));
   }
   const declarations = sanitizeDeclarations(rule.block, context, counts);
   if (isFailure(declarations)) return declarations;

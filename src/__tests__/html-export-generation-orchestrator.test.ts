@@ -169,6 +169,7 @@ describe('HtmlExportGenerationOrchestrator', () => {
 
     expect(result).toEqual({
       state: 'final',
+      attemptId: attempt('attempt-1'),
       finalizedArtifactId: finalizedId('finalized-1'),
       resolvedArtifactId: resolvedId('resolved-1'),
       sanitizedArtifactId: sanitizedId('sanitized-1'),
@@ -353,6 +354,7 @@ describe('HtmlExportGenerationOrchestrator', () => {
 
     expect(result).toEqual({
       state: 'partial',
+      attemptId: attempt('attempt-1'),
       resolvedArtifactId: resolvedId('resolved-1'),
       quarantineKind: 'recoverable-failure',
       route: ROUTE,
@@ -490,6 +492,7 @@ describe('HtmlExportGenerationOrchestrator', () => {
     expect(a).toEqual(b);
     expect(a).toEqual({
       state: 'final',
+      attemptId: attempt('attempt-1'),
       finalizedArtifactId: finalizedId('finalized-1'),
       resolvedArtifactId: resolvedId('resolved-1'),
       sanitizedArtifactId: sanitizedId('sanitized-1'),

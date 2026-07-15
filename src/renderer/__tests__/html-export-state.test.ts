@@ -9,7 +9,8 @@ import {
   type LayoutKind,
   type Orientation,
 } from '../html-export-state';
-import type { ContentModel, SummaryChartMode } from '../html-export-model';
+import type { SummaryChartMode } from '../html-export-model';
+import type { HtmlExportFinalized } from '../html-export-state';
 
 function run(events: HtmlExportEvent[], from: HtmlExportState = initialHtmlExportState): HtmlExportState {
   return events.reduce((state, event) => htmlExportReducer(state, event), from);
@@ -31,7 +32,10 @@ function toDesign(orientation: Orientation, layout: LayoutKind): HtmlExportState
   ]);
 }
 
-const MODEL: ContentModel = { title: 'Report', sections: [{ blocks: [{ kind: 'paragraph', text: 'hi' }] }] };
+const FINALIZED = {
+  attemptId: 'attempt-1',
+  finalizedArtifactId: 'final-1',
+} as unknown as HtmlExportFinalized;
 
 describe('htmlExportReducer — orientation × layout reach the summary/requirement step (all four combos)', () => {
   for (const [orientation, layout] of COMBOS) {
@@ -187,10 +191,10 @@ describe('htmlExportReducer — generate holds the validated content model', () 
     { type: 'SUBMIT_REQUIREMENT', freeRequirement: '', summaryChartMode: 'B' },
   ]);
 
-  it('AI_DONE → generated, holding the ContentModel (no HTML)', () => {
-    const generated = htmlExportReducer(generating, { type: 'AI_DONE', model: MODEL });
+  it('AI_DONE → generated, holding the finalized descriptor (no HTML)', () => {
+    const generated = htmlExportReducer(generating, { type: 'AI_DONE', finalized: FINALIZED });
     expect(generated.step).toBe('generated');
-    expect(generated.contentModel).toEqual(MODEL);
+    expect(generated.finalized).toEqual(FINALIZED);
     // No HTML artifact is ever stored on this path.
     expect((generated as Record<string, unknown>).generated).toBeUndefined();
   });
@@ -202,21 +206,21 @@ describe('htmlExportReducer — generate holds the validated content model', () 
   });
 
   it('BACK from generated returns to the summary/requirement step', () => {
-    const generated = htmlExportReducer(generating, { type: 'AI_DONE', model: MODEL });
+    const generated = htmlExportReducer(generating, { type: 'AI_DONE', finalized: FINALIZED });
     const back = htmlExportReducer(generated, { type: 'BACK' });
     expect(back.step).toBe('summary-requirement');
-    expect(back.contentModel).toEqual(MODEL);
+    expect(back.finalized).toEqual(FINALIZED);
   });
 
   it('regenerate path: SUBMIT_REQUIREMENT is valid again from generated', () => {
-    const generated = htmlExportReducer(generating, { type: 'AI_DONE', model: MODEL });
+    const generated = htmlExportReducer(generating, { type: 'AI_DONE', finalized: FINALIZED });
     const again = htmlExportReducer(generated, { type: 'SUBMIT_REQUIREMENT', freeRequirement: 'x', summaryChartMode: 'C' });
     expect(again.step).toBe('generating');
     expect(again.summaryChartMode).toBe('C');
   });
 
   it('CANCEL resets to idle from anywhere', () => {
-    const generated = htmlExportReducer(generating, { type: 'AI_DONE', model: MODEL });
+    const generated = htmlExportReducer(generating, { type: 'AI_DONE', finalized: FINALIZED });
     expect(htmlExportReducer(generated, { type: 'CANCEL' }).step).toBe('idle');
   });
 });
