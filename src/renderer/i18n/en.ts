@@ -227,6 +227,7 @@ export const en: Dict = {
     'he.regenerate': 'Regenerate',
     'he.error.fetch': 'Could not fetch the design. Check the name or URL, or use the default design.',
     'he.error.generate': 'Generation failed. Please try again.',
+    'he.error.tooLongSinglePass': 'This document is too long for single-pass HTML export (over 30,000 characters). Shorten it and try again.',
     'he.back': 'Back',
     'he.cancel': 'Cancel',
     'he.continue': 'Continue',

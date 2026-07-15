@@ -277,7 +277,7 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
   }
 
   /** Build the direct HTML-authoring prompt from the current selections + document. */
-  function buildDirectPrompt(): string {
+  function buildDirectPrompt(): { prompt: string; withinSinglePass: boolean } {
     const config = resolveDirectExportConfig({
       purpose: mapPurpose(state.purpose),
       orientation: state.orientation === 'horizontal' ? 'landscape' : 'portrait',
@@ -286,8 +286,13 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
       designMd: state.design?.designMd,
       userRequest: state.freeRequirement,
       model: pendingModel ? modelKey(pendingModel) : undefined,
+      summaryChartMode: state.summaryChartMode,
+      readableWidth: state.readableWidth,
+      interactive: state.interactive,
+      customPurpose: state.customPurpose,
     });
-    return buildDirectHtmlPrompt(config, deps.getMarkdown()).prompt;
+    const { prompt, coverage } = buildDirectHtmlPrompt(config, deps.getMarkdown());
+    return { prompt, withinSinglePass: coverage.withinSinglePass };
   }
 
   function submitRequirement() {
@@ -317,7 +322,14 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
       readableWidth,
       interactive,
     });
-    pendingPrompt = buildDirectPrompt();
+    const built = buildDirectPrompt();
+    if (!built.withinSinglePass) {
+      // Fail-fast: single-pass export cannot host >30k source (outline/batch is deferred).
+      pendingPrompt = '';
+      dispatch({ type: 'AI_ERROR', error: t('he.error.tooLongSinglePass') });
+      return;
+    }
+    pendingPrompt = built.prompt;
     maybeStartGeneration();
   }
 
@@ -331,7 +343,13 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
     const summaryChartMode = state.summaryChartMode ?? DEFAULT_SUMMARY_MODE;
     const freeRequirement = state.freeRequirement ?? '';
     dispatch({ type: 'SUBMIT_REQUIREMENT', freeRequirement, summaryChartMode, tokenWarning: false });
-    pendingPrompt = buildDirectPrompt();
+    const built = buildDirectPrompt();
+    if (!built.withinSinglePass) {
+      pendingPrompt = '';
+      dispatch({ type: 'AI_ERROR', error: t('he.error.tooLongSinglePass') });
+      return;
+    }
+    pendingPrompt = built.prompt;
     maybeStartGeneration();
   }
 

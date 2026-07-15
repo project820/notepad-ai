@@ -106,7 +106,7 @@ export const ja: Dict = {
     'he.design.title': 'デザイン', 'he.design.galleryHint': 'getdesign.md からデザインを選び、名前または URL を貼り付けてください。', 'he.design.input': 'デザイン名または URL',
     'he.model': 'モデル',
     'he.tokenWarning': '文書が長いため、一部が切り捨てられる場合があります。', 'he.generating': '生成中…', 'he.regenerate': '再生成',
-    'he.error.fetch': 'デザインを取得できませんでした。名前または URL を確認するか、既定のデザインを使用してください。', 'he.error.generate': '生成に失敗しました。もう一度お試しください。',
+    'he.error.fetch': 'デザインを取得できませんでした。名前または URL を確認するか、既定のデザインを使用してください。', 'he.error.generate': '生成に失敗しました。もう一度お試しください。', 'he.error.tooLongSinglePass': '文書が長すぎて単一パスの HTML エクスポートができません（30,000 文字超）。短縮してからもう一度お試しください。',
     'he.back': '戻る', 'he.cancel': 'キャンセル', 'he.continue': '続ける', 'he.generate': '生成', 'he.fetching': 'デザインを取得中…',
     'he.design.galleryLink': 'getdesign.md を開く', 'he.error.save': 'ファイルを保存できませんでした。もう一度お試しください。',
     'he.summary.title': '要約・チャート', 'he.summary.A': 'A · ビジュアル要約', 'he.summary.B': 'B · バランス要約', 'he.summary.C': 'C · 詳細要約', 'he.summary.D': 'D · 原文準拠', 'he.freeReq.title': '要望', 'he.freeReq.placeholder': '対象読者・強調点・残す/省く内容など、希望を自由に記入…', 'he.advanced.title': '詳細オプション', 'he.design.useDefault': '既定のデザインを使用', 'he.result.modelReady': 'コンテンツの準備完了',

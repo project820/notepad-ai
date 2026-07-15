@@ -201,6 +201,16 @@ export class ComposedGrokProvider implements AiProvider {
     return this.api.listModels();
   }
 
+  /**
+   * HTML-surface transport pick — single source of truth shared with streamChat's
+   * surfaceMode==='html' branch (api when xAI key is connected, else CLI).
+   * Used by the HTML export generator to label the pinned route honestly.
+   */
+  async htmlSurfaceTransport(): Promise<'api' | 'cli'> {
+    const apiStatus = await this.api.getAuthStatus();
+    return apiStatus.connected ? 'api' : 'cli';
+  }
+
   async streamChat(req: AiChatRequest, onEvent: (event: AiChatEvent) => void): Promise<void> {
     const apiStatus = await this.api.getAuthStatus();
     if (req.surfaceMode === 'html') {

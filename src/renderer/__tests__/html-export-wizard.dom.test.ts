@@ -129,6 +129,52 @@ describe('mountHtmlExportWizard — generate composes ONE direct-authoring promp
   });
 });
 
+describe('mountHtmlExportWizard — summary/chart mode + advanced knobs thread into the direct prompt', () => {
+  it('embeds the chosen A/B/C/D summary mode and advanced knobs in the composed prompt', async () => {
+    const { host, deps } = setup();
+    click(host, 'orient-vertical');
+    click(host, 'layout-scroll');
+    click(host, 'design-default');
+
+    // Core A/B/C/D control — pick C (Detailed brief).
+    click(host, 'summary-C');
+    // Advanced knobs: open detail mode and pick width + interactive.
+    click(host, 'mode-detail');
+    setField(host, 'readable-width', 'wide');
+    const interactive = host.querySelector<HTMLInputElement>('[data-he-field="interactive"]')!;
+    interactive.checked = true;
+    setField(host, 'free-requirement', 'board-ready digest');
+    click(host, 'generate-submit');
+    await flush();
+
+    expect(deps.generateHtmlExport).toHaveBeenCalledTimes(1);
+    const { prompt } = lastRequest(deps);
+    expect(prompt).toContain('summary/chart strength: C');
+    expect(prompt).toContain('Detailed brief');
+    expect(prompt).toContain('readable width: WIDE reading measure');
+    expect(prompt).toContain('interactivity: allow tasteful CSS-only interactions');
+    expect(prompt).toContain('board-ready digest');
+  });
+});
+
+describe('mountHtmlExportWizard — >30k single-pass fail-fast (no generation)', () => {
+  it('stops with a localized too-long error and never calls generateHtmlExport', async () => {
+    const longMd = `# Long\n\n${'x'.repeat(30_001)}`;
+    const { host, deps, handle } = setup({}, longMd);
+    click(host, 'orient-vertical');
+    click(host, 'layout-scroll');
+    click(host, 'design-default');
+    setField(host, 'free-requirement', '');
+    click(host, 'generate-submit');
+    await flush();
+
+    expect(deps.generateHtmlExport).not.toHaveBeenCalled();
+    expect(handle.getState().step).toBe('error');
+    expect(handle.getState().error).toBe('he.error.tooLongSinglePass');
+    expect(host.querySelector('.he-error')?.textContent).toContain('he.error.tooLongSinglePass');
+  });
+});
+
 describe('mountHtmlExportWizard — design fetch failure keeps choose-design (design.md is mandatory)', () => {
   it('FETCH_FAIL stays on choose-design with an error and never advances to generation', async () => {
     const { host, deps, handle } = setup({
