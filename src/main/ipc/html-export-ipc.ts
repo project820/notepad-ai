@@ -278,6 +278,14 @@ export function registerHtmlExportIpc({
     } catch {
       // Quarantine teardown is best effort and must not block sender cleanup.
     }
+    try {
+      // Abort any in-flight main-owned generation for this sender: on a window
+      // close/crash the destroyed hook runs cleanup, and the provider/CLI stream
+      // must not keep running after its WebContents is gone.
+      cancelGenerateHtml?.(webContentsId);
+    } catch {
+      // Best effort — must not block sender cleanup.
+    }
     return Promise.allSettled([pipelineCleanup, assetCleanup]).then(
       (results) => invoked && results.every((result) => result.status === 'fulfilled'),
     );

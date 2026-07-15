@@ -42,7 +42,7 @@ function setup(over: Partial<HtmlExportDeps> = {}, markdown = '# Title\n\nSome b
     getMarkdown: () => mdRef.value,
     fetchDesignMd: vi.fn(async () => ({ ok: true, designMd: '## tokens', rawUrl: 'https://raw/x/DESIGN.md' })),
     generateHtmlExport: vi.fn(async () => FINAL_RESULT),
-    saveHtmlFinalized: vi.fn(async () => ({ saved: true, filePath: '/tmp/export.html' })),
+    saveHtmlFinalized: vi.fn(async () => ({ saved: true, filePath: 'export.html' })),
     cancelHtmlGeneration: vi.fn(),
     getDefaultModel: () => ({ provider: 'chatgpt', id: 'gpt-5.4-mini' }),
     openExternal: vi.fn(),
@@ -252,6 +252,26 @@ describe('mountHtmlExportWizard — HTML-only model picker', () => {
     await flush();
     expect(deps.generateHtmlExport).toHaveBeenCalledTimes(1);
     expect(lastRequest(deps).model).toEqual({ provider: 'chatgpt', id: 'gpt-5.6' });
+  });
+
+  it('keeps allowlisted LM Studio models visible in the picker (not dropped by a general display policy)', async () => {
+    const { host } = setup({
+      listHtmlModels: async () => [
+        { provider: 'chatgpt', id: 'gpt-5.4-mini', label: 'GPT-5.4 mini', contextWindow: 400_000 },
+        { provider: 'lmstudio', id: 'local-llama', label: 'Local Llama', contextWindow: 32_000 },
+      ],
+      getDefaultModel: () => ({ provider: 'chatgpt', id: 'gpt-5.4-mini' }),
+    });
+    click(host, 'orient-vertical');
+    click(host, 'layout-scroll');
+    click(host, 'design-default');
+    await flush();
+    const select = host.querySelector<HTMLSelectElement>('[data-he-field="model"]');
+    expect(select).toBeTruthy();
+    const values = Array.from(select!.querySelectorAll('option')).map((o) => (o as HTMLOptionElement).value);
+    // The LM Studio model is not the current selection, yet it must remain offered.
+    expect(values).toContain('lmstudio:local-llama');
+    expect(values).toContain('chatgpt:gpt-5.4-mini');
   });
 });
 

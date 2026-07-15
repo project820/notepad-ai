@@ -38,8 +38,7 @@ import type { GenerationAttemptResult } from '../main/html-export-generation-orc
 import type { FinalizedArtifactId, HtmlExportAttemptId } from '../shared/html-export-pipeline';
 
 import { formatContextWindow } from '../main/ai/output-budget';
-import { applyModelDisplayPolicy } from '../main/ai/model-display-policy';
-import { isAiProviderId, type AiProviderId, type ModelRef } from '../main/ai/types';
+import { isAiProviderId, type AiProviderId } from '../main/ai/types';
 import { modelKey, parseModelKey } from './model-key';
 import { defaultHtmlFileName } from './html-export-prompt';
 
@@ -134,15 +133,12 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
       .listHtmlModels()
       .then((ms) => {
         if (disposed) return;
-        const current = deps.getDefaultModel?.();
-        const currentSelection = current
-          ? typeof current === 'string'
-            ? { provider: 'chatgpt' as const, id: current }
-            : isAiProviderId(current.provider)
-              ? { provider: current.provider, id: current.id }
-              : undefined
-          : undefined;
-        htmlModels = applyModelDisplayPolicy((Array.isArray(ms) ? ms : []) as ModelRef[], { currentSelection });
+        // The list is already HTML-allowlist-filtered by the caller
+        // (filterHtmlExportModels). Do NOT re-apply the general chat display
+        // policy here — it drops allowlisted local providers (e.g. LM Studio)
+        // that are not the current selection, hiding them from the HTML picker
+        // even though they are valid HTML-export targets (#29 review).
+        htmlModels = (Array.isArray(ms) ? ms : []) as HtmlModelChoice[];
         if (state.step === 'summary-requirement') render();
       })
       .catch(() => {

@@ -441,7 +441,7 @@ describe('sanitizeHtmlExport — fail-closed structural gate (issue #27)', () =>
       '| --- | --- |',
       '| Intro | done |',
       '',
-      'Saved the full 52KB document to /var/folders/tmp/xyz/export.html',
+      'Saved the full 52KB document to the OS temp directory.',
     ].join('\n');
     const result = sanitize(narration, structural);
     expect(result.ok).toBe(false);
