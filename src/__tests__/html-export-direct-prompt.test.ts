@@ -302,3 +302,39 @@ describe('design.md clamp', () => {
     expect(prompt).toContain('short source');
   });
 });
+
+describe('image directives — prompt must mirror the sanitizer asset-ID contract', () => {
+  const config = resolveDirectExportConfig({ purpose: 'presentation' });
+  const source = 'sample source';
+  const section = { id: 'section-1', title: 'Intro', sourceRange: { start: 0, end: source.length } };
+
+  const prompts = [
+    buildDirectHtmlPrompt(config, source).prompt,
+    buildOutlinePrompt(config, source).prompt,
+    buildSectionPrompt(config, section, source).prompt,
+  ];
+
+  it('never instructs the model to use inline data: URI images', () => {
+    for (const prompt of prompts) {
+      expect(prompt).not.toMatch(/inline data: images/i);
+      expect(prompt).not.toMatch(/use\s+(only\s+)?data:\s*(uri|url|image)/i);
+    }
+  });
+
+  it('directs the app-issued asset-ID contract and forbids data:/remote URLs', () => {
+    for (const prompt of prompts) {
+      expect(prompt).toContain('src="asset:');
+      expect(prompt).toMatch(/never\s+(emit\s+)?data:\s*URIs/i);
+    }
+  });
+
+  it('authoring prompts instruct: no provided asset IDs means no <img>', () => {
+    const authoring = [
+      buildDirectHtmlPrompt(config, source).prompt,
+      buildSectionPrompt(config, section, source).prompt,
+    ];
+    for (const prompt of authoring) {
+      expect(prompt).toMatch(/no provided asset ids means no <img>/i);
+    }
+  });
+});
