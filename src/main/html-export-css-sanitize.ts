@@ -183,8 +183,25 @@ function valueNodes(node: any): any[] {
   return result;
 }
 
+/** Decode CSS identifier escapes (`\XX ` hex, `\c` literal) so reserved-name and
+ *  allowlist comparisons see the canonical value the browser would resolve — an
+ *  escaped reserved name (e.g. `\64 ata-he-content`) must not evade the check. */
+function canonicalizeIdent(raw: string): string {
+  const s = String(raw);
+  if (s.indexOf('\\') === -1) return s;
+  return s.replace(/\\([0-9a-fA-F]{1,6})[ \t\n\r\f]?|\\([^0-9a-fA-F])/g, (_m, hex, ch) => {
+    if (hex) {
+      const code = parseInt(hex, 16);
+      if (code === 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) return '\uFFFD';
+      return String.fromCodePoint(code);
+    }
+    return ch;
+  });
+}
+
 function hasReservedName(name: string): boolean {
-  return RESERVED_NAME.test(name) || name.toLowerCase() === 'data-he-content';
+  const n = canonicalizeIdent(name).toLowerCase();
+  return RESERVED_NAME.test(n) || n === 'data-he-content';
 }
 
 const CONTENT_ROOT_ATTR = 'data-he-content';
@@ -195,8 +212,10 @@ function isGlobalRootAtom(node: any): boolean {
     const name = String(node.name).toLowerCase();
     return name === 'html' || name === 'body';
   }
+  // Only the non-functional `:root` atom is a rewrite target; `:root(...)` is a
+  // functional pseudo whose arguments are never validated — never treat it as root.
   if (node?.type === 'PseudoClassSelector') {
-    return String(node.name).toLowerCase() === 'root';
+    return String(node.name).toLowerCase() === 'root' && node.children == null;
   }
   return false;
 }
@@ -276,6 +295,42 @@ function scopeSelector(selector: any): string {
   rewriteGlobalRootAtoms(rewritten);
   const text = generated(rewritten);
   return beginsAtRoot ? text : `${CONTENT_ROOT_SELECTOR} ${text}`;
+}
+
+/** Collect every non-functional global-root atom anywhere in the selector tree. */
+function collectRootAtoms(node: any, acc: any[]): void {
+  if (!node || typeof node !== 'object') return;
+  if (isGlobalRootAtom(node)) { acc.push(node); return; }
+  const kids = node.children;
+  if (kids && typeof kids.forEach === 'function') {
+    kids.forEach((child: any) => collectRootAtoms(child, acc));
+  }
+}
+
+/**
+ * Minimal safe global-root grammar (security): a non-functional html/body/:root
+ * atom may appear ONLY as the single leading atom of a selector whose combinators
+ * are descendant/child. Reject roots that are nested, repeated, non-leading, or
+ * joined by sibling combinators (`+` / `~`) — those escape the content root or
+ * silently mis-scope. Runs AFTER validateSelector (which rejects functional :root).
+ */
+function validateGlobalRootShape(selector: any): Failure | null {
+  const roots: any[] = [];
+  collectRootAtoms(selector, roots);
+  if (roots.length === 0) return null;
+  if (roots.length > 1) {
+    return fail(CSS_VIOLATION_CODES.disallowedSelector, 'multiple global-root selectors');
+  }
+  const top = children(selector);
+  if (top[0] !== roots[0]) {
+    return fail(CSS_VIOLATION_CODES.disallowedSelector, 'global-root selector must be the leading atom');
+  }
+  for (const atom of top) {
+    if (atom?.type === 'Combinator' && (atom.name === '+' || atom.name === '~')) {
+      return fail(CSS_VIOLATION_CODES.disallowedSelector, 'global-root selector with sibling combinator');
+    }
+  }
+  return null;
 }
 
 function violationResult(failure: Failure): CssSanitizeResult {
@@ -374,14 +429,14 @@ function validateSelectorAtom(node: any): Failure | null {
     return fail(CSS_VIOLATION_CODES.disallowedSelector, 'nesting selector');
   } else if (type === 'ClassSelector' || type === 'IdSelector') {
     const name = String(node.name);
-    if (hasReservedName(name) || (type === 'IdSelector' && name.toLowerCase().startsWith('he-'))) {
+    if (hasReservedName(name) || (type === 'IdSelector' && canonicalizeIdent(name).toLowerCase().startsWith('he-'))) {
       return fail(CSS_VIOLATION_CODES.reservedSelector, `reserved selector ${name}`);
     }
   } else if (type === 'AttributeSelector') {
     const name = String(node.name?.name ?? node.name ?? '').toLowerCase();
     if (hasReservedName(name)) return fail(CSS_VIOLATION_CODES.reservedSelector, `reserved attribute ${name}`);
     const selectedValue = node.value ? generated(node.value).replace(/^['"]|['"]$/g, '').toLowerCase() : '';
-    if ((name === 'class' && hasReservedName(selectedValue)) || (name === 'id' && (hasReservedName(selectedValue) || selectedValue.startsWith('he-')))) {
+    if ((name === 'class' && hasReservedName(selectedValue)) || (name === 'id' && (hasReservedName(selectedValue) || canonicalizeIdent(selectedValue).startsWith('he-')))) {
       return fail(CSS_VIOLATION_CODES.reservedSelector, `reserved attribute selector ${name}`);
     }
     if (!SAFE_ATTRIBUTE_SELECTOR_NAMES.has(name) && !name.startsWith('aria-')) {
@@ -389,8 +444,12 @@ function validateSelectorAtom(node: any): Failure | null {
     }
   } else if (type === 'PseudoClassSelector') {
     const name = String(node.name).toLowerCase();
-    // :root is a rewrite target (scoped to [data-he-content]).
-    if (name === 'root') return null;
+    // Only the non-functional `:root` atom is a rewrite target; `:root(...)` is a
+    // functional pseudo whose arguments are never validated and must be rejected.
+    if (name === 'root') {
+      if (node.children != null) return fail(CSS_VIOLATION_CODES.disallowedSelector, 'functional pseudo-class :root()');
+      return null;
+    }
     if (!PSEUDO_CLASSES.has(name)) return fail(CSS_VIOLATION_CODES.disallowedSelector, `pseudo-class :${name}`);
   } else if (type === 'PseudoElementSelector') {
     const name = String(node.name).toLowerCase();
@@ -662,6 +721,8 @@ function sanitizeRule(rule: any, context: CssSanitizeContext, counts: Counts): s
   for (const selector of selectors) {
     const selectorFailure = validateSelector(selector);
     if (selectorFailure) return selectorFailure;
+    const shapeFailure = validateGlobalRootShape(selector);
+    if (shapeFailure) return shapeFailure;
     outputSelectors.push(scopeSelector(selector));
   }
   const declarations = sanitizeDeclarations(rule.block, context, counts);

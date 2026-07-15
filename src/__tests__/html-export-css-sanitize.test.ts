@@ -303,4 +303,40 @@ describe('global selector rewrite', () => {
     const second = sanitizeStylesheet(input);
     expect(first).toEqual(second);
   });
+
+  it('rejects root-led sibling combinators that would escape the content root', () => {
+    expect(failureCode(sanitizeStylesheet('body+*{color:red}'))).toBe(CSS_VIOLATION_CODES.disallowedSelector);
+    expect(failureCode(sanitizeStylesheet('body~.x{color:red}'))).toBe(CSS_VIOLATION_CODES.disallowedSelector);
+  });
+
+  it('rejects the functional :root(...) pseudo (laundering guard)', () => {
+    expect(failureCode(sanitizeStylesheet(':root([data-he-content]){color:red}'))).toBe(
+      CSS_VIOLATION_CODES.disallowedSelector,
+    );
+  });
+
+  it('rejects escaped reserved identifiers (canonicalized before the reserved check)', () => {
+    // `\\64 ` is the CSS hex escape for `d`, so this decodes to `.data-he-content`.
+    expect(failureCode(sanitizeStylesheet('.\\64 ata-he-content{color:red}'))).toBe(
+      CSS_VIOLATION_CODES.reservedSelector,
+    );
+    expect(failureCode(sanitizeStylesheet('[class=\\64 ata-he-content]{color:red}'))).toBe(
+      CSS_VIOLATION_CODES.reservedSelector,
+    );
+  });
+
+  it('rejects global roots outside the leading position (non-leading / repeated / nested)', () => {
+    expect(failureCode(sanitizeStylesheet('.x:root{color:red}'))).toBe(CSS_VIOLATION_CODES.disallowedSelector);
+    expect(failureCode(sanitizeStylesheet('html body{margin:0}'))).toBe(CSS_VIOLATION_CODES.disallowedSelector);
+  });
+
+  it('keeps rejecting nesting selectors', () => {
+    expect(failureCode(sanitizeStylesheet('&{color:red}'))).toBe(CSS_VIOLATION_CODES.disallowedSelector);
+  });
+
+  it('emits exact bytes for accepted leading-root shapes', () => {
+    const r = sanitizeStylesheet('body.dark>.card{color:red}');
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.css).toBe('[data-he-content].dark>.card{color:red}');
+  });
 });
