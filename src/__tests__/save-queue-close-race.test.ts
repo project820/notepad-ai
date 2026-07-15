@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { AtomicWriteBackend } from '../main/atomic-write';
+import type { DescriptorAtomicWriteBackend } from '../main/atomic-write';
 import { saveDocumentAtomically } from '../main/document-save';
 import { KeyedMutex } from '../main/keyed-mutex';
 
@@ -12,15 +12,34 @@ describe('save queue close race', () => {
     const firstWrite = new Promise<void>((resolve) => { releaseFirstWrite = resolve; });
     let revision = 1;
     let dirty = true;
-    const backend: AtomicWriteBackend = {
+    const backend: DescriptorAtomicWriteBackend = {
       async mkdir() {},
-      async writeFile(target, data) {
-        if (String(data) === 'A1') await firstWrite;
-        files.set(target, String(data));
+      async writeFile() {
+        throw new Error('obsolete path write');
       },
-      async fsyncFile() {},
-      async rename(from, target) { files.set(target, files.get(from) ?? ''); },
-      async unlink() {},
+      async fsyncFile() {
+        throw new Error('obsolete path fsync');
+      },
+      async openExclusiveTemp(target) {
+        return {
+          async writeFile(data) {
+            if (String(data) === 'A1') await firstWrite;
+            files.set(target, String(data));
+          },
+          async sync() {},
+          async stat() {
+            return { dev: 1n, ino: 1n };
+          },
+          async close() {},
+        };
+      },
+      async rename(from, target) {
+        files.set(target, files.get(from) ?? '');
+        files.delete(from);
+      },
+      async unlink(target) {
+        files.delete(target);
+      },
       randomId: () => 'tmp',
     };
     const save = (label: string, capturedRevision: number) => mutex.run('/docs/note.md', async () => {

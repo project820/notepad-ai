@@ -111,6 +111,15 @@ export const ja: Dict = {
     'he.design.galleryLink': 'getdesign.md を開く', 'he.error.save': 'ファイルを保存できませんでした。もう一度お試しください。',
     'he.summary.title': '要約・チャート', 'he.summary.A': 'A · ビジュアル要約', 'he.summary.B': 'B · バランス要約', 'he.summary.C': 'C · 詳細要約', 'he.summary.D': 'D · 原文準拠', 'he.freeReq.title': '要望', 'he.freeReq.placeholder': '対象読者・強調点・残す/省く内容など、希望を自由に記入…', 'he.advanced.title': '詳細オプション', 'he.design.useDefault': '既定のデザインを使用', 'he.result.modelReady': 'コンテンツの準備完了',
     'he.saving': '保存中…', 'he.result.readyToSave': 'コンテンツの準備ができました。単一の自己完結型 HTML ファイルとして保存します。', 'he.result.save': 'HTML を保存', 'he.result.open': 'ブラウザで開く', 'he.result.saved': '保存しました。ブラウザで開けます。', 'he.error.containment': '選択したレイアウト内にコンテンツを収められませんでした。要約レベルを下げるか、スクロールレイアウトをお試しください。', 'he.error.notSelfContained': '生成された文書が完全な自己完結型ではなかったため保存しませんでした。もう一度お試しください。',
+    'he.assets.select': 'システムのファイル選択画面で画像を選ぶ',
+    'he.assets.hintsTitle': 'この Markdown 文書で参照されている画像',
+    'he.assets.assign': '選択したファイルを参照先に明示的に割り当てる',
+    'he.assets.ambiguous': '同名のファイルが複数あるため、明示的に選択する必要があります。',
+    'he.assets.missing': '必要な画像を解決できないため、プレースホルダーに置き換えます。',
+    'he.assets.tooLarge': '選択した画像は、エンコードされたアセットの 2 MiB 上限を超えています。',
+    'he.assets.tooLargeGuidance': 'より小さいファイルまたは最適化済みのファイルを選んでください。アプリは画像のサイズ変更や加工を行いません。',
+    'he.assets.cancelled': '選択をキャンセルしました。',
+    'he.assets.partialConfirmation': '生成される部分的な文書をエクスポートするには、明示的な確認が必要です。',
     // v0.2 — settings: default .md editor
     'settings.mdHandler.title': '既定の .md エディター', 'settings.mdHandler.desc': 'クリックで Notepad AI が Markdown ファイルを開くようにします。macOS が自動変更をブロックする場合（未署名ビルド）、一度だけ行う Finder の手順を表示します。', 'settings.mdHandler.button': '既定の .md エディターに設定', 'settings.mdHandler.registered': '完了 — Notepad AI が既定の .md エディターになりました。.md ファイルをダブルクリックするとここで開きます。', 'settings.mdHandler.partial': '「このアプリケーションで開く」に追加しましたが、既定の自動設定はできませんでした。Finder で .md を右クリック → 情報を見る →「このアプリケーションで開く」→ Notepad AI →「すべてを変更」。', 'settings.mdHandler.unsupported': 'この OS/ビルドでは未対応',
     // v0.4 — local AI providers (Ollama / LM Studio) + small-context HTML notice

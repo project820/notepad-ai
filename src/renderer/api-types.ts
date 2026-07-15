@@ -2,6 +2,7 @@ import type { AiProviderId, ModelRef, ProviderAuthStatus, ReasoningEffort } from
 import type { AuthSnapshot, LoginUpdate, SubscriptionLoginUpdate, SubscriptionProvider } from '../shared/auth-protocol';
 import type { FileTreeEntry } from '../shared/file-types';
 import type { HtmlExportPipelineApi } from '../shared/html-export-pipeline';
+import type { HtmlExportAssetApi } from '../shared/html-export-assets';
 
 type ProjectWizardSaveApprovedDraftInput = {
   projectFolder: string;
@@ -52,7 +53,7 @@ type ReasoningCapabilitiesSnapshot = {
 };
 
 
-export type Api = HtmlExportPipelineApi & {
+export type Api = HtmlExportPipelineApi & HtmlExportAssetApi & {
   onFileOpened: (cb: (file: { filePath: string; content: string }) => void) => void;
   onMenuNew: (cb: () => void) => void;
   onMenuSave: (cb: () => void) => void;

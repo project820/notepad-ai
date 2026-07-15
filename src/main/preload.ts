@@ -13,6 +13,11 @@ import type {
   SanitizeRequest,
   SanitizeResult,
 } from '../shared/html-export-pipeline';
+import type {
+  HtmlExportAssetApi,
+  PickHtmlAssetsRequest,
+  PickHtmlAssetsResponse,
+} from '../shared/html-export-assets';
 
 type OpenedFile = {
   filePath: string | null;
@@ -303,6 +308,8 @@ const api = {
     ipcRenderer.invoke('html:pipeline:resolve', request),
   cancelHtmlExportAttempt: (request: CancelAttemptRequest): Promise<CancelAttemptResult> =>
     ipcRenderer.invoke('html:attempt:cancel', request),
+  pickHtmlExportAssets: (request: PickHtmlAssetsRequest): Promise<PickHtmlAssetsResponse> =>
+    ipcRenderer.invoke('html:asset:pick', request),
 
   // OS integration (⑥) — default .md editor handler
   mdHandlerStatus: (): Promise<{ supported: boolean; registered?: boolean }> =>
@@ -311,6 +318,6 @@ const api = {
     ipcRenderer.invoke('os:register-md-handler'),
 };
 
-api satisfies HtmlExportPipelineApi;
+api satisfies HtmlExportPipelineApi & HtmlExportAssetApi;
 
 contextBridge.exposeInMainWorld('api', api);

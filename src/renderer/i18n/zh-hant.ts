@@ -111,6 +111,15 @@ export const zhHant: Dict = {
     'he.design.galleryLink': '開啟 getdesign.md', 'he.error.save': '無法儲存檔案。請重試。',
     'he.summary.title': '摘要與圖表', 'he.summary.A': 'A · 視覺摘要', 'he.summary.B': 'B · 平衡摘要', 'he.summary.C': 'C · 詳細摘要', 'he.summary.D': 'D · 接近原文', 'he.freeReq.title': '你的需求', 'he.freeReq.placeholder': '描述任何具體要求 — 受眾、重點、保留或刪減的內容…', 'he.advanced.title': '進階選項', 'he.design.useDefault': '使用預設設計', 'he.result.modelReady': '內容已就緒',
     'he.saving': '正在儲存…', 'he.result.readyToSave': '內容已就緒。儲存為單一自包含的 HTML 檔案。', 'he.result.save': '儲存 HTML', 'he.result.open': '在瀏覽器中開啟', 'he.result.saved': '已儲存。可在瀏覽器中開啟。', 'he.error.containment': '無法在所選版面中容納內容。請嘗試較輕的摘要程度或捲動版面。', 'he.error.notSelfContained': '產生的文件並非完全自包含，未儲存。請重試。',
+    'he.assets.select': '透過系統檔案選擇器選取圖片',
+    'he.assets.hintsTitle': '此 Markdown 文件引用的圖片',
+    'he.assets.assign': '明確將選取的檔案指派給參照',
+    'he.assets.ambiguous': '多個同名檔案需要明確選擇。',
+    'he.assets.missing': '無法解析必要圖片，將以預留位置取代。',
+    'he.assets.tooLarge': '選取的圖片超過 2 MiB 的已編碼資源限制。',
+    'he.assets.tooLargeGuidance': '請選取較小或最佳化後的檔案；應用程式不會調整大小或修改檔案。',
+    'he.assets.cancelled': '已取消選取。',
+    'he.assets.partialConfirmation': '匯出產生的不完整文件需要明確確認。',
     // v0.2 — settings: default .md editor
     'settings.mdHandler.title': '預設 .md 編輯器', 'settings.mdHandler.desc': '點擊讓 Notepad AI 開啟你的 Markdown 檔案。若 macOS 阻止自動變更（未簽署版本），會顯示一次性的 Finder 操作步驟。', 'settings.mdHandler.button': '設為預設 .md 編輯器', 'settings.mdHandler.registered': '完成——Notepad AI 現在是你的預設 .md 編輯器。雙擊任一 .md 檔案即可在此開啟。', 'settings.mdHandler.partial': '已加入「開啟方式」，但無法自動設為預設。請在 Finder 右鍵 .md → 顯示簡介 → 「開啟方式」→ Notepad AI →「全部變更」。', 'settings.mdHandler.unsupported': '此作業系統/版本不支援',
     // v0.4 — local AI providers (Ollama / LM Studio) + small-context HTML notice

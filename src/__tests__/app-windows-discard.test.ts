@@ -5,6 +5,7 @@ const electron = vi.hoisted(() => {
   const ipcListeners = new Map<string, Listener>();
   const windows = new Map<number, FakeWindow>();
   let onSend: ((win: FakeWindow, channel: string, payload: any) => void) | null = null;
+  let nextWindowId = 1;
 
   class FakeWindow {
     readonly listeners = new Map<string, Listener[]>();
@@ -17,15 +18,19 @@ const electron = vi.hoisted(() => {
       openDevTools: () => void;
     };
 
-    constructor(readonly id: number) {
+    readonly id: number;
+
+    constructor(idOrOptions: number | Record<string, unknown> = nextWindowId) {
+      this.id = typeof idOrOptions === 'number' ? idOrOptions : nextWindowId;
+      nextWindowId = Math.max(nextWindowId, this.id + 1);
       this.webContents = {
-        id: id + 1000,
+        id: this.id + 1000,
         send: (channel, payload) => onSend?.(this, channel, payload),
         on: () => {},
         setWindowOpenHandler: () => {},
         openDevTools: () => {},
       };
-      windows.set(id, this);
+      windows.set(this.id, this);
     }
 
     on(event: string, listener: Listener) {
@@ -81,6 +86,7 @@ const electron = vi.hoisted(() => {
       ipcListeners.clear();
       windows.clear();
       onSend = null;
+      nextWindowId = 1;
     },
   };
 });
@@ -99,9 +105,20 @@ function registryFor(records: WindowRecord[]) {
     all: () => records,
     get: (id: number) => records.find((record) => record.windowId === id) ?? null,
     getByWebContents: (id: number) => records.find((record) => record.webContentsId === id) ?? null,
+    markReady: (webContentsId: number) => {
+      const record = records.find((candidate) => candidate.webContentsId === webContentsId) ?? null;
+      if (record) record.ready = true;
+      return record;
+    },
     focusedOrLast: () => null,
-    register: () => {},
-    unregister: () => {},
+    register: (record: WindowRecord) => {
+      records.push(record);
+      return record;
+    },
+    unregister: (id: number) => {
+      const index = records.findIndex((record) => record.windowId === id);
+      if (index >= 0) records.splice(index, 1);
+    },
     touchFocus: () => {},
     ownerOfPath: () => null,
     claimPath: () => {},
@@ -119,24 +136,37 @@ async function setup(
   replyState: StatePolicy = (win, payload) => {
     electron.emitIpc('close:state', win, { ...payload, dirty: true, hasPath: true, docEmpty: false, revision: 0, locale: 'en' });
   },
+  productionWindows = false,
+  fileGrants: unknown = { release: () => {} },
+  projectWizardRoots: unknown = { release: () => {} },
 ) {
+
   electron.reset();
   vi.resetModules();
-  const wins = Array.from({ length: count }, (_, index) => electron.createWindow(index + 1));
-  const records = wins.map((win, index) => ({
-    windowId: win.id,
-    webContentsId: win.webContents.id,
-    windowKey: `window-${index + 1}`,
-    currentPath: '/tmp/draft.md',
-    lastFocusedAt: 0,
-    ready: true,
-    pendingOutbound: [],
-  }));
+  const wins: FakeWindow[] = [];
+  const records: WindowRecord[] = [];
+  if (!productionWindows) {
+    for (let index = 0; index < count; index += 1) {
+      const win = electron.createWindow(index + 1);
+      wins.push(win);
+      records.push({
+        windowId: win.id,
+        webContentsId: win.webContents.id,
+        windowKey: `window-${index + 1}`,
+        currentPath: '/tmp/draft.md',
+        lastFocusedAt: 0,
+        ready: true,
+        pendingOutbound: [],
+      });
+    }
+  }
+
   const { createAppWindows } = await import('../main/app-windows');
+  const registry = registryFor(records);
   const appWindows = createAppWindows({
-    registry: registryFor(records),
-    fileGrants: { grantFile: () => {}, release: () => {} } as never,
-    projectWizardRoots: { release: () => {} } as never,
+    registry,
+    fileGrants: fileGrants as never,
+    projectWizardRoots: projectWizardRoots as never,
     convertDocument: async () => ({ ok: false }),
     abortChatsForWebContents: () => {},
     hasSingleInstanceLock: true,
@@ -154,7 +184,20 @@ async function setup(
       reply(win, channel, payload);
     }
   });
-  return { appWindows, wins };
+  if (productionWindows) {
+    const { registerSessionIpc } = await import('../main/ipc/session-ipc');
+    registerSessionIpc({
+      registry: registry as never,
+      sinkFor: appWindows.sinkFor,
+      isSessionWriteFenced: appWindows.isSessionWriteFenced,
+    });
+    for (let index = 0; index < count; index += 1) {
+      const win = await appWindows.createWindow() as FakeWindow;
+      wins.push(win);
+      electron.emitIpc('window:ready', win, undefined);
+    }
+  }
+  return { appWindows, wins, records };
 }
 
 describe('discard close IPC waiters', () => {
@@ -221,6 +264,99 @@ describe('discard close IPC waiters', () => {
     expect(removeSessionWindows).not.toHaveBeenCalled();
     expect(commitQuitSession).not.toHaveBeenCalled();
   });
+  it('does not enroll a replacement after current-window authorization is stale', async () => {
+    const fileGrants = {
+      authorizeExistingFile: vi.fn(async () => null),
+      grantExistingFile: vi.fn(async () => null),
+      release: () => {},
+    };
+    const { appWindows, wins } = await setup(
+      () => {},
+      async () => 'cancel',
+      1,
+      () => true,
+      async () => {},
+      async () => {},
+      async () => {},
+      undefined,
+      false,
+      fileGrants,
+    );
+
+    await appWindows.openFilePath('/stale-replacement.md', wins[0]);
+
+    expect(fileGrants.authorizeExistingFile).toHaveBeenCalledOnce();
+    expect(fileGrants.grantExistingFile).not.toHaveBeenCalled();
+  });
+  it('preserves only committed quit targets during coordinated teardown', async () => {
+    const removeSessionWindow = vi.fn(async () => {});
+    const removeSessionWindows = vi.fn(async () => {});
+    const commitQuitSession = vi.fn(async () => {});
+    const fileGrants = { release: vi.fn() };
+    const projectWizardRoots = { release: vi.fn() };
+    const { appWindows, wins, records } = await setup(
+      (win, channel, payload) => {
+        if (channel === 'close:save') {
+          electron.emitIpc('close:save-result', win, { requestId: payload.requestId, saved: true, committedRevision: 0 });
+        }
+        if (channel === 'close:consume') {
+          electron.emitIpc('close:consume-result', win, { requestId: payload.requestId, consumed: true });
+        }
+      },
+      async () => 'save',
+      2,
+      () => true,
+      commitQuitSession,
+      removeSessionWindow,
+      removeSessionWindows,
+      undefined,
+      true,
+      fileGrants,
+      projectWizardRoots,
+    );
+    const coordinatedKeys = records.map((record) => record.windowKey);
+    expect(records).toHaveLength(2);
+    expect(records.every((record) => record.ready)).toBe(true);
+
+    await expect(appWindows.approveAllForQuit('quit')).resolves.toBe(true);
+    expect(coordinatedKeys.every((windowKey) => appWindows.isSessionWriteFenced(windowKey))).toBe(true);
+    const lateWindow = await appWindows.createWindow() as FakeWindow;
+    electron.emitIpc('window:ready', lateWindow, undefined);
+    const lateWindowRecord = records.find((record) => record.windowId === lateWindow.id);
+    const lateWindowKey = lateWindowRecord?.windowKey;
+    expect(lateWindowRecord?.ready).toBe(true);
+    expect(lateWindowKey).toBeDefined();
+
+    for (const [index, win] of wins.entries()) {
+      win.destroyed = true;
+      win.emit('closed');
+      await Promise.resolve();
+
+      expect(fileGrants.release).toHaveBeenCalledTimes(index + 1);
+      expect(fileGrants.release).toHaveBeenNthCalledWith(index + 1, win.webContents.id);
+      expect(projectWizardRoots.release).toHaveBeenCalledTimes(index + 1);
+      expect(projectWizardRoots.release).toHaveBeenNthCalledWith(index + 1, win.webContents.id);
+      expect(appWindows.isSessionWriteFenced(coordinatedKeys[index])).toBe(false);
+      expect(coordinatedKeys.slice(index + 1).every((windowKey) => appWindows.isSessionWriteFenced(windowKey))).toBe(true);
+    }
+    expect(coordinatedKeys.every((windowKey) => !appWindows.isSessionWriteFenced(windowKey))).toBe(true);
+    lateWindow.destroyed = true;
+    lateWindow.emit('closed');
+    await Promise.resolve();
+
+    expect(fileGrants.release).toHaveBeenCalledTimes(wins.length + 1);
+    expect(fileGrants.release).toHaveBeenNthCalledWith(wins.length + 1, lateWindow.webContents.id);
+    expect(projectWizardRoots.release).toHaveBeenCalledTimes(wins.length + 1);
+    expect(projectWizardRoots.release).toHaveBeenNthCalledWith(wins.length + 1, lateWindow.webContents.id);
+    expect(appWindows.isSessionWriteFenced(lateWindowKey!)).toBe(false);
+
+    expect(commitQuitSession).toHaveBeenCalledOnce();
+    expect(commitQuitSession).toHaveBeenCalledWith([]);
+    expect(removeSessionWindows).not.toHaveBeenCalled();
+    expect(removeSessionWindow).toHaveBeenCalledTimes(1);
+    expect(removeSessionWindow).toHaveBeenCalledWith(lateWindowKey);
+    expect(coordinatedKeys).not.toContain(removeSessionWindow.mock.calls[0][0]);
+  });
 
   it('cancels a peer prepare and rolls back both targets when one prepare fails', async () => {
     const rollbackTargets: number[] = [];
@@ -240,25 +376,53 @@ describe('discard close IPC waiters', () => {
     expect(rollbackTargets.sort()).toEqual(wins.map((win) => win.id));
   });
 
-  it('does not let a late prepare ACK settle a rollback waiter with a distinct operation id', async () => {
+  it('does not let a stale prepare ACK settle a rollback waiter with a distinct operation id', async () => {
     let prepareId = '';
     let rollbackId = '';
-    let dialogs = 0;
+    let rejectCommit!: (error: Error) => void;
+    let signalCommitStarted!: () => void;
+    let signalRollbackStarted!: () => void;
+    let rollbackReply!: { win: FakeWindow; requestId: string };
+    const commitStarted = new Promise<void>((resolve) => { signalCommitStarted = resolve; });
+    const rollbackStarted = new Promise<void>((resolve) => { signalRollbackStarted = resolve; });
+    const commitQuitSession = vi.fn(() => new Promise<void>((_resolve, reject) => {
+      rejectCommit = reject;
+      signalCommitStarted();
+    }));
     const { appWindows } = await setup((win, channel, payload) => {
       if (channel === 'close:discard') {
         prepareId = payload.requestId;
-        electron.emitIpc('close:discard-result', win, { requestId: payload.requestId, fenced: false });
+        electron.emitIpc('close:discard-result', win, { requestId: payload.requestId, fenced: true });
+      }
+      if (channel === 'close:consume') {
+        electron.emitIpc('close:consume-result', win, { requestId: payload.requestId, consumed: true });
       }
       if (channel === 'close:discard-rollback') {
         rollbackId = payload.requestId;
-        electron.emitIpc('close:discard-result', win, { requestId: prepareId, fenced: true });
-        queueMicrotask(() => electron.emitIpc('close:discard-result', win, { requestId: payload.requestId }));
+        rollbackReply = { win, requestId: payload.requestId };
+        signalRollbackStarted();
       }
-    }, async () => (++dialogs > 1 ? 'cancel' : 'discard'), 1);
+    }, async () => 'discard', 1, () => true, commitQuitSession);
 
-    await expect(appWindows.approveAllForQuit('quit')).resolves.toBe(false);
+    const approval = appWindows.approveAllForQuit('quit');
+    await commitStarted;
+    expect(appWindows.isSessionWriteFenced('window-1')).toBe(true);
 
+    rejectCommit(new Error('disk full'));
+    await rollbackStarted;
     expect(rollbackId).not.toBe(prepareId);
+
+    let settled = false;
+    void approval.then(() => { settled = true; });
+    electron.emitIpc('close:discard-result', rollbackReply.win, { requestId: prepareId, fenced: true });
+    await Promise.resolve();
+
+    expect(settled).toBe(false);
+    expect(appWindows.isSessionWriteFenced('window-1')).toBe(true);
+
+    electron.emitIpc('close:discard-result', rollbackReply.win, { requestId: rollbackReply.requestId, fenced: true });
+    await expect(approval).resolves.toBe(false);
+    expect(appWindows.isSessionWriteFenced('window-1')).toBe(false);
   });
 
   it('settles prepare and rollback waiters when their windows are destroyed', async () => {
@@ -318,6 +482,7 @@ describe('discard close IPC waiters', () => {
 
       await vi.advanceTimersByTimeAsync(50);
       await expect(approval).resolves.toBe(true);
+      expect(appWindows.isSessionWriteFenced('window-1')).toBe(true);
     } finally {
       vi.useRealTimers();
     }
@@ -398,6 +563,45 @@ describe('discard close IPC waiters', () => {
 
     expect(rollbackTargets).toEqual([1]);
     expect(appWindows.isSessionWriteFenced('window-1')).toBe(false);
+  });
+  it('fences every consumed target while persistence is pending and clears them after a failed commit', async () => {
+    let rejectCommit!: (error: Error) => void;
+    let signalCommitStarted!: () => void;
+    const commitStarted = new Promise<void>((resolve) => { signalCommitStarted = resolve; });
+    const commitQuitSession = vi.fn(() => new Promise<void>((_resolve, reject) => {
+      rejectCommit = reject;
+      signalCommitStarted();
+    }));
+    const rollbackTargets: number[] = [];
+    const choices: Array<'save' | 'discard'> = ['save', 'discard'];
+    const { appWindows } = await setup((win, channel, payload) => {
+      if (channel === 'close:save') {
+        electron.emitIpc('close:save-result', win, { requestId: payload.requestId, saved: true, committedRevision: 0 });
+      }
+      if (channel === 'close:discard') {
+        electron.emitIpc('close:discard-result', win, { requestId: payload.requestId, fenced: true });
+      }
+      if (channel === 'close:consume') {
+        electron.emitIpc('close:consume-result', win, { requestId: payload.requestId, consumed: true });
+      }
+      if (channel === 'close:discard-rollback') {
+        rollbackTargets.push(win.id);
+        electron.emitIpc('close:discard-result', win, { requestId: payload.requestId });
+      }
+    }, async () => choices.shift() ?? 'cancel', 2, () => true, commitQuitSession);
+
+    const approval = appWindows.approveAllForQuit('quit');
+    await commitStarted;
+
+    expect(appWindows.isSessionWriteFenced('window-1')).toBe(true);
+    expect(appWindows.isSessionWriteFenced('window-2')).toBe(true);
+
+    rejectCommit(new Error('disk full'));
+    await expect(approval).resolves.toBe(false);
+
+    expect(rollbackTargets.sort()).toEqual([1, 2]);
+    expect(appWindows.isSessionWriteFenced('window-1')).toBe(false);
+    expect(appWindows.isSessionWriteFenced('window-2')).toBe(false);
   });
   it('preserves failed renderer discard compensation as a denied close', async () => {
     const rollbackResults: boolean[] = [];

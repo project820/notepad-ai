@@ -13,7 +13,7 @@
 import electron from 'electron';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -86,17 +86,29 @@ async function runElectronWorker(phase) {
     const saveResult = await win.webContents.executeJavaScript(
       `window.api.saveFile(${JSON.stringify(documentPath)}, ${JSON.stringify(renderedContent)})`,
     );
-    if (saveResult?.saved !== true || saveResult.filePath !== documentPath) throw new Error('file:save IPC did not report the saved document');
+    const canonicalDocumentPath = realpathSync(documentPath);
+    const rendererSuppliedAliasPath = documentPath;
+    if (rendererSuppliedAliasPath === canonicalDocumentPath) {
+      throw new Error('roundtrip renderer path unexpectedly resolved to its canonical text');
+    }
+    if (saveResult?.saved !== true || saveResult.filePath !== canonicalDocumentPath) {
+      throw new Error(
+        `file:save IPC canonical result mismatch (saved=${String(saveResult?.saved)}, error=${String(saveResult?.error)}, alias=${String(saveResult?.filePath === rendererSuppliedAliasPath)})`,
+      );
+    }
+    const savedCanonicalPath = saveResult.filePath;
     await win.webContents.executeJavaScript(
-      `window.api.sessionWrite(${JSON.stringify({ path: documentPath, title: 'roundtrip.md', doc: editedContent, dirty: false, savedAt: Date.now() })})`,
+      `window.api.sessionWrite(${JSON.stringify({ path: rendererSuppliedAliasPath, title: 'roundtrip.md', doc: editedContent, dirty: false, savedAt: Date.now() })})`,
     );
     const sessionPath = join(app.getPath('userData'), 'session.json');
     await waitFor('durable session snapshot', () => {
       if (!existsSync(sessionPath)) return false;
       const aggregate = JSON.parse(readFileSync(sessionPath, 'utf8'));
-      return aggregate.cleanExit === false && aggregate.windows?.some((entry) => entry.path === documentPath && entry.doc === editedContent);
+      return aggregate.cleanExit === false && aggregate.windows?.some(
+        (entry) => entry.path === savedCanonicalPath && entry.path !== rendererSuppliedAliasPath && entry.doc === editedContent,
+      );
     }, 60_000);
-    console.log('[roundtrip-smoke] phase-1-ready: document saved and snapshot flushed');
+    console.log('[roundtrip-smoke] phase-1-ready: document saved and canonical snapshot flushed');
     await new Promise(() => {});
   }
 
@@ -104,6 +116,11 @@ async function runElectronWorker(phase) {
     await waitFor('restore banner from the fresh process', () =>
       win.webContents.executeJavaScript(`Boolean(document.querySelector('.restore-yes'))`),
     );
+    const canonicalDocumentPath = realpathSync(documentPath);
+    const restoredSnapshot = await win.webContents.executeJavaScript(`window.api.sessionGet()`);
+    if (restoredSnapshot?.snapshot?.path !== canonicalDocumentPath || restoredSnapshot.snapshot.path === documentPath) {
+      throw new Error('restored session snapshot did not retain the main-owned canonical path');
+    }
     await win.webContents.executeJavaScript(`document.querySelector('.restore-yes')?.click()`);
     const restoredContent = await waitFor('restored document in the renderer DOM', async () => {
       const text = await win.webContents.executeJavaScript(
@@ -128,7 +145,10 @@ if (workerPhase) {
 } else {
   void (async () => {
   const userData = mkdtempSync(join(tmpdir(), 'notepad-ai-roundtrip-'));
-  const roundtripDocument = join(userData, 'roundtrip.md');
+  const roundtripDocumentDir = join(userData, 'roundtrip-real');
+  const roundtripDocument = join(roundtripDocumentDir, 'roundtrip.md');
+  const roundtripAliasDir = join(userData, 'roundtrip-alias');
+  const roundtripDocumentAlias = join(roundtripAliasDir, 'roundtrip.md');
   const children = new Set();
   const failures = [];
 
@@ -147,7 +167,7 @@ if (workerPhase) {
         NOTEPAD_AI_USERDATA: userData,
         NOTEPAD_AI_INTEGRATION_TEST: '1',
         NOTEPAD_AI_HIDE_WINDOWS: '1',
-        NOTEPAD_AI_ROUNDTRIP_DOCUMENT: roundtripDocument,
+        NOTEPAD_AI_ROUNDTRIP_DOCUMENT: roundtripDocumentAlias,
         ELECTRON_ENABLE_LOGGING: '1',
       },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -181,17 +201,30 @@ if (workerPhase) {
     const builtRenderer = resolve(REPO, 'dist/renderer/index.html');
     if (!existsSync(builtMain)) throw new Error(`built main missing at ${builtMain} — run \`npm run build\` first`);
     if (!existsSync(builtRenderer)) throw new Error(`built renderer missing at ${builtRenderer} — run \`npm run build\` first`);
+    mkdirSync(roundtripDocumentDir);
+    symlinkSync(roundtripDocumentDir, roundtripAliasDir, 'dir');
     writeFileSync(roundtripDocument, initialContent, 'utf8');
+    const canonicalRoundtripDocument = realpathSync(roundtripDocumentAlias);
+    if (roundtripDocumentAlias === canonicalRoundtripDocument) {
+      throw new Error('roundtrip document alias unexpectedly resolved to its canonical text');
+    }
 
     console.log('[roundtrip-smoke] phase 1: launch, save, snapshot, crash');
     const first = launchPhase('save');
     await waitFor('phase 1 snapshot flush', () => first.logs.join('').includes('phase-1-ready'), 60_000);
     check('opened, edited, and saved through the production Electron app', first.logs.join('').includes('phase-1-ready'));
     check('early open-file delivery creates exactly one window', first.logs.join('').includes('phase-1-open-file-window-count=1'));
-    check('saved file round-trips edited content byte-exactly', readFileSync(roundtripDocument).equals(Buffer.from(editedContent, 'utf8')));
+    check('saved file round-trips edited content byte-exactly', readFileSync(canonicalRoundtripDocument).equals(Buffer.from(editedContent, 'utf8')));
     first.child.kill('SIGKILL');
     await waitForExit(first.child);
     check('phase 1 Electron process was terminated with SIGKILL', first.child.signalCode === 'SIGKILL');
+    const persistedSession = JSON.parse(readFileSync(join(userData, 'session.json'), 'utf8'));
+    check(
+      'persisted recovery session stores the canonical path, not the alias',
+      persistedSession.windows?.some(
+        (entry) => entry.path === canonicalRoundtripDocument && entry.path !== roundtripDocumentAlias,
+      ),
+    );
 
     console.log('[roundtrip-smoke] phase 2: fresh launch and real renderer recovery');
     const second = launchPhase('restore');

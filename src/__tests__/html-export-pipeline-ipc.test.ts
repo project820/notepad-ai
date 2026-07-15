@@ -34,6 +34,46 @@ function createService() {
     invalidateSender: vi.fn(),
   };
 }
+function createAssetLifecycle(activeAttempt = 'attempt-old') {
+  return {
+    getActiveAttempt: vi.fn(() => activeAttempt),
+    invalidateAttempt: vi.fn(),
+    releaseWebContents: vi.fn(),
+  };
+}
+function createNoopAssetLifecycle() {
+  return {
+    getActiveAttempt: vi.fn(() => undefined),
+    invalidateAttempt: vi.fn(),
+    releaseWebContents: vi.fn(),
+  };
+}
+function expectCanonicalPipelineError(
+  result: unknown,
+  kind: HtmlExportPipelineErrorKind,
+  dependencyDetail?: string,
+): void {
+  const response = result as { readonly ok: boolean; readonly error: unknown };
+  expect(response).toStrictEqual({
+    ok: false,
+    error: {
+      kind,
+      detail: `HTML export pipeline error: ${kind}`,
+    },
+  });
+  expect(Object.getPrototypeOf(response.error)).toBe(Object.prototype);
+  expect((response.error as object)).not.toBeInstanceOf(Error);
+  const serialized = JSON.stringify(response);
+  expect(serialized).not.toMatch(/private|secret|path/i);
+  if (dependencyDetail) {
+    expect(serialized).not.toContain(dependencyDetail);
+    expect(serialized).not.toContain('/private/');
+  }
+}
+function expectCanonicalPipelineReject(result: unknown): void {
+  expectCanonicalPipelineError(result, 'pipeline-reject');
+}
+
 
 describe('HTML export pipeline IPC', () => {
   beforeEach(() => ipc.reset());
@@ -41,7 +81,11 @@ describe('HTML export pipeline IPC', () => {
   it('forwards only opaque IDs to the pipeline service', async () => {
     const service = createService();
     const sender: Sender = { id: 41, once: vi.fn() };
-    registerHtmlExportIpc({ windowForWebContents: () => null, pipelineService: service as never });
+    registerHtmlExportIpc({
+      windowForWebContents: () => null,
+      pipelineService: service as never,
+      assetLifecycle: createNoopAssetLifecycle(),
+    });
 
     await ipc.handler('html:attempt:generate')!(eventFor(sender), {});
     await ipc.handler('html:pipeline:sanitize')!(eventFor(sender), {
@@ -71,7 +115,11 @@ describe('HTML export pipeline IPC', () => {
   it.each(invalidOpaqueIds)('rejects %s opaque IDs in every expected field', async (_description, invalidId) => {
     const service = createService();
     const sender: Sender = { id: 42, once: vi.fn() };
-    registerHtmlExportIpc({ windowForWebContents: () => null, pipelineService: service as never });
+    registerHtmlExportIpc({
+      windowForWebContents: () => null,
+      pipelineService: service as never,
+      assetLifecycle: createNoopAssetLifecycle(),
+    });
 
     const expected = {
       ok: false,
@@ -121,7 +169,11 @@ describe('HTML export pipeline IPC', () => {
   ])('rejects %s request shapes across every pipeline handler', async (_description, malformed) => {
     const service = createService();
     const sender: Sender = { id: 46, once: vi.fn() };
-    registerHtmlExportIpc({ windowForWebContents: () => null, pipelineService: service as never });
+    registerHtmlExportIpc({
+      windowForWebContents: () => null,
+      pipelineService: service as never,
+      assetLifecycle: createNoopAssetLifecycle(),
+    });
 
     const results = await Promise.all([
       ipc.handler('html:attempt:generate')!(eventFor(sender), malformed),
@@ -142,7 +194,11 @@ describe('HTML export pipeline IPC', () => {
   it('rejects malformed and byte-bearing requests before calling the pipeline', async () => {
     const service = createService();
     const sender: Sender = { id: 44, once: vi.fn() };
-    registerHtmlExportIpc({ windowForWebContents: () => null, pipelineService: service as never });
+    registerHtmlExportIpc({
+      windowForWebContents: () => null,
+      pipelineService: service as never,
+      assetLifecycle: createNoopAssetLifecycle(),
+    });
 
     const malformed = await ipc.handler('html:pipeline:sanitize')!(eventFor(sender), {
       attemptId: 'attempt-2',
@@ -181,32 +237,260 @@ describe('HTML export pipeline IPC', () => {
     'pipeline-reject',
   ] as const satisfies readonly HtmlExportPipelineErrorKind[];
 
-  it.each(stableErrorKinds)('passes through a plain %s error exactly', async (kind) => {
+  it.each(stableErrorKinds)('normalizes private detail from every pipeline handler %s failure', async (kind) => {
+    const handlers = [
+      ['begin', 'html:attempt:generate', {}, 'beginAttempt', []],
+      ['sanitize', 'html:pipeline:sanitize', { attemptId: 'attempt-typed', rawArtifactId: 'raw-typed' }, 'sanitize', ['attempt-typed', 'raw-typed']],
+      ['resolve', 'html:pipeline:resolve', { attemptId: 'attempt-typed', sanitizedCandidateId: 'sanitized-typed' }, 'resolve', ['attempt-typed', 'sanitized-typed']],
+      ['cancel', 'html:attempt:cancel', { attemptId: 'attempt-typed' }, 'invalidateAttempt', ['attempt-typed']],
+    ] as const;
+
+    for (const [operation, channel, input, method, expectedArgs] of handlers) {
+      const service = createService();
+      const dependencyDetail = `private ${operation} failure at /private/${method}/secret.html`;
+      service[method].mockReturnValueOnce({
+        ok: false,
+        error: { kind, detail: dependencyDetail },
+      });
+      const sender: Sender = { id: 43, once: vi.fn() };
+      const assetLifecycle = createNoopAssetLifecycle();
+      registerHtmlExportIpc({
+        windowForWebContents: () => null,
+        pipelineService: service as never,
+        assetLifecycle,
+      });
+
+      const result = await ipc.handler(channel)!(eventFor(sender), input);
+
+      expectCanonicalPipelineError(result, kind, dependencyDetail);
+      expect(service[method]).toHaveBeenCalledExactlyOnceWith(43, ...expectedArgs);
+      expect(assetLifecycle.invalidateAttempt).not.toHaveBeenCalled();
+    }
+  });
+  it.each([
+    ['begin', 'html:attempt:generate', {}, 'beginAttempt'],
+    ['sanitize', 'html:pipeline:sanitize', { attemptId: 'attempt-throw', rawArtifactId: 'raw-throw' }, 'sanitize'],
+    ['resolve', 'html:pipeline:resolve', { attemptId: 'attempt-throw', sanitizedCandidateId: 'sanitized-throw' }, 'resolve'],
+    ['cancel', 'html:attempt:cancel', { attemptId: 'attempt-throw' }, 'invalidateAttempt'],
+  ] as const)('contains private-path errors thrown by pipeline %s dependencies', async (
+    _operation,
+    channel,
+    input,
+    method,
+  ) => {
     const service = createService();
-    const sender: Sender = { id: 43, once: vi.fn() };
-    const expected = {
-      ok: false as const,
-      error: { kind, detail: `HTML export pipeline error: ${kind}` },
-    };
-    service.sanitize.mockReturnValueOnce(expected);
-    registerHtmlExportIpc({ windowForWebContents: () => null, pipelineService: service as never });
-
-    const result = await ipc.handler('html:pipeline:sanitize')!(eventFor(sender), {
-      attemptId: 'attempt-3',
-      rawArtifactId: 'raw-3',
+    service[method].mockImplementationOnce(() => {
+      throw new Error(`private failure at /private/${method}/secret.html`);
     });
-    const error = (result as { error: unknown }).error;
+    const sender: Sender = { id: 52, once: vi.fn() };
+    const assetLifecycle = createAssetLifecycle();
+    registerHtmlExportIpc({
+      windowForWebContents: () => null,
+      pipelineService: service as never,
+      assetLifecycle,
+    });
 
-    expect(result).toStrictEqual(expected);
-    expect(Object.getPrototypeOf(error)).toBe(Object.prototype);
-    expect(error).not.toBeInstanceOf(Error);
-    expect(service.sanitize).toHaveBeenCalledWith(43, 'attempt-3', 'raw-3');
+    const result = await ipc.handler(channel)!(eventFor(sender), input);
+    expectCanonicalPipelineReject(result);
+    expect(assetLifecycle.invalidateAttempt).not.toHaveBeenCalled();
+  });
+  it.each([
+    ['begin', 'html:attempt:generate', {}, 'beginAttempt'],
+    ['sanitize', 'html:pipeline:sanitize', { attemptId: 'attempt-reject', rawArtifactId: 'raw-reject' }, 'sanitize'],
+    ['resolve', 'html:pipeline:resolve', { attemptId: 'attempt-reject', sanitizedCandidateId: 'sanitized-reject' }, 'resolve'],
+    ['cancel', 'html:attempt:cancel', { attemptId: 'attempt-reject' }, 'invalidateAttempt'],
+  ] as const)('contains private-path errors rejected by pipeline %s dependencies', async (
+    _operation,
+    channel,
+    input,
+    method,
+  ) => {
+    const service = createService();
+    service[method].mockRejectedValueOnce(new Error(`private rejection at /private/${method}/secret.html`));
+    const sender: Sender = { id: 56, once: vi.fn() };
+    const assetLifecycle = createAssetLifecycle();
+    registerHtmlExportIpc({
+      windowForWebContents: () => null,
+      pipelineService: service as never,
+      assetLifecycle,
+    });
+
+    const result = await ipc.handler(channel)!(eventFor(sender), input);
+    expectCanonicalPipelineReject(result);
+    expect(assetLifecycle.invalidateAttempt).not.toHaveBeenCalled();
   });
 
-  it('invalidates each sender once when its webContents is destroyed', async () => {
+  it('contains lifecycle dependency failures without beginning downstream cleanup', async () => {
     const service = createService();
+    const assetLifecycle = createAssetLifecycle();
+    assetLifecycle.getActiveAttempt.mockImplementationOnce(() => {
+      throw new Error('private lifecycle failure at /private/attempts/secret.html');
+    });
+    const sender: Sender = { id: 53, once: vi.fn() };
+    registerHtmlExportIpc({
+      windowForWebContents: () => null,
+      pipelineService: service as never,
+      assetLifecycle,
+    });
+
+    const result = await ipc.handler('html:attempt:generate')!(eventFor(sender), {});
+    expectCanonicalPipelineReject(result);
+    expect(service.beginAttempt).not.toHaveBeenCalled();
+    expect(assetLifecycle.invalidateAttempt).not.toHaveBeenCalled();
+  });
+  it('contains asynchronously rejected lifecycle lookup failures before beginning downstream work', async () => {
+    const service = createService();
+    const assetLifecycle = createAssetLifecycle();
+    assetLifecycle.getActiveAttempt.mockRejectedValueOnce(
+      new Error('private lifecycle rejection at /private/attempts/secret.html'),
+    );
+    const sender: Sender = { id: 57, once: vi.fn() };
+    registerHtmlExportIpc({
+      windowForWebContents: () => null,
+      pipelineService: service as never,
+      assetLifecycle,
+    });
+
+    const result = await ipc.handler('html:attempt:generate')!(eventFor(sender), {});
+    expectCanonicalPipelineReject(result);
+    expect(service.beginAttempt).not.toHaveBeenCalled();
+    expect(assetLifecycle.invalidateAttempt).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['begin supersession', 'html:attempt:generate', {}, 'attempt-old'],
+    ['successful cancellation', 'html:attempt:cancel', { attemptId: 'attempt-1' }, 'attempt-1'],
+  ] as const)('contains lifecycle invalidation failures after %s', async (
+    _operation,
+    channel,
+    input,
+    expectedAttemptId,
+  ) => {
+    const service = createService();
+    const assetLifecycle = createAssetLifecycle();
+    assetLifecycle.invalidateAttempt.mockImplementationOnce(() => {
+      throw new Error('private lifecycle invalidation at /private/assets/secret.png');
+    });
+    const sender: Sender = { id: 54, once: vi.fn() };
+    registerHtmlExportIpc({
+      windowForWebContents: () => null,
+      pipelineService: service as never,
+      assetLifecycle,
+    });
+
+    const result = await ipc.handler(channel)!(eventFor(sender), input);
+    expectCanonicalPipelineReject(result);
+    expect(assetLifecycle.invalidateAttempt).toHaveBeenCalledExactlyOnceWith({
+      webContentsId: 54,
+      attemptId: expectedAttemptId,
+    });
+  });
+  it.each([
+    ['begin supersession', 'html:attempt:generate', {}, 'attempt-old'],
+    ['successful cancellation', 'html:attempt:cancel', { attemptId: 'attempt-1' }, 'attempt-1'],
+  ] as const)('contains asynchronously rejected lifecycle invalidation after %s', async (
+    _operation,
+    channel,
+    input,
+    expectedAttemptId,
+  ) => {
+    const service = createService();
+    const assetLifecycle = createAssetLifecycle();
+    assetLifecycle.invalidateAttempt.mockRejectedValueOnce(
+      new Error('private lifecycle rejection at /private/assets/secret.png'),
+    );
+    const sender: Sender = { id: 58, once: vi.fn() };
+    registerHtmlExportIpc({
+      windowForWebContents: () => null,
+      pipelineService: service as never,
+      assetLifecycle,
+    });
+
+    const result = await ipc.handler(channel)!(eventFor(sender), input);
+    expectCanonicalPipelineReject(result);
+    expect(assetLifecycle.invalidateAttempt).toHaveBeenCalledExactlyOnceWith({
+      webContentsId: 58,
+      attemptId: expectedAttemptId,
+    });
+  });
+
+  it('cleans asset lifecycle only after successful superseding begins and cancels', async () => {
+    const service = createService();
+    const assetLifecycle = createAssetLifecycle();
+    const sender: Sender = { id: 47, once: vi.fn() };
+    registerHtmlExportIpc({
+      windowForWebContents: () => null,
+      pipelineService: service as never,
+      assetLifecycle,
+    });
+
+    await expect(ipc.handler('html:attempt:generate')!(eventFor(sender), {})).resolves.toEqual({
+      ok: true,
+      value: { attemptId: 'attempt-1' },
+    });
+    expect(assetLifecycle.getActiveAttempt).toHaveBeenCalledWith(47);
+    expect(assetLifecycle.invalidateAttempt).toHaveBeenCalledWith({ webContentsId: 47, attemptId: 'attempt-old' });
+
+    await expect(ipc.handler('html:attempt:cancel')!(eventFor(sender), { attemptId: 'attempt-1' })).resolves.toEqual({
+      ok: true,
+      value: {},
+    });
+    expect(assetLifecycle.invalidateAttempt).toHaveBeenLastCalledWith({ webContentsId: 47, attemptId: 'attempt-1' });
+  });
+  it('keeps prior asset bytes when a replacement attempt fails to start', async () => {
+    const service = createService();
+    service.beginAttempt.mockReturnValueOnce({
+      ok: false,
+      error: { kind: 'pipeline-reject', detail: 'begin failed' },
+    });
+    const assetLifecycle = createAssetLifecycle();
+    const sender: Sender = { id: 49, once: vi.fn() };
+    registerHtmlExportIpc({
+      windowForWebContents: () => null,
+      pipelineService: service as never,
+      assetLifecycle,
+    });
+
+    const result = await ipc.handler('html:attempt:generate')!(eventFor(sender), {});
+    expectCanonicalPipelineError(result, 'pipeline-reject', 'begin failed');
+    expect(assetLifecycle.getActiveAttempt).toHaveBeenCalledWith(49);
+    expect(assetLifecycle.invalidateAttempt).not.toHaveBeenCalled();
+  });
+  it.each([
+    'wrong-sender',
+    'stale-artifact',
+    'attempt-superseded',
+  ] as const)('keeps asset lifecycle intact when cancellation fails with %s', async (kind) => {
+    const service = createService();
+    service.invalidateAttempt.mockReturnValueOnce({
+      ok: false,
+      error: { kind, detail: `HTML export pipeline error: ${kind}` },
+    });
+    const assetLifecycle = createAssetLifecycle();
+    const sender: Sender = { id: 50, once: vi.fn() };
+    registerHtmlExportIpc({
+      windowForWebContents: () => null,
+      pipelineService: service as never,
+      assetLifecycle,
+    });
+
+    await expect(ipc.handler('html:attempt:cancel')!(eventFor(sender), { attemptId: 'attempt-1' })).resolves.toStrictEqual({
+      ok: false,
+      error: { kind, detail: `HTML export pipeline error: ${kind}` },
+    });
+    expect(service.invalidateAttempt).toHaveBeenCalledWith(50, 'attempt-1');
+    expect(assetLifecycle.invalidateAttempt).not.toHaveBeenCalled();
+  });
+
+  it('invalidates pipeline and asset state once when its webContents is destroyed', async () => {
+    const service = createService();
+    const assetLifecycle = createAssetLifecycle();
     const sender: Sender = { id: 43, once: vi.fn() };
-    registerHtmlExportIpc({ windowForWebContents: () => null, pipelineService: service as never });
+    registerHtmlExportIpc({
+      windowForWebContents: () => null,
+      pipelineService: service as never,
+      assetLifecycle,
+    });
 
     await ipc.handler('html:attempt:generate')!(eventFor(sender), {});
     await ipc.handler('html:attempt:generate')!(eventFor(sender), {});
@@ -217,12 +501,165 @@ describe('HTML export pipeline IPC', () => {
     destroyed();
     expect(service.invalidateSender).toHaveBeenCalledTimes(1);
     expect(service.invalidateSender).toHaveBeenCalledWith(43);
+    expect(assetLifecycle.releaseWebContents).toHaveBeenCalledTimes(1);
+    expect(assetLifecycle.releaseWebContents).toHaveBeenCalledWith(43);
+  });
+  it('fences in-flight work and stale cleanup when a webContents id is reused', async () => {
+    const service = createService();
+    const assetLifecycle = createNoopAssetLifecycle();
+    const oldSender: Sender = { id: 43, once: vi.fn() };
+    const newSender: Sender = { id: 43, once: vi.fn() };
+    let finishOldAttempt!: (result: { ok: true; value: { attemptId: string } }) => void;
+    service.beginAttempt.mockImplementationOnce(
+      () => new Promise((resolve) => {
+        finishOldAttempt = resolve;
+      }),
+    );
+    registerHtmlExportIpc({
+      windowForWebContents: () => null,
+      pipelineService: service as never,
+      assetLifecycle,
+    });
+
+    const oldRun = ipc.handler('html:attempt:generate')!(eventFor(oldSender), {});
+    await vi.waitFor(() => expect(service.beginAttempt).toHaveBeenCalledTimes(1));
+
+    await expect(ipc.handler('html:attempt:generate')!(eventFor(newSender), {})).resolves.toEqual({
+      ok: true,
+      value: { attemptId: 'attempt-1' },
+    });
+    finishOldAttempt({ ok: true, value: { attemptId: 'attempt-old-incarnation' } });
+    expectCanonicalPipelineReject(await oldRun);
+
+    expect(service.invalidateSender).toHaveBeenCalledExactlyOnceWith(43);
+    expect(assetLifecycle.releaseWebContents).toHaveBeenCalledExactlyOnceWith(43);
+    expect(service.invalidateAttempt).toHaveBeenCalledWith(43, 'attempt-old-incarnation');
+    expect(assetLifecycle.invalidateAttempt).toHaveBeenCalledWith({
+      webContentsId: 43,
+      attemptId: 'attempt-old-incarnation',
+    });
+
+    const oldDestroyed = oldSender.once.mock.calls[0][1] as () => void;
+    const newDestroyed = newSender.once.mock.calls[0][1] as () => void;
+    oldDestroyed();
+    expect(service.invalidateSender).toHaveBeenCalledTimes(1);
+    expect(assetLifecycle.releaseWebContents).toHaveBeenCalledTimes(1);
+
+    newDestroyed();
+    expect(service.invalidateSender).toHaveBeenCalledTimes(2);
+    expect(assetLifecycle.releaseWebContents).toHaveBeenCalledTimes(2);
+  });
+  it('waits for destroyed-sender cleanup before reusing the same webContents id', async () => {
+    const service = createService();
+    const assetLifecycle = createNoopAssetLifecycle();
+    const oldSender: Sender = { id: 67, once: vi.fn() };
+    const newSender: Sender = { id: 67, once: vi.fn() };
+    let finishCleanup!: () => void;
+    service.invalidateSender.mockImplementationOnce(
+      () => new Promise<void>((resolve) => {
+        finishCleanup = resolve;
+      }),
+    );
+    registerHtmlExportIpc({
+      windowForWebContents: () => null,
+      pipelineService: service as never,
+      assetLifecycle,
+    });
+
+    await ipc.handler('html:attempt:generate')!(eventFor(oldSender), {});
+    const oldDestroyed = oldSender.once.mock.calls[0][1] as () => void;
+    oldDestroyed();
+
+    const replacementRun = ipc.handler('html:attempt:generate')!(eventFor(newSender), {});
+    await Promise.resolve();
+    expect(service.beginAttempt).toHaveBeenCalledTimes(1);
+
+    finishCleanup();
+    await expect(replacementRun).resolves.toEqual({
+      ok: true,
+      value: { attemptId: 'attempt-1' },
+    });
+    expect(service.beginAttempt).toHaveBeenCalledTimes(2);
+  });
+  it('retains a failed cleanup tombstone and rejects same-id rebinding', async () => {
+    const service = createService();
+    const assetLifecycle = createNoopAssetLifecycle();
+    const oldSender: Sender = { id: 69, once: vi.fn() };
+    const newSender: Sender = { id: 69, once: vi.fn() };
+    registerHtmlExportIpc({
+      windowForWebContents: () => null,
+      pipelineService: service as never,
+      assetLifecycle,
+    });
+
+    await ipc.handler('html:attempt:generate')!(eventFor(oldSender), {});
+    service.invalidateSender.mockImplementationOnce(() => {
+      throw new Error('cleanup failed');
+    });
+    const oldDestroyed = oldSender.once.mock.calls[0][1] as () => void;
+    oldDestroyed();
+
+    expectCanonicalPipelineReject(
+      await ipc.handler('html:attempt:generate')!(eventFor(newSender), {}),
+    );
+    expect(service.beginAttempt).toHaveBeenCalledTimes(1);
+    expect(assetLifecycle.releaseWebContents).toHaveBeenCalledExactlyOnceWith(69);
+  });
+  it('releases assets even when destroyed pipeline cleanup throws private-path errors', () => {
+    const service = createService();
+    service.invalidateSender.mockImplementationOnce(() => {
+      throw new Error('private sender cleanup at /private/pipeline/secret.html');
+    });
+    const assetLifecycle = createAssetLifecycle();
+    const sender: Sender = { id: 55, once: vi.fn() };
+    registerHtmlExportIpc({
+      windowForWebContents: () => null,
+      pipelineService: service as never,
+      assetLifecycle,
+    });
+
+    ipc.handler('html:attempt:generate')!(eventFor(sender), {});
+    const destroyed = sender.once.mock.calls[0][1] as () => void;
+    expect(destroyed).not.toThrow();
+    expect(service.invalidateSender).toHaveBeenCalledExactlyOnceWith(55);
+    expect(assetLifecycle.releaseWebContents).toHaveBeenCalledExactlyOnceWith(55);
+  });
+  it('keeps destroyed sender cleanup nonthrowing when asset release throws', () => {
+    const service = createService();
+    const assetLifecycle = createAssetLifecycle();
+    assetLifecycle.releaseWebContents.mockImplementationOnce(() => {
+      throw new Error('private asset release at /private/assets/secret.png');
+    });
+    const sender: Sender = { id: 59, once: vi.fn() };
+    registerHtmlExportIpc({
+      windowForWebContents: () => null,
+      pipelineService: service as never,
+      assetLifecycle,
+    });
+
+    ipc.handler('html:attempt:generate')!(eventFor(sender), {});
+    const destroyed = sender.once.mock.calls[0][1] as () => void;
+    expect(destroyed).not.toThrow();
+    expect(service.invalidateSender).toHaveBeenCalledExactlyOnceWith(59);
+    expect(assetLifecycle.releaseWebContents).toHaveBeenCalledExactlyOnceWith(59);
   });
 
-  it('keeps the legacy HTML export handlers registered', () => {
+  it('does not mutate asset lifecycle for malformed requests and keeps legacy HTML export handlers registered', async () => {
     const service = createService();
-    registerHtmlExportIpc({ windowForWebContents: () => null, pipelineService: service as never });
+    const assetLifecycle = createAssetLifecycle();
+    const sender: Sender = { id: 48, once: vi.fn() };
+    registerHtmlExportIpc({
+      windowForWebContents: () => null,
+      pipelineService: service as never,
+      assetLifecycle,
+    });
 
+    await ipc.handler('html:attempt:generate')!(eventFor(sender), { bytes: 'renderer bytes' });
+    await ipc.handler('html:attempt:cancel')!(eventFor(sender), { attemptId: 'invalid/path' });
+
+    expect(assetLifecycle.getActiveAttempt).not.toHaveBeenCalled();
+    expect(assetLifecycle.invalidateAttempt).not.toHaveBeenCalled();
+    expect(assetLifecycle.releaseWebContents).not.toHaveBeenCalled();
     expect(ipc.handler('design:fetch')).toBeDefined();
     expect(ipc.handler('design:list')).toBeDefined();
     expect(ipc.handler('html:save')).toBeDefined();
@@ -232,7 +669,11 @@ describe('HTML export pipeline IPC', () => {
   it('keeps legacy save and open behavior fail-closed', async () => {
     const service = createService();
     const sender: Sender = { id: 45, once: vi.fn() };
-    registerHtmlExportIpc({ windowForWebContents: () => null, pipelineService: service as never });
+    registerHtmlExportIpc({
+      windowForWebContents: () => null,
+      pipelineService: service as never,
+      assetLifecycle: createNoopAssetLifecycle(),
+    });
 
     const save = await ipc.handler('html:save')!(eventFor(sender), {
       html: '<!doctype html><p>legacy</p>',
