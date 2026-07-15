@@ -339,4 +339,24 @@ describe('global selector rewrite', () => {
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.css).toBe('[data-he-content].dark>.card{color:red}');
   });
+
+  it('canonicalizes CRLF-terminated hex escapes before the reserved check', () => {
+    // css-tree/browsers consume `\\r\\n` as one escape terminator, so both decode to
+    // `.data-he-content` / class value `data-he-content`.
+    expect(failureCode(sanitizeStylesheet('.\\64\r\nata-he-content{color:red}'))).toBe(
+      CSS_VIOLATION_CODES.reservedSelector,
+    );
+    expect(failureCode(sanitizeStylesheet('[class=\\64\r\nata-he-content]{color:red}'))).toBe(
+      CSS_VIOLATION_CODES.reservedSelector,
+    );
+  });
+
+  it('rejects global roots hidden in :nth-child(... of S) selector fields', () => {
+    expect(failureCode(sanitizeStylesheet(':nth-child(1 of body){color:red}'))).toBe(
+      CSS_VIOLATION_CODES.disallowedSelector,
+    );
+    expect(failureCode(sanitizeStylesheet('body:nth-child(1 of :root){color:red}'))).toBe(
+      CSS_VIOLATION_CODES.disallowedSelector,
+    );
+  });
 });

@@ -1,4 +1,4 @@
-import { generate, lexer, List, parse, walk } from 'css-tree';
+import { generate, ident, lexer, List, parse, walk } from 'css-tree';
 
 /** Frozen resource limits for model-authored export CSS. */
 export const CSS_MAX_STYLESHEET_BYTES = 128 * 1024;
@@ -186,10 +186,8 @@ function valueNodes(node: any): any[] {
 /** Decode CSS identifier escapes (`\XX ` hex, `\c` literal) so reserved-name and
  *  allowlist comparisons see the canonical value the browser would resolve — an
  *  escaped reserved name (e.g. `\64 ata-he-content`) must not evade the check. */
-function canonicalizeIdent(raw: string): string {
-  const s = String(raw);
-  if (s.indexOf('\\') === -1) return s;
-  return s.replace(/\\([0-9a-fA-F]{1,6})[ \t\n\r\f]?|\\([^0-9a-fA-F])/g, (_m, hex, ch) => {
+function decodeCssEscapes(s: string): string {
+  return s.replace(/\\([0-9a-fA-F]{1,6})(?:\r\n|[ \t\n\r\f])?|\\([^0-9a-fA-F])/g, (_m, hex, ch) => {
     if (hex) {
       const code = parseInt(hex, 16);
       if (code === 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) return '\uFFFD';
@@ -197,6 +195,18 @@ function canonicalizeIdent(raw: string): string {
     }
     return ch;
   });
+}
+
+function canonicalizeIdent(raw: string): string {
+  const s = String(raw);
+  if (s.indexOf('\\') === -1) return s;
+  // Prefer the parser's own escape decoder (handles CRLF terminators, surrogate/
+  // over-range guards, etc.); fall back to a CRLF-aware regex if it ever throws.
+  try {
+    return ident.decode(s);
+  } catch {
+    return decodeCssEscapes(s);
+  }
 }
 
 function hasReservedName(name: string): boolean {
@@ -297,14 +307,17 @@ function scopeSelector(selector: any): string {
   return beginsAtRoot ? text : `${CONTENT_ROOT_SELECTOR} ${text}`;
 }
 
-/** Collect every non-functional global-root atom anywhere in the selector tree. */
+/** Collect every non-functional global-root atom anywhere in the selector tree,
+ *  using the parser's structural walk so selector-bearing fields (e.g. the
+ *  `of S` list on `:nth-child(... of S)`, stored on `Nth.selector`, not `.children`)
+ *  are covered — a root hidden there must not evade the shape check. */
 function collectRootAtoms(node: any, acc: any[]): void {
   if (!node || typeof node !== 'object') return;
-  if (isGlobalRootAtom(node)) { acc.push(node); return; }
-  const kids = node.children;
-  if (kids && typeof kids.forEach === 'function') {
-    kids.forEach((child: any) => collectRootAtoms(child, acc));
-  }
+  walk(node, {
+    enter(current: any) {
+      if (isGlobalRootAtom(current)) acc.push(current);
+    },
+  });
 }
 
 /**
