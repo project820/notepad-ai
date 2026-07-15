@@ -136,6 +136,13 @@ describe('buildDirectHtmlPrompt — 1:1 config mapping + full source', () => {
     expect(prompt).toMatch(/Sure, here is/i);
     expect(prompt).toMatch(/I hope this helps/i);
     expect(prompt).toMatch(/whether bare text or wrapped in an element/i);
+    // Raster images are not supported in the direct export (no asset-ID injection
+    // and the sanitizer rejects non-asset src); the prompt must not advertise them
+    // and must tell the model not to emit them, so image-heavy sources are not
+    // rejected at sanitization. Inline <svg> stays supported (#29 review).
+    expect(prompt).toMatch(/Raster images.*NOT supported/i);
+    expect(prompt).not.toMatch(/inline data: images/i);
+    expect(prompt).not.toMatch(/img\/picture\/source/);
     // The legacy content-model guidance that forbids encoding HTML/CSS must NOT
     // appear in a direct-authoring prompt (AC-M1a contradiction guard).
     expect(prompt).not.toMatch(/never encode CSS, HTML/i);
