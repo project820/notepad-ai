@@ -175,6 +175,9 @@ export class HtmlExportPipelineService {
     const sanitized = sanitizeHtmlExport({
       html,
       parse: () => parsed.value.document,
+      // Fail-closed (#27): a non-HTML answer (model narration) must be rejected here,
+      // never sanitized→finalized→saved as an export.
+      requireStructuralDocument: true,
     });
     if (!sanitized.ok) return reject('HTML sanitizer rejected model output');
     if (!sameCounts(sanitized.counts, parsed.value.counts)) {

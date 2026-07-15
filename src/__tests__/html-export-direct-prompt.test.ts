@@ -103,6 +103,12 @@ describe('HTML_EXPORT_DIRECT_INSTRUCTIONS — forbids JSON / ContentModel', () =
     expect(HTML_EXPORT_DIRECT_INSTRUCTIONS).toMatch(/ContentModel/i);
     expect(HTML_EXPORT_DIRECT_INSTRUCTIONS).not.toMatch(/output ONLY a JSON/i);
   });
+
+  it('forbids work narration / file-writing answers (issue #27)', () => {
+    expect(HTML_EXPORT_DIRECT_INSTRUCTIONS).toMatch(/never work narration/i);
+    expect(HTML_EXPORT_DIRECT_INSTRUCTIONS).toMatch(/never a file path/i);
+    expect(HTML_EXPORT_DIRECT_INSTRUCTIONS).toMatch(/non-HTML answers are rejected/i);
+  });
 });
 
 describe('buildDirectHtmlPrompt — 1:1 config mapping + full source', () => {
@@ -119,6 +125,8 @@ describe('buildDirectHtmlPrompt — 1:1 config mapping + full source', () => {
     const { prompt, coverage } = buildDirectHtmlPrompt(config, source);
 
     expect(prompt).toContain(HTML_EXPORT_DIRECT_INSTRUCTIONS);
+    expect(prompt).toMatch(/Do NOT use tools, write files, or describe steps/i);
+    expect(prompt).toMatch(/NEVER narrate progress, write files, or return a path/i);
     expect(prompt).toContain('DIRECT AUTHORING DESIGN GUIDE');
     // The legacy content-model guidance that forbids encoding HTML/CSS must NOT
     // appear in a direct-authoring prompt (AC-M1a contradiction guard).

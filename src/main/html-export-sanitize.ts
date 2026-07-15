@@ -23,6 +23,17 @@ export const HTML_SANITIZER_LIMITS = {
   maxAttributes: 8_192,
 } as const;
 
+/**
+ * Minimum element-node count the sanitized body must contain to be accepted as a
+ * structural HTML document. A prose/narration response (e.g. a model that answers
+ * with work commentary instead of authoring HTML) parses to a body of text nodes
+ * with zero elements; without this floor it would sanitize, finalize, and save as
+ * a "successful" export (fail-open). Floor is 1 so a single intentional block
+ * element is still accepted; pure text/narration (0 elements) is rejected.
+ * Fail-closed: below the floor maps to a retryable pipeline-reject. See issue #27.
+ */
+export const HTML_MIN_BODY_ELEMENT_NODES = 1;
+
 export const HTML_VIOLATION_CODES = {
   parse: 'html_parse',
   activeTag: 'html_active_tag',
@@ -35,6 +46,7 @@ export const HTML_VIOLATION_CODES = {
   cap: 'html_cap',
   cssRejected: 'css_rejected',
   internal: 'html_internal',
+  noStructure: 'html_no_structure',
 } as const;
 
 type HtmlSanitizerViolationCode = (typeof HTML_VIOLATION_CODES)[keyof typeof HTML_VIOLATION_CODES] | SvgViolationCode;
@@ -60,6 +72,14 @@ export type HtmlExportSanitizeOptions = {
   html: string;
   parse?: HtmlExportParse;
   isAllowedAssetId?: (src: string) => boolean;
+  /**
+   * When true, require the sanitized body to be a structural HTML document (at
+   * least `HTML_MIN_BODY_ELEMENT_NODES` element nodes) — the pipeline enables this
+   * so a non-HTML answer (model narration/prose) is rejected fail-closed, never
+   * finalized (issue #27). The raw sanitizer (unit tests, ad-hoc fragments) leaves
+   * it off and stays a pure filter.
+   */
+  requireStructuralDocument?: boolean;
 };
 
 type Node = DefaultTreeAdapterTypes.Node;
@@ -119,6 +139,16 @@ function attrs(node: Node): Attribute[] {
 function tagName(node: Node): string | null {
   const candidate = (node as { tagName?: unknown }).tagName;
   return typeof candidate === 'string' ? candidate.toLowerCase() : null;
+}
+
+/** Count element nodes strictly within `root`'s subtree (excludes `root` itself). */
+function countElementDescendants(root: Node): number {
+  let count = 0;
+  for (const child of childNodes(root)) {
+    if (tagName(child) !== null) count++;
+    count += countElementDescendants(child);
+  }
+  return count;
 }
 
 function textValue(node: Node): string {
@@ -525,6 +555,23 @@ export function sanitizeHtmlExport(options: HtmlExportSanitizeOptions): HtmlExpo
     }
     outputBody.childNodes = outputNodes as DefaultTreeAdapterTypes.ChildNode[];
     for (const child of outputBody.childNodes) child.parentNode = outputBody;
+
+    // Fail-closed structural gate (issue #27): a response that is not a structural
+    // HTML document — e.g. model narration/prose — parses to a body of text nodes
+    // with (near-)zero elements. Reject it here so it can never sanitize→finalize→
+    // save as an export; the pipeline maps this to a retryable pipeline-reject.
+    const bodyElementCount = countElementDescendants(outputBody);
+    if (options.requireStructuralDocument && bodyElementCount < HTML_MIN_BODY_ELEMENT_NODES) {
+      return {
+        ok: false,
+        violations: [
+          {
+            code: HTML_VIOLATION_CODES.noStructure,
+            detail: `sanitized body has ${bodyElementCount} element node(s); a structural HTML document is required (>= ${HTML_MIN_BODY_ELEMENT_NODES})`,
+          },
+        ],
+      };
+    }
 
     return {
       ok: true,

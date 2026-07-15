@@ -12,12 +12,12 @@ import {
   type HtmlExportParse,
 } from '../main/html-export-sanitize';
 
-function sanitize(html: string) {
-  return sanitizeHtmlExport({ html });
+function sanitize(html: string, opts: { requireStructuralDocument?: boolean } = {}) {
+  return sanitizeHtmlExport({ html, ...opts });
 }
 
-function failureCode(html: string): string {
-  const result = sanitize(html);
+function failureCode(html: string, opts: { requireStructuralDocument?: boolean } = {}): string {
+  const result = sanitize(html, opts);
   expect(result.ok).toBe(false);
   return result.ok ? '' : result.violations[0].code;
 }
@@ -206,7 +206,8 @@ describe('sanitizeHtmlExport', () => {
   it('pre-registers keyframes across style blocks before sanitizing forward animation references', () => {
     const result = sanitize(
       '<style>.animated{animation:spin 100ms}</style>' +
-      '<style>@keyframes spin{from{opacity:0}to{opacity:1}}</style>',
+      '<style>@keyframes spin{from{opacity:0}to{opacity:1}}</style>' +
+      '<p class="animated">x</p>',
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -280,14 +281,14 @@ describe('sanitizeHtmlExport', () => {
   });
 
   it('enforces CSS rule and keyframe caps across separate style blocks', () => {
-    const withinRuleCap = Array.from({ length: CSS_MAX_RULES }, (_, index) => `<style>.r${index}{color:red}</style>`).join('');
+    const withinRuleCap = Array.from({ length: CSS_MAX_RULES }, (_, index) => `<style>.r${index}{color:red}</style>`).join('') + '<p>x</p>';
     expect(sanitize(withinRuleCap).ok).toBe(true);
     const pastRuleCap = `${withinRuleCap}<style>.overflow{color:red}</style>`;
     expect(failureCode(pastRuleCap)).toBe('css_rejected');
 
     const keyframe = (index: number) => `<style>@keyframes k${index}{from{opacity:0}to{opacity:1}}</style>`;
-    expect(sanitize(Array.from({ length: CSS_MAX_KEYFRAMES }, (_, index) => keyframe(index)).join('')).ok).toBe(true);
-    expect(failureCode(Array.from({ length: CSS_MAX_KEYFRAMES + 1 }, (_, index) => keyframe(index)).join(''))).toBe('css_rejected');
+    expect(sanitize(Array.from({ length: CSS_MAX_KEYFRAMES }, (_, index) => keyframe(index)).join('') + '<p>x</p>').ok).toBe(true);
+    expect(failureCode(Array.from({ length: CSS_MAX_KEYFRAMES + 1 }, (_, index) => keyframe(index)).join('') + '<p>x</p>')).toBe('css_rejected');
   });
 
   it('is deterministic for malformed HTML', () => {
@@ -297,7 +298,28 @@ describe('sanitizeHtmlExport', () => {
   });
 
   it('accepts the exact node cap and rejects cap plus one', () => {
-    expect(sanitizeHtmlExport({ html: '', parse: injectedParse(documentWithTextNodes(HTML_SANITIZER_LIMITS.maxNodes - 1)) }).ok).toBe(true);
+    // Pure text-node trees have zero body elements; the structural gate (#27)
+    // would reject them first. Use one element + (maxNodes-2) text children so
+    // countParsedTree hits the exact cap with a structural body.
+    const exactCapDoc: DefaultTreeAdapterTypes.Document = {
+      nodeName: '#document',
+      mode: 'no-quirks',
+      childNodes: [
+        {
+          nodeName: 'p',
+          tagName: 'p',
+          namespaceURI: 'http://www.w3.org/1999/xhtml',
+          attrs: [],
+          childNodes: Array.from({ length: HTML_SANITIZER_LIMITS.maxNodes - 2 }, () => ({
+            nodeName: '#text',
+            value: 'x',
+            parentNode: null,
+          })),
+          parentNode: null,
+        },
+      ],
+    } as DefaultTreeAdapterTypes.Document;
+    expect(sanitizeHtmlExport({ html: '', parse: injectedParse(exactCapDoc) }).ok).toBe(true);
     expect(failureCodeWithParse(documentWithTextNodes(HTML_SANITIZER_LIMITS.maxNodes))).toBe('html_cap');
   });
 
@@ -404,5 +426,43 @@ describe('sanitizeHtmlExport', () => {
     document.childNodes[0].namespaceURI = 'http://www.w3.org/2000/svg';
     document.childNodes[0].attrs = [{ name: 'href', value: '#p', prefix: 'xlink', namespace: 'http://www.w3.org/1999/xlink' }];
     expect(failureCodeWithParse(document)).toBe('html_reserved_namespace');
+  });
+});
+describe('sanitizeHtmlExport — fail-closed structural gate (issue #27)', () => {
+  const structural = { requireStructuralDocument: true } as const;
+
+  it('rejects a model narration / prose response as non-structural (never finalizes)', () => {
+    // The captured Grok failure: work commentary + a markdown-ish table + a temp path,
+    // no HTML. parse5 wraps it as a body of text nodes with zero elements.
+    const narration = [
+      'Creating a landscape slide-deck for your document.',
+      '',
+      '| Section | Status |',
+      '| --- | --- |',
+      '| Intro | done |',
+      '',
+      'Saved the full 52KB document to /var/folders/tmp/xyz/export.html',
+    ].join('\n');
+    const result = sanitize(narration, structural);
+    expect(result.ok).toBe(false);
+    expect(failureCode(narration, structural)).toBe(HTML_VIOLATION_CODES.noStructure);
+    // Without the pipeline flag the sanitizer remains a pure filter.
+    expect(sanitize(narration).ok).toBe(true);
+  });
+
+  it('rejects a document whose body falls below the element-node floor', () => {
+    // Empty body / pure whitespace — zero elements after sanitize.
+    expect(failureCode('<!doctype html><html><body>   \n  </body></html>', structural)).toBe(
+      HTML_VIOLATION_CODES.noStructure,
+    );
+    // A single structural element is the floor and is accepted.
+    expect(sanitize('<!doctype html><html><body><p>one block</p></body></html>', structural).ok).toBe(true);
+  });
+
+  it('accepts a structural HTML document at or above the element-node floor', () => {
+    const doc = '<!doctype html><html><body><section><h1>Title</h1><p>Body copy.</p></section></body></html>';
+    const result = sanitize(doc, structural);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.bodyHtml).toContain('<h1>Title</h1>');
   });
 });

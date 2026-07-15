@@ -25,7 +25,7 @@ const USER_REQUEST_CHARS = 4000;
  * model (contrast with `HTML_EXPORT_CONTENT_INSTRUCTIONS`).
  */
 export const HTML_EXPORT_DIRECT_INSTRUCTIONS =
-  'You are a direct HTML/CSS author for a self-contained HTML export. You author a COMPLETE, self-contained HTML document with inline CSS — never a JSON content model, never Markdown, never code fences, never a ContentModel. A main-process pipeline sanitizes and validates your output before it is saved.';
+  'You are a direct HTML/CSS author for a self-contained HTML export. You author a COMPLETE, self-contained HTML document with inline CSS — never a JSON content model, never Markdown, never code fences, never a ContentModel, never work narration, never a file path, and never a claim that you wrote a file. A main-process pipeline sanitizes and validates your output before it is saved; non-HTML answers are rejected.';
 
 /** Frozen 30k single-pass source boundary (§5.14 / AC-M1a). */
 export const SINGLE_PASS_SOURCE_LIMIT = 30_000;
@@ -207,8 +207,9 @@ export function buildDirectHtmlPrompt(
     '',
     '=== EXPORT REQUEST ===',
     'Author a COMPLETE, self-contained HTML document with inline CSS that re-expresses the SOURCE DOCUMENT below.',
-    'Output ONLY the HTML document. Do NOT output a JSON content model, ContentModel, Markdown, prose commentary, or code fences.',
-    'A main-process pipeline will sanitize and validate your HTML before it is saved.',
+    'Output ONLY the HTML document. Do NOT output a JSON content model, ContentModel, Markdown, prose commentary, tool narration, temp/file paths, or code fences.',
+    'Do NOT use tools, write files, or describe steps. Your sole response must be the HTML document itself.',
+    'A main-process pipeline will sanitize and validate your HTML before it is saved; narration is rejected as failure.',
     '',
     ...configDirectiveLines(config),
     '',
@@ -218,6 +219,7 @@ export function buildDirectHtmlPrompt(
     '- Output a single complete HTML document (doctype, html, head with inline <style>, body).',
     '- NEVER return a JSON content model or ContentModel — that path is obsolete for this request.',
     '- NEVER wrap the document in Markdown code fences.',
+    '- NEVER narrate progress, write files, or return a path instead of the document.',
     '- Honor orientation, mode, density, and purpose exactly as directed above.',
     '- Treat design.md as visual authority when present; realize its hierarchy, mood, and signature elements in HTML/CSS.',
     '- Preserve critical facts, numbers, names, quotes, and code from the source.',
