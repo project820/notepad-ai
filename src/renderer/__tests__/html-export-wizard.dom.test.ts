@@ -361,6 +361,27 @@ describe('mountHtmlExportWizard — viewport + abandon invalidation', () => {
     expect(deps.cancelHtmlGeneration).toHaveBeenCalledTimes(1);
   });
 
+  it('regenerate that now exceeds the single-pass limit invalidates the prior finalized attempt before the too-long error', async () => {
+    const { host, deps, handle, mdRef } = setup({ maxSourceCharsForModel: () => 50 });
+    click(host, 'orient-vertical');
+    click(host, 'layout-scroll');
+    click(host, 'design-default');
+    setField(host, 'free-requirement', '');
+    click(host, 'generate-submit');
+    await flush();
+    expect(handle.getState().step).toBe('generated');
+
+    // Grow the source past the model budget, then Regenerate: the preflight returns
+    // too-long WITHOUT starting a new generation (which would otherwise supersede
+    // it), so it must invalidate the prior finalized attempt rather than leak it.
+    (deps.cancelHtmlGeneration as ReturnType<typeof vi.fn>).mockClear();
+    mdRef.value = `# Title\n\n${'x'.repeat(200)}`;
+    click(host, 'regenerate');
+    expect(handle.getState().step).toBe('error');
+    expect(handle.getState().error).toBe('he.error.tooLongSinglePass');
+    expect(deps.cancelHtmlGeneration).toHaveBeenCalledTimes(1);
+  });
+
   it('BACK from generated also invokes cancelHtmlGeneration (abandons the finalized attempt)', async () => {
     const { host, deps, handle } = setup();
     click(host, 'orient-vertical');

@@ -371,6 +371,12 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
     dispatch({ type: 'SUBMIT_REQUIREMENT', freeRequirement, summaryChartMode, tokenWarning: false });
     const built = buildDirectPrompt();
     if (!built.withinSinglePass) {
+      // Regenerate runs from the generated step, where a finalized attempt is
+      // held. SUBMIT_REQUIREMENT already cleared it from UI state, but this
+      // preflight returns WITHOUT starting a new generation (which would
+      // otherwise supersede it), so invalidate the prior finalized attempt now
+      // instead of leaking it in main memory until window cleanup.
+      deps.cancelHtmlGeneration?.();
       pendingPrompt = '';
       dispatch({ type: 'AI_ERROR', error: t('he.error.tooLongSinglePass') });
       return;
