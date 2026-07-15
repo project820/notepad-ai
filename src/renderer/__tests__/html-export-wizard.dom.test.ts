@@ -381,6 +381,18 @@ describe('mountHtmlExportWizard — purpose/density/etc are demoted to an option
     expect(lastRequest(deps).prompt).toContain('FULL');
   });
 
+  it('preserves a non-core purpose preset (blog/portfolio/proposal) as a prompt hint', async () => {
+    const { host, deps } = setup();
+    toSummary(host);
+    const purposeSel = host.querySelector<HTMLSelectElement>('[data-he-field="purpose"]')!;
+    purposeSel.value = 'blog';
+    purposeSel.dispatchEvent(new Event('change', { bubbles: true }));
+    click(host, 'generate-submit');
+    await flush();
+    // Blog collapses to DOCUMENT in the 4-value model but its intent is carried forward.
+    expect(lastRequest(deps).prompt).toContain('a blog post');
+  });
+
   it('drops stale detail directives when the user switches back to Auto', async () => {
     const { host, deps } = setup();
     toSummary(host);

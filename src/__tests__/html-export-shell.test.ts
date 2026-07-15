@@ -148,6 +148,17 @@ describe('bundleSanitizedHtml — canonical shell contract', () => {
     expect(body.indexOf('<h1>Hello shell</h1>')).toBeLessThan(body.indexOf('<script>'));
   });
 
+  it('wraps the sanitized body in the [data-he-content] scope root so sanitized CSS matches', () => {
+    // The real sanitizer emits inner body content with no wrapper; the shell must
+    // add the [data-he-content] content root that every scoped selector targets,
+    // or the export renders unstyled (#29 P1).
+    const { html } = bundleSanitizedHtml(payload({ bodyHtml: '<h1>Styled</h1>' }));
+    expect(html).toMatch(/<body>\s*<div data-he-content>\s*<h1>Styled<\/h1>/);
+    const bodyInner = html.match(/<body>([\s\S]*?)<\/body>/)?.[1] ?? '';
+    // The runtime script stays outside (after) the content root.
+    expect(bodyInner.indexOf('</div>')).toBeLessThan(bodyInner.indexOf('<script>'));
+  });
+
   it('does not introduce http(s) or protocol-relative // origins via the shell wrapper', () => {
     // Payload deliberately free of remote-looking substrings.
     const p = payload({

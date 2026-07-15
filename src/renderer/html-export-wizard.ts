@@ -271,6 +271,17 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
       default: return undefined;
     }
   }
+  /** Non-core wizard purposes collapse to DOCUMENT in the 4-value direct model;
+   *  carry their intent forward as a purpose hint so the preset is not silently
+   *  lost (blog/portfolio/proposal). #29 review (P2). */
+  function purposePresetHint(p?: HtmlPurpose): string | undefined {
+    switch (p) {
+      case 'blog': return 'a blog post / editorial article';
+      case 'portfolio': return 'a portfolio / showcase page';
+      case 'proposal': return 'a proposal / pitch document';
+      default: return undefined;
+    }
+  }
 
   /** Build the direct HTML-authoring prompt from the current selections + document. */
   function buildDirectPrompt(): { prompt: string; withinSinglePass: boolean } {
@@ -290,7 +301,8 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
       summaryChartMode: state.summaryChartMode,
       readableWidth: detail ? state.readableWidth : undefined,
       interactive: detail ? state.interactive : undefined,
-      customPurpose: state.purpose === 'custom' ? state.customPurpose : undefined,
+      customPurpose:
+        state.purpose === 'custom' ? state.customPurpose : purposePresetHint(state.purpose),
     });
     const { prompt, coverage } = buildDirectHtmlPrompt(config, deps.getMarkdown());
     return { prompt, withinSinglePass: coverage.withinSinglePass };

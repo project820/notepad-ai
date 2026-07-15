@@ -90,7 +90,11 @@ export function bundleSanitizedHtml(
     '<!doctype html>\n' +
     '<html>\n' +
     `<head>\n${head}\n</head>\n` +
-    `<body>\n${payload.bodyHtml}\n<script>${HTML_EXPORT_RUNTIME_JS}</script>\n</body>\n` +
+    // The sanitizer scopes every model-authored selector and inline style under
+    // `[data-he-content]` (a reserved attribute model output cannot set), so the
+    // shell MUST wrap the body in that content root or none of the sanitized CSS
+    // matches and the export renders unstyled. See #29 review (P1).
+    `<body>\n<div data-he-content>\n${payload.bodyHtml}\n</div>\n<script>${HTML_EXPORT_RUNTIME_JS}</script>\n</body>\n` +
     '</html>\n';
 
   return { html, manifest };
