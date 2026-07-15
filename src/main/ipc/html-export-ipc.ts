@@ -25,6 +25,7 @@ import {
 import { atomicWrite, nodeAtomicBackend, type AtomicWriteBackend } from '../atomic-write';
 import type { GenerationAttemptResult } from '../html-export-generation-orchestrator';
 import { isAiProviderId, type AiProviderId } from '../ai/types';
+import { isHtmlExportModelProviderAllowed } from '../ai/html-export-model-allowlist';
 import {
   designListContentsUrl,
   isAllowedDesignFetchUrl,
@@ -224,7 +225,10 @@ function isGenerateRequest(
   if (input.prompt.length === 0 || input.prompt.length > HTML_GENERATE_PROMPT_MAX) return false;
   if (!Object.hasOwn(input, 'model') || !isExactPlainObject(input.model)) return false;
   const model = input.model as Record<string, unknown>;
-  if (!isAiProviderId(model.provider)) return false;
+  // Fail-closed HTML-export provider allowlist (§5.3 / AC-M1c-d): the HTML surface
+  // pins ONE no-fallback transport, so OpenRouter (opaque multi-vendor routing) and
+  // any non-allowlisted provider are rejected here even if the renderer offers them.
+  if (!isAiProviderId(model.provider) || !isHtmlExportModelProviderAllowed(model.provider)) return false;
   if (typeof model.id !== 'string' || model.id.length === 0 || model.id.length > 256) return false;
   if ('instructions' in input && input.instructions !== undefined) {
     if (typeof input.instructions !== 'string' || input.instructions.length > 65_536) return false;

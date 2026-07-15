@@ -1060,7 +1060,7 @@ describe('HTML export pipeline IPC', () => {
       expect(dialogSpy).not.toHaveBeenCalled();
     });
 
-    it('keeps the legacy html:save handler registered alongside the finalized path', async () => {
+    it('registers the finalized save handler (the raw html:save path is removed at cutover)', async () => {
       const service = createService();
       registerHtmlExportIpc({
         windowForWebContents: () => null,
@@ -1068,6 +1068,41 @@ describe('HTML export pipeline IPC', () => {
         assetLifecycle: createNoopAssetLifecycle(),
       });
       expect(ipc.handler('html:save-finalized')).toBeDefined();
+    });
+
+    it('html:generate hard-excludes OpenRouter (and non-allowlisted providers) but forwards an allowed provider', async () => {
+      const service = createService();
+      const generateHtml = vi.fn(async () => ({
+        state: 'final' as const,
+        attemptId: 'attempt-1',
+        finalizedArtifactId: 'finalized-1',
+        resolvedArtifactId: 'resolved-1',
+        sanitizedArtifactId: 'sanitized-1',
+        route: { provider: 'chatgpt', model: 'gpt-5.4-mini', transport: 'api' as const },
+      }));
+      const sender: Sender = { id: 91, once: vi.fn() };
+      registerHtmlExportIpc({
+        windowForWebContents: () => fakeWin,
+        pipelineService: service as never,
+        assetLifecycle: createNoopAssetLifecycle(),
+        generateHtml: generateHtml as never,
+      });
+
+      // OpenRouter is opaque multi-vendor routing → rejected before reaching the generator.
+      const rejected = await ipc.handler('html:generate')!(eventFor(sender), {
+        prompt: 'make it',
+        model: { provider: 'openrouter', id: 'anthropic/claude-sonnet-4.5' },
+      });
+      expect(rejected).toStrictEqual({ state: 'failed', stage: 'begin', kind: 'pipeline-reject' });
+      expect(generateHtml).not.toHaveBeenCalled();
+
+      // An allowlisted provider is forwarded to the main-owned generator.
+      const ok = await ipc.handler('html:generate')!(eventFor(sender), {
+        prompt: 'make it',
+        model: { provider: 'chatgpt', id: 'gpt-5.4-mini' },
+      });
+      expect(generateHtml).toHaveBeenCalledTimes(1);
+      expect(ok).toMatchObject({ state: 'final', finalizedArtifactId: 'finalized-1' });
     });
   });
 });

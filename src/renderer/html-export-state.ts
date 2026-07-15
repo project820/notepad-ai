@@ -217,6 +217,9 @@ export function htmlExportReducer(state: HtmlExportState, event: HtmlExportEvent
         step: 'generating',
         freeRequirement: event.freeRequirement,
         pendingRequirement: undefined,
+        // A new generation invalidates any prior finalized artifact so a
+        // non-generated step can never retain a saveable descriptor.
+        finalized: undefined,
       };
     }
 
@@ -235,7 +238,7 @@ export function htmlExportReducer(state: HtmlExportState, event: HtmlExportEvent
 
     case 'AI_ERROR':
       if (state.step !== 'generating') return state;
-      return { ...state, step: 'error', error: event.error };
+      return { ...state, step: 'error', error: event.error, finalized: undefined };
 
     case 'BACK':
       return back(state);

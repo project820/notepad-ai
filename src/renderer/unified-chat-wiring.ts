@@ -6,6 +6,7 @@ import { styleDirective, detectLanguage, type Naturalness } from './humanize-eng
 import { t } from './i18n';
 import { modelContextWindowTokens } from '../main/ai/output-budget';
 import { isAiProviderId, type AiProviderId } from '../main/ai/types';
+import { filterHtmlExportModels, isHtmlExportModelProviderAllowed } from '../main/ai/html-export-model-allowlist';
 import { openSettingsModal, triggerCliOnboarding } from './settings-modal';
 import { savePrefs, type Prefs } from './prefs';
 import { buildUnifiedChatInstructions } from './unified-chat-prompt-handler';
@@ -258,7 +259,7 @@ export function initUnifiedChatWiring(ctx: AppContext, deps: UnifiedChatWiringDe
       maxSourceCharsForModel: (m) => htmlExportSourceCharBudget(m ?? currentModelArg()),
       listHtmlModels: async () => {
         const ms = await deps.loadModelsCached(true);
-        return ms.map((m) => {
+        const mapped = ms.map((m) => {
           const provider = m.provider ?? 'chatgpt';
           return {
             provider,
@@ -267,8 +268,19 @@ export function initUnifiedChatWiring(ctx: AppContext, deps: UnifiedChatWiringDe
             contextWindow: isAiProviderId(provider) ? modelContextWindowTokens(provider, m.id, m.contextWindow) : undefined,
           };
         });
+        // §5.3 / AC-M1c-d: the HTML surface pins ONE no-fallback transport, so
+        // OpenRouter (and any non-allowlisted provider) is hard-excluded from the
+        // picker even if the general chat policy would reinject a current selection.
+        return filterHtmlExportModels(mapped);
       },
-      getDefaultModel: () => deps.prefs.htmlModel ?? currentModelArg(),
+      // Never preselect a provider the HTML surface forbids (fail-closed): a
+      // persisted OpenRouter htmlModel/main model resolves to no default here.
+      getDefaultModel: () => {
+        const d = deps.prefs.htmlModel ?? currentModelArg();
+        if (!d) return undefined;
+        const provider = typeof d === 'string' ? 'chatgpt' : d.provider;
+        return isHtmlExportModelProviderAllowed(provider) ? d : undefined;
+      },
       onModelChosen: (m) => {
         if (isAiProviderId(m.provider)) {
           deps.prefs.htmlModel = { provider: m.provider, id: m.id };

@@ -185,14 +185,16 @@ export class ComposedClaudeProvider implements AiProvider {
   }
 
   async streamChat(req: AiChatRequest, onEvent: (e: AiChatEvent) => void): Promise<void> {
+    // §5.3: the HTML export surface is CLI-only — pin it BEFORE the image→API
+    // divert so an html request can never be pushed onto the paid API. The HTML
+    // transport never carries images, but check the pin first to stay fail-closed.
+    if (req.surfaceMode === 'html') {
+      await this.cli.streamChat(req, onEvent);
+      return;
+    }
     // v0.7: the CLI is text-only — image turns go directly to the Anthropic API.
     if (req.images && req.images.length > 0) {
       await this.api.streamChat(req, onEvent);
-      return;
-    }
-    if (req.surfaceMode === 'html') {
-      // §5.3: the HTML export surface is CLI-only — no automatic API fallback.
-      await this.cli.streamChat(req, onEvent);
       return;
     }
     // Everything else (incl. HTML export with a max-output budget) stays CLI-first:
