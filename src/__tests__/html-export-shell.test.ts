@@ -13,6 +13,8 @@ function payload(over: Partial<HtmlExportSanitizedPayload> = {}): HtmlExportSani
     documentHtml: over.documentHtml ?? '<html><body><div data-he-content><p>safe</p></div></body></html>',
     contentCss: over.contentCss ?? '@layer he-authored{[data-he-content] p{color:red}}',
     counts: over.counts ?? { nodeCount: 3, maxDepth: 2, attributeCount: 1 },
+    ...(over.contentRootClass ? { contentRootClass: over.contentRootClass } : {}),
+    ...(over.contentRootId ? { contentRootId: over.contentRootId } : {}),
   };
 }
 
@@ -157,6 +159,36 @@ describe('bundleSanitizedHtml — canonical shell contract', () => {
     const bodyInner = html.match(/<body>([\s\S]*?)<\/body>/)?.[1] ?? '';
     // The runtime script stays outside (after) the content root.
     expect(bodyInner.indexOf('</div>')).toBeLessThan(bodyInner.indexOf('<script>'));
+  });
+  it('transfers sanitized content-root class so [data-he-content].dark selectors match', () => {
+    const contentCss = '@layer he-authored{[data-he-content].dark>.card{color:red}}';
+    const { html } = bundleSanitizedHtml(
+      payload({
+        bodyHtml: '<div class="card">x</div>',
+        contentCss,
+        contentRootClass: 'dark',
+      }),
+    );
+    expect(html).toMatch(/<body>\s*<div data-he-content class="dark">\s*<div class="card">x<\/div>/);
+    // Runtime script stays outside the content root.
+    const bodyInner = html.match(/<body>([\s\S]*?)<\/body>/)?.[1] ?? '';
+    expect(bodyInner.indexOf('</div>')).toBeLessThan(bodyInner.indexOf('<script>'));
+    // The rewritten selector is present and the wrapper carries the matching class.
+    expect(html).toContain('[data-he-content].dark>.card{color:red}');
+    expect(html).toContain('data-he-content class="dark"');
+  });
+
+  it('emits id before class when both content-root identity fields are present', () => {
+    const { html } = bundleSanitizedHtml(
+      payload({ contentRootId: 'app', contentRootClass: 'dark theme' }),
+    );
+    expect(html).toContain('<div data-he-content id="app" class="dark theme">');
+  });
+
+  it('keeps the bare content-root wrapper when class/id are absent', () => {
+    const { html } = bundleSanitizedHtml(payload({ bodyHtml: '<p>x</p>' }));
+    expect(html).toMatch(/<body>\s*<div data-he-content>\s*<p>x<\/p>/);
+    expect(html).not.toMatch(/<div data-he-content (?:id|class)=/);
   });
 
   it('does not introduce http(s) or protocol-relative // origins via the shell wrapper', () => {

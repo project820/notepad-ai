@@ -61,6 +61,22 @@ function escapeStyleText(css: string): string {
   return css.replace(/<\/(style)/gi, '<\\/$1');
 }
 
+/** Escape a value for a double-quoted HTML attribute (content-root id/class). */
+function escapeAttr(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;');
+}
+
+/** Build the reserved content-root wrapper, optionally carrying sanitized root class/id. */
+function contentRootOpenTag(payload: HtmlExportSanitizedPayload): string {
+  let tag = '<div data-he-content';
+  if (payload.contentRootId) tag += ` id="${escapeAttr(payload.contentRootId)}"`;
+  if (payload.contentRootClass) tag += ` class="${escapeAttr(payload.contentRootClass)}"`;
+  return `${tag}>`;
+}
+
 /**
  * Assemble a single self-contained offline `.html` document from a sanitized
  * pipeline payload. Returns the document string and the embedded manifest
@@ -94,7 +110,9 @@ export function bundleSanitizedHtml(
     // `[data-he-content]` (a reserved attribute model output cannot set), so the
     // shell MUST wrap the body in that content root or none of the sanitized CSS
     // matches and the export renders unstyled. See #29 review (P1).
-    `<body>\n<div data-he-content>\n${payload.bodyHtml}\n</div>\n<script>${HTML_EXPORT_RUNTIME_JS}</script>\n</body>\n` +
+    // Safe class/id from source <html>/<body> are transferred so rewritten
+    // selectors like `[data-he-content].dark` still match (Codex P2).
+    `<body>\n${contentRootOpenTag(payload)}\n${payload.bodyHtml}\n</div>\n<script>${HTML_EXPORT_RUNTIME_JS}</script>\n</body>\n` +
     '</html>\n';
 
   return { html, manifest };

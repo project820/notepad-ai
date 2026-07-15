@@ -353,6 +353,42 @@ describe('mountHtmlExportWizard — a non-final generation result surfaces an er
     expect(handle.getState().step).toBe('error');
     expect(host.querySelector('.he-error')).toBeTruthy();
   });
+
+  it('invalidates the non-final attempt via cancelHtmlGeneration before the error state', async () => {
+    const order: string[] = [];
+    const { host, handle, deps } = setup({
+      generateHtmlExport: vi.fn(async () => FAILED_RESULT),
+      cancelHtmlGeneration: vi.fn(() => {
+        order.push('cancel');
+      }),
+    });
+    click(host, 'orient-vertical');
+    click(host, 'layout-scroll');
+    click(host, 'design-default');
+    setField(host, 'free-requirement', '');
+    click(host, 'generate-submit');
+    await settle(() => handle.getState().step === 'error');
+    expect(handle.getState().step).toBe('error');
+    expect(deps.cancelHtmlGeneration).toHaveBeenCalledTimes(1);
+    // cancel was invoked while handling the non-final result (not only on destroy).
+    expect(order).toEqual(['cancel']);
+  });
+
+  it('invalidates the attempt when generateHtmlExport rejects', async () => {
+    const { host, handle, deps } = setup({
+      generateHtmlExport: vi.fn(async () => {
+        throw new Error('network');
+      }),
+    });
+    click(host, 'orient-vertical');
+    click(host, 'layout-scroll');
+    click(host, 'design-default');
+    setField(host, 'free-requirement', '');
+    click(host, 'generate-submit');
+    await settle(() => handle.getState().step === 'error');
+    expect(handle.getState().step).toBe('error');
+    expect(deps.cancelHtmlGeneration).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('mountHtmlExportWizard — local model context badge + small-model notice (G003)', () => {

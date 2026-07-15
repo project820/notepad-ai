@@ -6,7 +6,11 @@ import { styleDirective, detectLanguage, type Naturalness } from './humanize-eng
 import { t } from './i18n';
 import { modelContextWindowTokens } from '../main/ai/output-budget';
 import { isAiProviderId, type AiProviderId } from '../main/ai/types';
-import { filterHtmlExportModels, isHtmlExportModelProviderAllowed } from '../main/ai/html-export-model-allowlist';
+import {
+  filterHtmlExportModels,
+  htmlCapableProviderIds,
+  isHtmlExportModelProviderAllowed,
+} from '../main/ai/html-export-model-allowlist';
 import { openSettingsModal, triggerCliOnboarding } from './settings-modal';
 import { savePrefs, type Prefs } from './prefs';
 import { buildUnifiedChatInstructions } from './unified-chat-prompt-handler';
@@ -245,6 +249,18 @@ export function initUnifiedChatWiring(ctx: AppContext, deps: UnifiedChatWiringDe
       triggerCliOnboarding(openSettings);
       return;
     }
+    // §5.3 honesty: generic auth is not enough — only open the wizard when at
+    // least one provider can actually pin an HTML transport (Claude needs CLI).
+    // Status-fetch failure keeps the existing hasAuth gate (do not hard-break entry).
+    const statuses = await window.api.aiProvidersStatus().catch(() => null);
+    if (!guard.isCurrent()) return;
+    if (statuses && htmlCapableProviderIds(statuses).size === 0) {
+      setUnifiedChatOpen(true);
+      unifiedChat.addMessage('assistant', t('chat.noProvider'));
+      ctx.setStatus(t('status.connectProvider'));
+      triggerCliOnboarding(openSettings);
+      return;
+    }
     if (!guard.isCurrent()) return;
     setUnifiedChatOpen(true);
     unifiedChat.showPanel('<div class="he-host"></div>', undefined, () => {
@@ -271,7 +287,13 @@ export function initUnifiedChatWiring(ctx: AppContext, deps: UnifiedChatWiringDe
         // §5.3 / AC-M1c-d: the HTML surface pins ONE no-fallback transport, so
         // OpenRouter (and any non-allowlisted provider) is hard-excluded from the
         // picker even if the general chat policy would reinject a current selection.
-        return filterHtmlExportModels(mapped);
+        const allowlisted = filterHtmlExportModels(mapped);
+        // Drop models whose provider cannot run HTML right now (e.g. API-only Claude).
+        // Status-fetch failure keeps the allowlist filter only (do not hard-break the picker).
+        const liveStatuses = await window.api.aiProvidersStatus().catch(() => null);
+        if (!liveStatuses) return allowlisted;
+        const capable = htmlCapableProviderIds(liveStatuses);
+        return allowlisted.filter((m) => isAiProviderId(m.provider) && capable.has(m.provider));
       },
       // Never preselect a provider the HTML surface forbids (fail-closed): a
       // persisted OpenRouter htmlModel/main model resolves to no default here.

@@ -402,13 +402,16 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
             finalized: { attemptId: result.attemptId, finalizedArtifactId: result.finalizedArtifactId },
           });
         } else {
-          // partial / failed / cancelled → no finalized artifact to save; surface as retryable.
+          // partial / failed / cancelled → drop the non-final attempt so rejected
+          // model output cannot linger if the user backs out of the error screen.
+          deps.cancelHtmlGeneration?.();
           dispatch({ type: 'AI_ERROR', error: t('he.error.generate') });
         }
       })
       .catch(() => {
         if (disposed || token !== generationToken) return;
         generating = false;
+        deps.cancelHtmlGeneration?.();
         dispatch({ type: 'AI_ERROR', error: t('he.error.generate') });
       });
   }

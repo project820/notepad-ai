@@ -60,6 +60,10 @@ type HtmlExportSanitizeSuccess = {
   documentHtml: string;
   contentCss: string;
   counts: HtmlSanitizerCounts;
+  /** Safe class tokens from source <html>/<body>, for the shell content-root wrapper. */
+  contentRootClass?: string;
+  /** Safe id from source <body> (else <html>), for the shell content-root wrapper. */
+  contentRootId?: string;
 };
 
 type HtmlExportSanitizeFailure = {
@@ -140,6 +144,76 @@ function attrs(node: Node): Attribute[] {
 function tagName(node: Node): string | null {
   const candidate = (node as { tagName?: unknown }).tagName;
   return typeof candidate === 'string' ? candidate.toLowerCase() : null;
+}
+
+function findElement(root: Node, name: string): Element | null {
+  const visit = (node: Node): Element | null => {
+    if (tagName(node) === name) return node as Element;
+    for (const child of childNodes(node)) {
+      const match = visit(child);
+      if (match) return match;
+    }
+    return null;
+  };
+  return visit(root);
+}
+
+/**
+ * Class/id gate shared with sanitizeAttributes: reserved tokens fail closed.
+ * Returns null when the value is safe to keep.
+ */
+function rejectReservedClassOrId(name: 'class' | 'id', value: string): Failure | null {
+  if (isReservedValue(value)) {
+    return fail(HTML_VIOLATION_CODES.reservedNamespace, `reserved ${name} value`);
+  }
+  return null;
+}
+
+/**
+ * Read class/id from a source element through the same reserved-name gate that
+ * sanitizeAttributes applies to model elements. Reserved values are dropped
+ * (not transferred onto the content root); other attributes are ignored.
+ */
+function readSafeClassAndId(node: Element | null): { className?: string; id?: string } {
+  if (!node) return {};
+  let className: string | undefined;
+  let id: string | undefined;
+  for (const attribute of attrs(node)) {
+    const name = attribute.name.toLowerCase();
+    if (name !== 'class' && name !== 'id') continue;
+    if (rejectReservedClassOrId(name, attribute.value)) continue;
+    if (!attribute.value) continue;
+    if (name === 'class') className = attribute.value;
+    else id = attribute.value;
+  }
+  return { className, id };
+}
+
+/** Merge html+body class tokens (order-preserving, de-duped). Body id wins over html id. */
+function contentRootIdentity(document: DefaultTreeAdapterTypes.Document): {
+  contentRootClass?: string;
+  contentRootId?: string;
+} {
+  const html = readSafeClassAndId(findElement(document, 'html'));
+  const body = readSafeClassAndId(findElement(document, 'body'));
+  const seen = new Set<string>();
+  const tokens: string[] = [];
+  for (const value of [html.className, body.className]) {
+    if (!value) continue;
+    for (const part of value.split(/\s+/)) {
+      if (!part || seen.has(part)) continue;
+      // Per-token reserved gate (same isReservedValue path as element class attrs).
+      if (rejectReservedClassOrId('class', part)) continue;
+      seen.add(part);
+      tokens.push(part);
+    }
+  }
+  const contentRootClass = tokens.length > 0 ? tokens.join(' ') : undefined;
+  const contentRootId = body.id ?? html.id;
+  return {
+    ...(contentRootClass ? { contentRootClass } : {}),
+    ...(contentRootId ? { contentRootId } : {}),
+  };
 }
 
 /** Count element nodes strictly within `root`'s subtree (excludes `root` itself). */
@@ -258,9 +332,8 @@ function preflightAttributeFailure(
     const name = attribute.name.toLowerCase();
     const dangerous = rejectDangerousAttribute(attribute, isAllowedAssetId);
     if (dangerous) return dangerous;
-    if ((name === 'class' || name === 'id') && isReservedValue(attribute.value)) {
-      return fail(HTML_VIOLATION_CODES.reservedNamespace, `reserved ${name} value`);
-    }
+    const reserved = rejectReservedClassOrId(name as 'class' | 'id', attribute.value);
+    if ((name === 'class' || name === 'id') && reserved) return reserved;
     if (name === 'style' || !survives) continue;
     if (!isAllowedAttribute(tag, name)) {
       return fail(HTML_VIOLATION_CODES.attribute, `attribute ${name} is not allowed on ${tag}`);
@@ -305,9 +378,8 @@ function sanitizeAttributes(node: Node, tag: string, context: Context, survives:
     const name = attribute.name.toLowerCase();
     const dangerous = rejectDangerousAttribute(attribute, context.isAllowedAssetId);
     if (dangerous) return dangerous;
-    if ((name === 'class' || name === 'id') && isReservedValue(attribute.value)) {
-      return fail(HTML_VIOLATION_CODES.reservedNamespace, `reserved ${name} value`);
-    }
+    const reserved = rejectReservedClassOrId(name as 'class' | 'id', attribute.value);
+    if ((name === 'class' || name === 'id') && reserved) return reserved;
     if (name === 'style') {
       const result = sanitizeDeclarationList(attribute.value, context.cssContext);
       if (!result.ok) return cssFailure(result.violations[0]);
@@ -498,15 +570,7 @@ function sanitizeNode(node: Node, context: Context, parentNode: DefaultTreeAdapt
 }
 
 function findBody(document: DefaultTreeAdapterTypes.Document): Element | null {
-  const visit = (node: Node): Element | null => {
-    if (tagName(node) === 'body') return node as Element;
-    for (const child of childNodes(node)) {
-      const match = visit(child);
-      if (match) return match;
-    }
-    return null;
-  };
-  return visit(document);
+  return findElement(document, 'body');
 }
 
 /**
@@ -600,12 +664,14 @@ export function sanitizeHtmlExport(options: HtmlExportSanitizeOptions): HtmlExpo
       }
     }
 
+    const rootIdentity = contentRootIdentity(document);
     return {
       ok: true,
       bodyHtml: serialize(outputBody),
       documentHtml: serialize(outputDocument),
       contentCss: `@layer he-authored{${context.stylesheetRules.join('')}}${context.inlineRules.join('')}`,
       counts,
+      ...rootIdentity,
     };
   } catch {
     return { ok: false, violations: [{ code: HTML_VIOLATION_CODES.internal, detail: 'HTML sanitization failed' }] };

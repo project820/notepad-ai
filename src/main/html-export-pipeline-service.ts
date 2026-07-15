@@ -33,6 +33,10 @@ export type HtmlExportSanitizedPayload = {
   documentHtml: string;
   contentCss: string;
   counts: HtmlExportCounts;
+  /** Safe class tokens from source <html>/<body> for the shell content-root wrapper. */
+  contentRootClass?: string;
+  /** Safe id from source <body> (else <html>) for the shell content-root wrapper. */
+  contentRootId?: string;
 };
 
 export type HtmlExportResolver = (sanitizedPayload: HtmlExportSanitizedPayload) => Promise<string | Uint8Array>;
@@ -189,6 +193,8 @@ export class HtmlExportPipelineService {
       documentHtml: sanitized.documentHtml,
       contentCss: sanitized.contentCss,
       counts: sanitized.counts,
+      ...(sanitized.contentRootClass ? { contentRootClass: sanitized.contentRootClass } : {}),
+      ...(sanitized.contentRootId ? { contentRootId: sanitized.contentRootId } : {}),
     };
     const serializedPayload = JSON.stringify(payload);
     if (Buffer.byteLength(serializedPayload, 'utf8') > HTML_EXPORT_PIPELINE_STAGE_MAX_BYTES) {

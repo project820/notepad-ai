@@ -517,4 +517,38 @@ describe('sanitizeHtmlExport — fail-closed structural gate (issue #27)', () =>
     expect(result.bodyHtml).toContain('<p>Primary</p>');
     expect(result.bodyHtml).toContain('<p>Side</p>');
   });
+  it('surfaces safe body/html class and id on the content-root identity fields', () => {
+    const result = sanitize(
+      '<!doctype html><html class="theme"><body class="dark" id="app"><p class="card">x</p></body></html>',
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Body children still unwrap; root attrs are not left on the body output.
+    expect(result.bodyHtml).toBe('<p class="card">x</p>');
+    // html+body classes merge; body id wins.
+    expect(result.contentRootClass).toBe('theme dark');
+    expect(result.contentRootId).toBe('app');
+  });
+
+  it('does not transfer a reserved body class onto contentRootClass', () => {
+    // Shared class/id gate rejects reserved tokens fail-closed (same path as
+    // sanitizeAttributes), so the document never succeeds with a reserved root class.
+    expect(failureCode('<body class="he-shell"><p>x</p></body>')).toBe(
+      HTML_VIOLATION_CODES.reservedNamespace,
+    );
+    // A safe body class alone still surfaces; reserved sibling tokens cannot slip through.
+    const safe = sanitize('<body class="dark"><p>x</p></body>');
+    expect(safe.ok).toBe(true);
+    if (!safe.ok) return;
+    expect(safe.contentRootClass).toBe('dark');
+    expect(safe.contentRootId).toBeUndefined();
+  });
+
+  it('omits content-root identity fields when html/body carry no safe class or id', () => {
+    const result = sanitize('<p>plain</p>');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.contentRootClass).toBeUndefined();
+    expect(result.contentRootId).toBeUndefined();
+  });
 });
