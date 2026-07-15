@@ -32,7 +32,7 @@ export const HTML_SANITIZER_LIMITS = {
  * element is still accepted; pure text/narration (0 elements) is rejected.
  * Fail-closed: below the floor maps to a retryable pipeline-reject. See issue #27.
  */
-export const HTML_MIN_BODY_ELEMENT_NODES = 1;
+const HTML_MIN_BODY_ELEMENT_NODES = 1;
 
 export const HTML_VIOLATION_CODES = {
   parse: 'html_parse',
