@@ -27,6 +27,8 @@ import { HtmlExportPipelineService } from './html-export-pipeline-service';
 import { bundleSanitizedHtml } from './html-export-shell';
 import { HtmlExportQuarantinePool } from './html-export-quarantine';
 import { ElectronQuarantineHost } from './html-export-quarantine-host';
+import { createHtmlExportGenerator } from './html-export-generate';
+import { htmlExportMaxTokens } from './ai/output-budget';
 import {
   createHtmlExportQuarantineError,
   type HtmlExportAttemptId,
@@ -103,6 +105,16 @@ const htmlExportQuarantine = {
   cancelAttempt: (webContentsId: number, attemptId: HtmlExportAttemptId) =>
     htmlExportQuarantinePool?.cancelAttempt(webContentsId, attemptId),
 };
+
+const htmlExportGenerator = createHtmlExportGenerator({
+  pipeline: htmlExportPipelineService,
+  stream: (req, onEvent) => getRegistry().streamProviderChat(req, onEvent),
+  maxOutputTokens: (m) => htmlExportMaxTokens(m.provider, m.id),
+  quarantine: async ({ webContentsId, attemptId, resolvedArtifactId }) => {
+    const measured = await htmlExportQuarantine.measure(webContentsId, attemptId, resolvedArtifactId);
+    return measured.ok ? { ok: true as const } : { ok: false as const, kind: measured.error.kind };
+  },
+});
 const testCloseChoice = process.env.NOTEPAD_AI_CLOSE_DIALOG_CHOICE;
 const windows = createAppWindows({
   registry,
@@ -152,6 +164,8 @@ registerHtmlExportIpc({
     releaseWebContents: (id) => htmlExportAssetRegistry.releaseWebContents(id),
   },
   quarantine: htmlExportQuarantine,
+  generateHtml: (webContentsId, input) => htmlExportGenerator.run(webContentsId, input),
+  cancelGenerateHtml: (webContentsId) => htmlExportGenerator.cancel(webContentsId),
 });
 registerHtmlExportAssetIpc({
   windowForWebContents: (id) => windows.windowFromRecord(registry.getByWebContents(id)),

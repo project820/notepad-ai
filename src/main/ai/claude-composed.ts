@@ -190,6 +190,11 @@ export class ComposedClaudeProvider implements AiProvider {
       await this.api.streamChat(req, onEvent);
       return;
     }
+    if (req.surfaceMode === 'html') {
+      // §5.3: the HTML export surface is CLI-only — no automatic API fallback.
+      await this.cli.streamChat(req, onEvent);
+      return;
+    }
     // Everything else (incl. HTML export with a max-output budget) stays CLI-first:
     // `claude -p` runs on the user's SUBSCRIPTION (no per-token billing), and it
     // handles model-id remapping itself. We deliberately do NOT divert to the paid

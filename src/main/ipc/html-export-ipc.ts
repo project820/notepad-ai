@@ -23,6 +23,8 @@ import {
   createHtmlExportQuarantineError,
 } from '../../shared/html-export-pipeline';
 import { atomicWrite, nodeAtomicBackend, type AtomicWriteBackend } from '../atomic-write';
+import type { GenerationAttemptResult } from '../html-export-generation-orchestrator';
+import { isAiProviderId, type AiProviderId } from '../ai/types';
 import {
   designListContentsUrl,
   isAllowedDesignFetchUrl,
@@ -63,6 +65,12 @@ type HtmlExportIpcDeps = {
   quarantine?: HtmlExportQuarantineLifecycle;
   /** Injectable atomic-write backend for the finalized save path (tests only). */
   saveBackend?: AtomicWriteBackend;
+  /** Main-owned generation: streams the model, drives the pipeline, finalizes. */
+  generateHtml?: (
+    webContentsId: number,
+    input: { prompt: string; model: { provider: AiProviderId; id: string }; instructions?: string },
+  ) => Promise<GenerationAttemptResult>;
+  cancelGenerateHtml?: (webContentsId: number) => void;
 };
 
 
@@ -204,6 +212,26 @@ function isSaveFinalizedRequest(input: unknown): input is SaveFinalizedRequest {
   return true;
 }
 
+const HTML_GENERATE_PROMPT_MAX = 4 * 1024 * 1024;
+
+function isGenerateRequest(
+  input: unknown,
+): input is { prompt: string; model: { provider: AiProviderId; id: string }; instructions?: string } {
+  if (!isExactPlainObject(input) || Object.getOwnPropertySymbols(input).length !== 0) return false;
+  const keys = Object.keys(input);
+  if (!keys.every((key) => key === 'prompt' || key === 'model' || key === 'instructions')) return false;
+  if (!Object.hasOwn(input, 'prompt') || typeof input.prompt !== 'string') return false;
+  if (input.prompt.length === 0 || input.prompt.length > HTML_GENERATE_PROMPT_MAX) return false;
+  if (!Object.hasOwn(input, 'model') || !isExactPlainObject(input.model)) return false;
+  const model = input.model as Record<string, unknown>;
+  if (!isAiProviderId(model.provider)) return false;
+  if (typeof model.id !== 'string' || model.id.length === 0 || model.id.length > 256) return false;
+  if ('instructions' in input && input.instructions !== undefined) {
+    if (typeof input.instructions !== 'string' || input.instructions.length > 65_536) return false;
+  }
+  return true;
+}
+
 function quarantineReject(kind: Parameters<typeof createHtmlExportQuarantineError>[0]): QuarantineMeasureResult {
   return { ok: false, error: createHtmlExportQuarantineError(kind) };
 }
@@ -214,6 +242,8 @@ export function registerHtmlExportIpc({
   assetLifecycle,
   quarantine,
   saveBackend,
+  generateHtml,
+  cancelGenerateHtml,
 }: HtmlExportIpcDeps): void {
 
   type SenderBinding = {
@@ -364,6 +394,31 @@ export function registerHtmlExportIpc({
     );
   });
 
+  // PR-R1 cutover: main-owned one-call generation. The renderer submits only the
+  // prompt + model; main streams the model, drives the pipeline, and finalizes.
+  handleTrusted('html:generate', async (event, input: unknown): Promise<GenerationAttemptResult> => {
+    const binding = await bindSenderInvalidation(event.sender);
+    if (!binding || !generateHtml) return { state: 'failed', stage: 'begin', kind: 'pipeline-reject' };
+    if (!isGenerateRequest(input)) return { state: 'failed', stage: 'begin', kind: 'pipeline-reject' };
+    try {
+      return await generateHtml(binding.webContentsId, {
+        prompt: input.prompt,
+        model: input.model,
+        ...(input.instructions !== undefined ? { instructions: input.instructions } : {}),
+      });
+    } catch {
+      return { state: 'failed', stage: 'generate', kind: 'pipeline-reject' };
+    }
+  });
+
+  handleTrusted('html:generate:cancel', async (event) => {
+    try {
+      cancelGenerateHtml?.(event.sender.id);
+    } catch {
+      // best effort
+    }
+    return { ok: true as const };
+  });
   handleTrusted('html:pipeline:sanitize', async (event, input: unknown): Promise<SanitizeResult> => {
     const binding = await bindSenderInvalidation(event.sender);
     if (!binding) return pipelineReject();
