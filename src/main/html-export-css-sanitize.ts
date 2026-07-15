@@ -123,7 +123,7 @@ const PROPERTY_SET = new Set<string>(CSS_ALLOWED_PROPERTIES);
 const FUNCTION_SET = new Set<string>(CSS_ALLOWED_FUNCTIONS.map((name) => name.toLowerCase()));
 const AT_RULE_SET = new Set<string>(CSS_ALLOWED_AT_RULES);
 const TYPE_SELECTORS = new Set([
-  'section', 'div', 'article', 'header', 'footer', 'nav', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+  'section', 'div', 'article', 'main', 'aside', 'header', 'footer', 'nav', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
   'p', 'span', 'strong', 'em', 'b', 'i', 'u', 's', 'small', 'mark', 'sub', 'sup', 'br', 'hr',
   'ul', 'ol', 'li', 'dl', 'dt', 'dd', 'blockquote', 'figure', 'figcaption', 'img', 'picture',
   'source', 'svg', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'caption', 'code',

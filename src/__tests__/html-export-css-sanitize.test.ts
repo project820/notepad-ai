@@ -45,6 +45,20 @@ describe('html export CSS sanitizer', () => {
       declarationCount: 2,
     });
   });
+  it('accepts main and aside type selectors scoped to the content root', () => {
+    expect(sanitizeStylesheet('main{color:red}')).toEqual({
+      ok: true,
+      css: '[data-he-content] main{color:red}',
+      ruleCount: 1,
+      declarationCount: 1,
+    });
+    expect(sanitizeStylesheet('aside{color:red}')).toEqual({
+      ok: true,
+      css: '[data-he-content] aside{color:red}',
+      ruleCount: 1,
+      declarationCount: 1,
+    });
+  });
 
   it('parses inline declarations and preserves duplicate shorthand/longhand order', () => {
     expect(sanitizeDeclarationList('margin:1px;margin-left:4px;color:red;color:blue')).toEqual({

@@ -167,6 +167,7 @@ const HTML_EXPORT_DIRECT_DESIGN_KNOWLEDGE = [
   '4. Author complete, self-contained HTML with inline CSS. Use only inline data: images (never remote URLs), no scripts, no external fonts/assets. Every visual choice — layout, spacing, color, type scale — is yours to encode in CSS, honoring the design authority above.',
   '5. Use only LITERAL CSS values. CSS custom properties (`--name`) and `var()` are NOT supported and will be rejected — write concrete values inline. Global element selectors (html/body/:root/*) are allowed (scoped to the export content root) but prefer authoring styles against document content.',
   '6. Use ONLY the supported HTML tag vocabulary (structural: section, article, main, aside, nav, header, footer, div, h1–h6, p, ul/ol/li, dl/dt/dd, figure/figcaption, blockquote, table/thead/tbody/tfoot/tr/th/td/caption, img/picture/source, svg; inline: span, strong/em/b/i/u/s, small, mark, sub/sup, code/pre/kbd/samp, abbr, time, a, br, hr). Attach classes, ids, and inline styles ONLY to these tags — unsupported tags are unwrapped and their attributes dropped, which orphans any CSS that targets them.',
+  '7. Output ONLY the document markup — no conversational preamble, acknowledgements, closing remarks, or narration (no "Sure, here is...", no "I hope this helps"), whether bare text or wrapped in an element.',
 ].join('\n');
 
 function designKnowledgeBlock(): string[] {
@@ -222,6 +223,7 @@ export function buildDirectHtmlPrompt(
     '- NEVER return a JSON content model or ContentModel — that path is obsolete for this request.',
     '- NEVER wrap the document in Markdown code fences.',
     '- NEVER narrate progress, write files, or return a path instead of the document.',
+    '- NEVER include conversational preamble, acknowledgements, closing remarks, or narration (no "Sure, here is...", no "I hope this helps"), whether bare text or wrapped in an element.',
     '- Honor orientation, mode, density, and purpose exactly as directed above.',
     '- Treat design.md as visual authority when present; realize its hierarchy, mood, and signature elements in HTML/CSS.',
     '- Preserve critical facts, numbers, names, quotes, and code from the source.',

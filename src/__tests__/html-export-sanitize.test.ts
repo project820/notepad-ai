@@ -488,6 +488,23 @@ describe('sanitizeHtmlExport — fail-closed structural gate (issue #27)', () =>
       expect(result.bodyHtml).toContain('<p>Body copy.</p>');
     }
   });
+  it('rejects NBSP-only top-level text under HTML-ASCII whitespace rules', () => {
+    // String.trim() strips U+00A0, so the old gate treated NBSP as whitespace.
+    // HTML-ASCII whitespace is only U+0009/0A/0C/0D/20 — NBSP must fail closed.
+    expect(failureCode('\u00A0<section><p>x</p></section>', structural)).toBe(
+      HTML_VIOLATION_CODES.noStructure,
+    );
+  });
+
+  it('accepts normal spaces/newlines between top-level structural elements', () => {
+    const doc = '<section><p>a</p></section>\n  <aside><p>b</p></aside>';
+    const result = sanitize(doc, structural);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.bodyHtml).toContain('<section>');
+      expect(result.bodyHtml).toContain('<aside>');
+    }
+  });
 
   it('preserves main and aside semantic containers with class/id intact', () => {
     const result = sanitize(

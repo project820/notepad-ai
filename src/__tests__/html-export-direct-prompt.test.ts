@@ -132,6 +132,10 @@ describe('buildDirectHtmlPrompt — 1:1 config mapping + full source', () => {
     expect(prompt).toMatch(/unsupported tags are unwrapped/i);
     expect(prompt).toMatch(/\bmain\b/);
     expect(prompt).toMatch(/\baside\b/);
+    expect(prompt).toMatch(/no conversational preamble/i);
+    expect(prompt).toMatch(/Sure, here is/i);
+    expect(prompt).toMatch(/I hope this helps/i);
+    expect(prompt).toMatch(/whether bare text or wrapped in an element/i);
     // The legacy content-model guidance that forbids encoding HTML/CSS must NOT
     // appear in a direct-authoring prompt (AC-M1a contradiction guard).
     expect(prompt).not.toMatch(/never encode CSS, HTML/i);

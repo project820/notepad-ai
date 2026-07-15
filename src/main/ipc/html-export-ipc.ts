@@ -441,20 +441,17 @@ export function registerHtmlExportIpc({
   });
 
   handleTrusted('html:generate:cancel', async (event) => {
-    // Abort any in-flight generation, then drop the sender's active/finalized
-    // attempt so abandoned wizard IDs cannot still save. Finalize leaves the
-    // attempt in activeAttempts, so invalidateSender (via clearSenderState) is enough.
+    // Abort any in-flight generation and drop the sender's active/finalized
+    // attempt so abandoned wizard IDs cannot still save. Routes through
+    // startSenderCleanup (which fences admission via pendingSenderCleanup and
+    // runs clearSenderState: cancelGenerateHtml + invalidateSender + asset
+    // release + quarantine cancel). Finalize leaves the attempt in
+    // activeAttempts, so invalidateSender is enough for revocation.
     try {
-      cancelGenerateHtml?.(event.sender.id);
+      return { ok: await startSenderCleanup(event.sender.id) };
     } catch {
-      // best effort
+      return { ok: false };
     }
-    try {
-      await clearSenderState(event.sender.id);
-    } catch {
-      // best effort
-    }
-    return { ok: true as const };
   });
   handleTrusted('html:pipeline:sanitize', async (event, input: unknown): Promise<SanitizeResult> => {
     const binding = await bindSenderInvalidation(event.sender);

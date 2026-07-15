@@ -158,6 +158,11 @@ function textValue(node: Node): string {
     : '';
 }
 
+/** True when `s` contains only HTML ASCII whitespace (U+0009/0A/0C/0D/20). */
+function isHtmlAsciiWhitespaceOnly(s: string): boolean {
+  return /^[\t\n\f\r ]*$/.test(s);
+}
+
 function countParsedTree(root: Node): HtmlSanitizerCounts | Failure {
   let nodeCount = 0;
   let attributeCount = 0;
@@ -578,7 +583,8 @@ export function sanitizeHtmlExport(options: HtmlExportSanitizeOptions): HtmlExpo
       }
       const hasTopLevelNarration = childNodes(outputBody).some(
         (child) =>
-          (child as { nodeName?: string }).nodeName === '#text' && textValue(child).trim() !== '',
+          (child as { nodeName?: string }).nodeName === '#text' &&
+          !isHtmlAsciiWhitespaceOnly(textValue(child)),
       );
       if (hasTopLevelNarration) {
         return {
