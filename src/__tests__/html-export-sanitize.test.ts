@@ -551,4 +551,40 @@ describe('sanitizeHtmlExport — fail-closed structural gate (issue #27)', () =>
     expect(result.contentRootClass).toBeUndefined();
     expect(result.contentRootId).toBeUndefined();
   });
+  it('transfers safe body/html inline styles onto [data-he-content] rules in contentCss', () => {
+    const result = sanitize(
+      '<!doctype html><html style="font-size:16px"><body style="background:#111;color:#eee"><p>x</p></body></html>',
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Wrapper itself stays free of a raw style="" attribute (shell adds only class/id).
+    expect(result.bodyHtml).toBe('<p>x</p>');
+    // html first, body second so body wins by cascade order.
+    expect(result.contentCss).toContain('[data-he-content]{font-size:16px}');
+    expect(result.contentCss).toContain('[data-he-content]{background:#111;color:#eee}');
+    const htmlIdx = result.contentCss.indexOf('[data-he-content]{font-size:16px}');
+    const bodyIdx = result.contentCss.indexOf('[data-he-content]{background:#111;color:#eee}');
+    expect(htmlIdx).toBeGreaterThanOrEqual(0);
+    expect(bodyIdx).toBeGreaterThan(htmlIdx);
+  });
+
+  it('rejects unsafe root inline styles via the shared declaration sanitizer', () => {
+    // Network function in a body style is hard-failed by sanitizeDeclarationList.
+    expect(failureCode('<body style="background:url(https://evil.test/x.png)"><p>x</p></body>')).toBe(
+      HTML_VIOLATION_CODES.cssRejected,
+    );
+    // Custom properties are also rejected on root styles (same path as element styles).
+    expect(failureCode('<html style="color:var(--accent)"><body><p>x</p></body></html>')).toBe(
+      HTML_VIOLATION_CODES.cssRejected,
+    );
+  });
+
+  it('emits no content-root style rule when html/body have no style attribute', () => {
+    const result = sanitize('<body class="dark"><p>x</p></body>');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.contentCss).not.toContain('[data-he-content]{');
+    // Identity transfer still works; only style rules are absent.
+    expect(result.contentRootClass).toBe('dark');
+  });
 });

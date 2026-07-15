@@ -215,6 +215,38 @@ function contentRootIdentity(document: DefaultTreeAdapterTypes.Document): {
     ...(contentRootId ? { contentRootId } : {}),
   };
 }
+/** Read and sanitize a root element's style attribute via the shared declaration sanitizer. */
+function readSanitizedRootInlineCss(
+  node: Element | null,
+  cssContext: CssSanitizeContext,
+): string | Failure | null {
+  if (!node) return null;
+  for (const attribute of attrs(node)) {
+    if (attribute.name.toLowerCase() !== 'style') continue;
+    const result = sanitizeDeclarationList(attribute.value, cssContext);
+    if (!result.ok) return cssFailure(result.violations[0]);
+    return result.css ? result.css : null;
+  }
+  return null;
+}
+
+/**
+ * Transfer safe html/body inline styles onto the content-root wrapper as scoped
+ * stylesheet rules (html first, body second so body wins by source order).
+ * Reuses sanitizeDeclarationList — the same path sanitizeAttributes uses for
+ * element style attributes. Absent/empty styles emit nothing.
+ */
+function transferRootInlineStyles(
+  document: DefaultTreeAdapterTypes.Document,
+  context: Context,
+): Failure | null {
+  for (const node of [findElement(document, 'html'), findElement(document, 'body')]) {
+    const css = readSanitizedRootInlineCss(node, context.cssContext);
+    if (isFailure(css)) return css;
+    if (css) context.inlineRules.push(`[data-he-content]{${css}}`);
+  }
+  return null;
+}
 
 /** Count element nodes strictly within `root`'s subtree (excludes `root` itself). */
 function countElementDescendants(root: Node): number {
@@ -665,6 +697,8 @@ export function sanitizeHtmlExport(options: HtmlExportSanitizeOptions): HtmlExpo
     }
 
     const rootIdentity = contentRootIdentity(document);
+    const rootStyleFailure = transferRootInlineStyles(document, context);
+    if (rootStyleFailure) return { ok: false, violations: [rootStyleFailure.violation] };
     return {
       ok: true,
       bodyHtml: serialize(outputBody),

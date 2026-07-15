@@ -178,6 +178,45 @@ describe('mountHtmlExportWizard — >30k single-pass fail-fast (no generation)',
     expect(host.querySelector('.he-error')?.textContent).toContain('he.error.tooLongSinglePass');
   });
 });
+describe('mountHtmlExportWizard — per-model single-pass limit via maxSourceCharsForModel', () => {
+  it('gates generation when source exceeds the model budget even if under the 30k default', async () => {
+    // Source is longer than a small model budget but under the generous 30k default.
+    const md = `# Title\n\n${'x'.repeat(500)}`;
+    expect(md.length).toBeLessThan(30_000);
+    const { host, deps, handle } = setup(
+      {
+        maxSourceCharsForModel: () => 100,
+        getDefaultModel: () => ({ provider: 'ollama', id: 'local-8k', contextWindow: 8_192 }),
+      },
+      md,
+    );
+    click(host, 'orient-vertical');
+    click(host, 'layout-scroll');
+    click(host, 'design-default');
+    setField(host, 'free-requirement', '');
+    click(host, 'generate-submit');
+    await flush();
+
+    expect(deps.generateHtmlExport).not.toHaveBeenCalled();
+    expect(handle.getState().step).toBe('error');
+    expect(handle.getState().error).toBe('he.error.tooLongSinglePass');
+  });
+
+  it('keeps the 30k default when maxSourceCharsForModel is omitted', async () => {
+    // Under 30k and no per-model limit → generation proceeds.
+    const md = `# Title\n\n${'y'.repeat(500)}`;
+    const { host, deps, handle } = setup({}, md);
+    click(host, 'orient-vertical');
+    click(host, 'layout-scroll');
+    click(host, 'design-default');
+    setField(host, 'free-requirement', '');
+    click(host, 'generate-submit');
+    await flush();
+
+    expect(deps.generateHtmlExport).toHaveBeenCalledTimes(1);
+    expect(handle.getState().step).toBe('generated');
+  });
+});
 
 describe('mountHtmlExportWizard — design fetch failure keeps choose-design (design.md is mandatory)', () => {
   it('FETCH_FAIL stays on choose-design with an error and never advances to generation', async () => {

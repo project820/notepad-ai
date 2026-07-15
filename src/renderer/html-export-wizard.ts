@@ -309,7 +309,12 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
       customPurpose:
         state.purpose === 'custom' ? state.customPurpose : purposePresetHint(state.purpose),
     });
-    const { prompt, coverage } = buildDirectHtmlPrompt(config, deps.getMarkdown());
+    const limit = deps.maxSourceCharsForModel?.(pendingModel);
+    const { prompt, coverage } = buildDirectHtmlPrompt(
+      config,
+      deps.getMarkdown(),
+      limit && limit > 0 ? { singlePassLimit: limit } : undefined,
+    );
     return { prompt, withinSinglePass: coverage.withinSinglePass };
   }
 
