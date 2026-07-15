@@ -64,6 +64,11 @@ type HtmlExportSanitizeSuccess = {
   contentRootClass?: string;
   /** Safe id from source <body> (else <html>), for the shell content-root wrapper. */
   contentRootId?: string;
+  /**
+   * Safe inert root attributes (lang/dir/title/role) from source <html>/<body>
+   * for the shell content-root wrapper. Body wins over html on conflict.
+   */
+  contentRootAttrs?: Record<string, string>;
 };
 
 type HtmlExportSanitizeFailure = {
@@ -115,6 +120,9 @@ const ACTIVE_TAGS = new Set([
   'slot', 'form', 'input', 'button',
 ]);
 const GLOBAL_ATTRIBUTES = new Set(['class', 'id', 'title', 'lang', 'dir', 'role']);
+/** Inert global attrs transferable onto the content-root (class/id handled separately). */
+const SAFE_ROOT_ATTRIBUTE_NAMES = ['lang', 'dir', 'title', 'role'] as const;
+const SAFE_ROOT_ATTRIBUTE_NAME_SET = new Set<string>(SAFE_ROOT_ATTRIBUTE_NAMES);
 const TABLE_ATTRIBUTES = new Set(['colspan', 'rowspan', 'scope']);
 const IMAGE_ATTRIBUTES = new Set(['alt', 'width', 'height']);
 const RESERVED_CLASS_OR_ID = /^(?:he-s|he-(?:doc|slide|scaler|runtime|manifest|shell|csp)|(?:shell|runtime|manifest|csp))/i;
@@ -189,10 +197,31 @@ function readSafeClassAndId(node: Element | null): { className?: string; id?: st
   return { className, id };
 }
 
+/**
+ * Read inert global attrs (lang/dir/title/role) from a source element through the
+ * same rejectDangerousAttribute + isAllowedAttribute path sanitizeAttributes uses.
+ * Non-allowlisted / dangerous / empty values are dropped (not transferred).
+ */
+function readSafeRootAttrs(node: Element | null): Record<string, string> {
+  if (!node) return {};
+  const out: Record<string, string> = {};
+  for (const attribute of attrs(node)) {
+    const name = attribute.name.toLowerCase();
+    if (!SAFE_ROOT_ATTRIBUTE_NAME_SET.has(name)) continue;
+    // Same gates as sanitizeAttributes for a surviving global-attr element.
+    if (rejectDangerousAttribute(attribute)) continue;
+    if (!isAllowedAttribute('div', name)) continue;
+    if (!attribute.value) continue;
+    out[name] = attribute.value;
+  }
+  return out;
+}
+
 /** Merge html+body class tokens (order-preserving, de-duped). Body id wins over html id. */
 function contentRootIdentity(document: DefaultTreeAdapterTypes.Document): {
   contentRootClass?: string;
   contentRootId?: string;
+  contentRootAttrs?: Record<string, string>;
 } {
   const html = readSafeClassAndId(findElement(document, 'html'));
   const body = readSafeClassAndId(findElement(document, 'body'));
@@ -210,9 +239,21 @@ function contentRootIdentity(document: DefaultTreeAdapterTypes.Document): {
   }
   const contentRootClass = tokens.length > 0 ? tokens.join(' ') : undefined;
   const contentRootId = body.id ?? html.id;
+
+  // Body attrs override html attrs (mirrors body-id-wins). Deterministic key order.
+  const mergedAttrs: Record<string, string> = {
+    ...readSafeRootAttrs(findElement(document, 'html')),
+    ...readSafeRootAttrs(findElement(document, 'body')),
+  };
+  const contentRootAttrs: Record<string, string> = {};
+  for (const name of SAFE_ROOT_ATTRIBUTE_NAMES) {
+    if (mergedAttrs[name]) contentRootAttrs[name] = mergedAttrs[name];
+  }
+
   return {
     ...(contentRootClass ? { contentRootClass } : {}),
     ...(contentRootId ? { contentRootId } : {}),
+    ...(Object.keys(contentRootAttrs).length > 0 ? { contentRootAttrs } : {}),
   };
 }
 /** Read and sanitize a root element's style attribute via the shared declaration sanitizer. */

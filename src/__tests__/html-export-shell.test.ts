@@ -15,6 +15,7 @@ function payload(over: Partial<HtmlExportSanitizedPayload> = {}): HtmlExportSani
     counts: over.counts ?? { nodeCount: 3, maxDepth: 2, attributeCount: 1 },
     ...(over.contentRootClass ? { contentRootClass: over.contentRootClass } : {}),
     ...(over.contentRootId ? { contentRootId: over.contentRootId } : {}),
+    ...(over.contentRootAttrs ? { contentRootAttrs: over.contentRootAttrs } : {}),
   };
 }
 
@@ -204,6 +205,41 @@ describe('bundleSanitizedHtml — canonical shell contract', () => {
     const { html } = bundleSanitizedHtml(payload({ bodyHtml: '<p>x</p>' }));
     expect(html).toMatch(/<body>\s*<div data-he-content>\s*<p>x<\/p>/);
     expect(html).not.toMatch(/<div data-he-content (?:id|class)=/);
+  });
+  it('transfers safe content-root attrs in deterministic order after id/class', () => {
+    const { html } = bundleSanitizedHtml(
+      payload({
+        contentRootId: 'app',
+        contentRootClass: 'dark',
+        contentRootAttrs: { role: 'main', lang: 'ko', dir: 'rtl', title: 'Doc' },
+      }),
+    );
+    // Order: data-he-content, id, class, then lang → dir → title → role.
+    expect(html).toContain(
+      '<div data-he-content id="app" class="dark" lang="ko" dir="rtl" title="Doc" role="main">',
+    );
+  });
+
+  it('HTML-escapes content-root attr values (& " < > \')', () => {
+    const { html } = bundleSanitizedHtml(
+      payload({
+        contentRootAttrs: {
+          lang: `k&o"'x<y>z`,
+          title: `a&b"'c<d>e`,
+        },
+      }),
+    );
+    expect(html).toContain('lang="k&amp;o&quot;&#39;x&lt;y&gt;z"');
+    expect(html).toContain('title="a&amp;b&quot;&#39;c&lt;d&gt;e"');
+    expect(html).not.toContain('lang="k&o');
+    expect(html).not.toContain('title="a&b');
+  });
+
+  it('keeps the bare content-root wrapper when contentRootAttrs is absent', () => {
+    const { html } = bundleSanitizedHtml(payload({ bodyHtml: '<p>x</p>' }));
+    expect(html).toMatch(/<body>\s*<div data-he-content>\s*<p>x<\/p>/);
+    expect(html).not.toMatch(/<div data-he-content [^>]*\blang=/);
+    expect(html).not.toMatch(/<div data-he-content [^>]*\bdir=/);
   });
 
   it('does not introduce http(s) or protocol-relative // origins via the shell wrapper', () => {

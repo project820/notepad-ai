@@ -323,11 +323,24 @@ export function initUnifiedChatWiring(ctx: AppContext, deps: UnifiedChatWiringDe
       },
       // Never preselect a provider the HTML surface forbids (fail-closed): a
       // persisted OpenRouter htmlModel/main model resolves to no default here.
+      // Also drop an allowlisted-but-not-currently-HTML-capable default (e.g.
+      // API-only Claude with no usable CLI) when the capable set is known (the
+      // entry gate populates it), so a quick Generate cannot submit a default
+      // that only fails at the CLI/main rejection. Cold (no cache) keeps
+      // allowlist-only, matching the picker/entry continuity policy.
       getDefaultModel: () => {
         const d = deps.prefs.htmlModel ?? currentModelArg();
         if (!d) return undefined;
         const provider = typeof d === 'string' ? 'chatgpt' : d.provider;
-        return isHtmlExportModelProviderAllowed(provider) ? d : undefined;
+        if (!isHtmlExportModelProviderAllowed(provider)) return undefined;
+        if (
+          lastHtmlCapableProviderIds &&
+          isAiProviderId(provider) &&
+          !lastHtmlCapableProviderIds.has(provider)
+        ) {
+          return undefined;
+        }
+        return d;
       },
       onModelChosen: (m) => {
         if (isAiProviderId(m.provider)) {

@@ -37,6 +37,11 @@ export type HtmlExportSanitizedPayload = {
   contentRootClass?: string;
   /** Safe id from source <body> (else <html>) for the shell content-root wrapper. */
   contentRootId?: string;
+  /**
+   * Safe inert root attributes (lang/dir/title/role) from source <html>/<body>
+   * for the shell content-root wrapper. Body wins over html on conflict.
+   */
+  contentRootAttrs?: Record<string, string>;
 };
 
 export type HtmlExportResolver = (sanitizedPayload: HtmlExportSanitizedPayload) => Promise<string | Uint8Array>;
@@ -96,19 +101,31 @@ function isCounts(value: unknown): value is HtmlExportCounts {
     && attributeCount <= HTML_SANITIZER_LIMITS.maxAttributes;
 }
 
+function isPlainStringRecord(value: unknown): value is Record<string, string> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  // Fail-closed: every own enumerable value must be a string (keys are always strings).
+  for (const [key, entry] of Object.entries(value)) {
+    if (typeof key !== 'string' || typeof entry !== 'string') return false;
+  }
+  return true;
+}
+
 function isSanitizedPayload(value: unknown): value is HtmlExportSanitizedPayload {
   if (typeof value !== 'object' || value === null) return false;
   const payload = value as Partial<HtmlExportSanitizedPayload>;
-  // contentRootClass/Id are optional shape fields only — the sanitizer remains
+  // contentRootClass/Id/Attrs are optional shape fields only — the sanitizer remains
   // the reserved-value gate. Reject non-string when present (fail-closed).
   const optionalRootString = (field: unknown): boolean =>
     field === undefined || typeof field === 'string';
+  const optionalRootAttrs = (field: unknown): boolean =>
+    field === undefined || isPlainStringRecord(field);
   return typeof payload.bodyHtml === 'string'
     && typeof payload.documentHtml === 'string'
     && typeof payload.contentCss === 'string'
     && isCounts(payload.counts)
     && optionalRootString(payload.contentRootClass)
-    && optionalRootString(payload.contentRootId);
+    && optionalRootString(payload.contentRootId)
+    && optionalRootAttrs(payload.contentRootAttrs);
 }
 
 /**
@@ -201,6 +218,9 @@ export class HtmlExportPipelineService {
       counts: sanitized.counts,
       ...(sanitized.contentRootClass ? { contentRootClass: sanitized.contentRootClass } : {}),
       ...(sanitized.contentRootId ? { contentRootId: sanitized.contentRootId } : {}),
+      ...(sanitized.contentRootAttrs && Object.keys(sanitized.contentRootAttrs).length > 0
+        ? { contentRootAttrs: sanitized.contentRootAttrs }
+        : {}),
     };
     const serializedPayload = JSON.stringify(payload);
     if (Buffer.byteLength(serializedPayload, 'utf8') > HTML_EXPORT_PIPELINE_STAGE_MAX_BYTES) {

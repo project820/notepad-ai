@@ -71,11 +71,19 @@ function escapeAttr(value: string): string {
     .replace(/'/g, '&#39;');
 }
 
-/** Build the reserved content-root wrapper, optionally carrying sanitized root class/id. */
+/** Build the reserved content-root wrapper, optionally carrying sanitized root identity. */
 function contentRootOpenTag(payload: HtmlExportSanitizedPayload): string {
   let tag = '<div data-he-content';
   if (payload.contentRootId) tag += ` id="${escapeAttr(payload.contentRootId)}"`;
   if (payload.contentRootClass) tag += ` class="${escapeAttr(payload.contentRootClass)}"`;
+  // Deterministic order for transferred inert globals (matches sanitizer allowlist order).
+  const attrs = payload.contentRootAttrs;
+  if (attrs) {
+    for (const name of ['lang', 'dir', 'title', 'role'] as const) {
+      const value = attrs[name];
+      if (value) tag += ` ${name}="${escapeAttr(value)}"`;
+    }
+  }
   return `${tag}>`;
 }
 

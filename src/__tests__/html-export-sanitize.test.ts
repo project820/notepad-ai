@@ -587,4 +587,56 @@ describe('sanitizeHtmlExport — fail-closed structural gate (issue #27)', () =>
     // Identity transfer still works; only style rules are absent.
     expect(result.contentRootClass).toBe('dark');
   });
+  it('surfaces safe html/body lang/dir/title/role on contentRootAttrs', () => {
+    const result = sanitize(
+      '<!doctype html><html lang="ko"><body dir="rtl" role="main" title="Doc"><p>x</p></body></html>',
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bodyHtml).toBe('<p>x</p>');
+    expect(result.contentRootAttrs).toEqual({
+      lang: 'ko',
+      dir: 'rtl',
+      title: 'Doc',
+      role: 'main',
+    });
+  });
+
+  it('does not transfer disallowed or non-inert root attributes onto contentRootAttrs', () => {
+    // data-*/element-specific attrs are not in the inert root allowlist; body
+    // still sanitizes (survives=false skips isAllowedAttribute for html/body).
+    const result = sanitize(
+      '<!doctype html><html lang="en" data-evil="x" colspan="2"><body dir="ltr" alt="n" width="1" data-section-id="s1"><p>x</p></body></html>',
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.contentRootAttrs).toEqual({ lang: 'en', dir: 'ltr' });
+    expect(result.contentRootAttrs).not.toHaveProperty('data-evil');
+    expect(result.contentRootAttrs).not.toHaveProperty('data-section-id');
+    expect(result.contentRootAttrs).not.toHaveProperty('colspan');
+    expect(result.contentRootAttrs).not.toHaveProperty('alt');
+    expect(result.contentRootAttrs).not.toHaveProperty('width');
+    expect(result.contentRootAttrs).not.toHaveProperty('style');
+  });
+
+  it('body inert root attrs win over html on conflict', () => {
+    const result = sanitize(
+      '<!doctype html><html lang="en" dir="ltr" title="Html" role="document"><body lang="ko" dir="rtl" title="Body" role="main"><p>x</p></body></html>',
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.contentRootAttrs).toEqual({
+      lang: 'ko',
+      dir: 'rtl',
+      title: 'Body',
+      role: 'main',
+    });
+  });
+
+  it('omits contentRootAttrs when html/body carry no safe inert root attributes', () => {
+    const result = sanitize('<p>plain</p>');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.contentRootAttrs).toBeUndefined();
+  });
 });
