@@ -277,6 +277,20 @@ describe('HtmlExportPipelineService', () => {
     expect(workerResult.ok ? '' : workerResult.error.kind).toBe('pipeline-oversize');
   });
 
+  it('rejects an unissued asset:<id> <img> src fail-closed (the direct path issues no asset IDs)', async () => {
+    const { service, registry } = serviceFor();
+    const attemptId = start(service);
+    // asset:aaaaaaaaaaaaaaaa is a syntactically valid opaque ID (>=16 chars) that
+    // was never issued. With the pipeline's empty allowlist it must be rejected,
+    // not finalized as a broken image.
+    const raw = valueOf(
+      service.storeRawModelOutput(1, attemptId, '<section><h1>t</h1><img src="asset:aaaaaaaaaaaaaaaa"></section>'),
+    );
+    const result = await service.sanitize(1, attemptId, raw.id);
+    expect(result.ok ? '' : result.error.kind).toBe('pipeline-reject');
+    expect(registry.transitions).toHaveLength(0);
+  });
+
   it('rejects mismatched worker node, depth, and attribute counts before a registry transition', async () => {
     for (const field of ['nodeCount', 'maxDepth', 'attributeCount'] as const) {
       const { service, registry, parseHost } = serviceFor();
