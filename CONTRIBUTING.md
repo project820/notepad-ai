@@ -48,7 +48,7 @@ Before opening a PR, confirm all of the following pass:
 - [ ] `npm run preflight:tessdata` confirms the bundled OCR data before packaging
 - [ ] `npm run test:security-e2e` is green
 - [ ] `npm run test:converter-e2e` is green
-- [ ] `npm run test:html-export` is green
+- [ ] `npm run test:html-export-direct` is green
 - [ ] `npm run test:roundtrip-smoke` is green
 - [ ] `npm run knip` exits cleanly
 - [ ] `npm audit --omit=dev --audit-level=high` reports no high/critical

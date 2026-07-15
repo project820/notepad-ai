@@ -299,8 +299,6 @@ const api = {
     designs?: { slug: string; name: string; pageUrl: string }[];
     error?: string;
   }> => ipcRenderer.invoke('design:list'),
-  saveHtml: (args: { html: string; defaultName?: string }): Promise<{ saved: boolean; filePath?: string; error?: string }> =>
-    ipcRenderer.invoke('html:save', args),
   openSavedHtml: (filePath: string): Promise<{ opened: boolean; error?: string }> =>
     ipcRenderer.invoke('html:open-saved', filePath),
   beginHtmlExportAttempt: (request: BeginAttemptRequest): Promise<BeginAttemptResult> =>

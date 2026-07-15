@@ -1,6 +1,5 @@
 import { EditorSelection } from '@codemirror/state';
 import { mountHtmlExportWizard, type HtmlExportWizardHandle } from './html-export-wizard';
-import { HTML_EXPORT_CONTENT_INSTRUCTIONS } from './html-export-content-prompt';
 import { clampChatWidth } from './chat-layout';
 import { guardVerdict } from './humanize-guards';
 import { styleDirective, detectLanguage, type Naturalness } from './humanize-engine';
@@ -235,53 +234,6 @@ export function initUnifiedChatWiring(ctx: AppContext, deps: UnifiedChatWiringDe
     return Math.floor(ctxTokens * 3 * 0.6);
   }
 
-  function runHtmlGeneration(prompt: string, model?: { provider: AiProviderId; id: string }): { result: Promise<string>; cancel: () => void } {
-    const modelArg = model ?? currentModelArg();
-    let cancelled = false;
-    let activeCancel = () => {};
-    const isTransient = (m: string) => /terminated|network|stream error|econnreset|socket hang/i.test(m);
-    const attempt = (): Promise<string> => new Promise<string>((resolve, reject) => {
-      const id = ucId();
-      let buffer = '';
-      const cleanup = window.api.onAiChatEvent(id, (e) => {
-        if (e.kind === 'delta' && e.text) {
-          buffer += e.text;
-        } else if (e.kind === 'done') {
-          cleanup();
-          resolve(e.text ?? buffer);
-        } else if (e.kind === 'error') {
-          cleanup();
-          reject(new Error(e.message ?? t('status.aiError')));
-        }
-      });
-      activeCancel = () => {
-        void window.api.aiCancel(id);
-        cleanup();
-      };
-      window.api.aiChat({
-        id,
-        instructions: HTML_EXPORT_CONTENT_INSTRUCTIONS,
-        history: [],
-        userText: prompt,
-        model: modelArg,
-        surfaceMode: 'html',
-      }).catch((err) => {
-        cleanup();
-        reject(err instanceof Error ? err : new Error(String(err)));
-      });
-    });
-    const result = (async () => {
-      try {
-        return await attempt();
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (!cancelled && isTransient(msg)) return await attempt();
-        throw err;
-      }
-    })();
-    return { result, cancel: () => { cancelled = true; activeCancel(); } };
-  }
-
   async function startHtmlExportWizard(guard: ToolPanelGuard) {
     const hasAuth = await window.api.aiHasAnyAuth().catch(() => true);
     if (!guard.isCurrent()) return;
@@ -327,9 +279,10 @@ export function initUnifiedChatWiring(ctx: AppContext, deps: UnifiedChatWiringDe
       getPendingTitle: () => ctx.pendingTitle,
       fetchDesignMd: (input) => window.api.fetchDesignMd(input),
       listDesigns: () => window.api.listDesigns(),
-      saveHtml: (args) => window.api.saveHtml(args),
+      saveHtmlFinalized: (args) => window.api.saveHtmlFinalized(args),
       openSavedHtml: (filePath) => window.api.openSavedHtml(filePath),
-      aiGenerate: (prompt, model) => runHtmlGeneration(prompt, model && isAiProviderId(model.provider) ? { provider: model.provider, id: model.id } : undefined),
+      generateHtmlExport: (request) => window.api.generateHtmlExport(request),
+      cancelHtmlGeneration: () => void window.api.cancelHtmlGeneration(),
       openExternal: (url) => void window.api.openExternal(url),
       onCancel: () => ctx.setStatus(t('status.htmlExportCanceled')),
       t,

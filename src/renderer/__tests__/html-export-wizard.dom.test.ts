@@ -1,51 +1,15 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const validationGate = vi.hoisted(() => ({
-  forceSelfContainedFailure: false,
-  selfContained: vi.fn(),
-  exportDom: vi.fn(),
-  selfContainedVerdicts: [] as Array<{ ok: boolean; violations: string[] }>,
-  exportDomVerdicts: [] as Array<{ ok: boolean; violations: string[] }>,
-}));
-
-vi.mock('../html-export-validate', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../html-export-validate')>();
-  return {
-    ...actual,
-    validateSelfContainedHtml: (...args: Parameters<typeof actual.validateSelfContainedHtml>) => {
-      validationGate.selfContained(...args);
-      const verdict = validationGate.forceSelfContainedFailure
-        ? { ok: false, violations: ['forced test failure'] }
-        : actual.validateSelfContainedHtml(...args);
-      validationGate.selfContainedVerdicts.push(verdict);
-      return verdict;
-    },
-    validateExportDom: (...args: Parameters<typeof actual.validateExportDom>) => {
-      validationGate.exportDom(...args);
-      const verdict = actual.validateExportDom(...args);
-      validationGate.exportDomVerdicts.push(verdict);
-      return verdict;
-    },
-  };
-});
-
 import { mountHtmlExportWizard, type HtmlExportDeps } from '../html-export-wizard';
+import type { GenerationAttemptResult } from '../../main/html-export-generation-orchestrator';
 
 afterEach(() => {
   document.body.innerHTML = '';
-  validationGate.forceSelfContainedFailure = false;
-  validationGate.selfContained.mockClear();
-  validationGate.exportDom.mockClear();
-  validationGate.selfContainedVerdicts.length = 0;
-  validationGate.exportDomVerdicts.length = 0;
   vi.restoreAllMocks();
 });
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
-// The slide-plan fallback path awaits planSlides + domFontsReady, which can span
-// several task ticks under loaded parallel workers. Poll until the async save
-// pipeline settles instead of assuming a single macrotask covers it.
 const settle = async (predicate: () => boolean, tries = 80): Promise<void> => {
   for (let i = 0; i < tries; i++) {
     await flush();
@@ -53,12 +17,22 @@ const settle = async (predicate: () => boolean, tries = 80): Promise<void> => {
   }
 };
 
-/** A valid ContentModel JSON reply (the AI outputs a content model, never HTML). */
-const CONTENT_MODEL = {
-  title: 'My Report',
-  sections: [{ title: 'Intro', blocks: [{ kind: 'paragraph', text: 'Hello world.' }] }],
-};
-const CONTENT_JSON = JSON.stringify(CONTENT_MODEL);
+/** A successful finalized generation result (main-owned; opaque IDs only). */
+const FINAL_RESULT = {
+  state: 'final',
+  attemptId: 'attempt-1',
+  finalizedArtifactId: 'final-1',
+  resolvedArtifactId: 'resolved-1',
+  sanitizedArtifactId: 'sanitized-1',
+  route: { provider: 'chatgpt', model: 'gpt-5.4-mini', transport: 'cli' },
+} as unknown as GenerationAttemptResult;
+
+/** A non-final (failed/partial) result — no finalized artifact to save. */
+const FAILED_RESULT = {
+  state: 'failed',
+  attemptId: 'attempt-1',
+  route: { provider: 'chatgpt', model: 'gpt-5.4-mini', transport: 'cli' },
+} as unknown as GenerationAttemptResult;
 
 function setup(over: Partial<HtmlExportDeps> = {}, markdown = '# Title\n\nSome body.') {
   const host = document.createElement('div');
@@ -67,7 +41,10 @@ function setup(over: Partial<HtmlExportDeps> = {}, markdown = '# Title\n\nSome b
   const deps: HtmlExportDeps = {
     getMarkdown: () => mdRef.value,
     fetchDesignMd: vi.fn(async () => ({ ok: true, designMd: '## tokens', rawUrl: 'https://raw/x/DESIGN.md' })),
-    aiGenerate: vi.fn(() => ({ result: Promise.resolve(CONTENT_JSON), cancel: vi.fn() })),
+    generateHtmlExport: vi.fn(async () => FINAL_RESULT),
+    saveHtmlFinalized: vi.fn(async () => ({ saved: true, filePath: '/tmp/export.html' })),
+    cancelHtmlGeneration: vi.fn(),
+    getDefaultModel: () => ({ provider: 'chatgpt', id: 'gpt-5.4-mini' }),
     openExternal: vi.fn(),
     t: (k) => k,
     ...over,
@@ -88,14 +65,14 @@ function setField(host: HTMLElement, name: string, value: string) {
   el.value = value;
 }
 
-/** Last prompt string passed to aiGenerate. */
-function lastPrompt(deps: HtmlExportDeps): string {
-  const calls = (deps.aiGenerate as ReturnType<typeof vi.fn>).mock.calls;
-  return calls[calls.length - 1][0] as string;
+/** The request object passed to the last generateHtmlExport call. */
+function lastRequest(deps: HtmlExportDeps): { prompt: string; model: { provider: string; id: string } } {
+  const calls = (deps.generateHtmlExport as ReturnType<typeof vi.fn>).mock.calls;
+  return calls[calls.length - 1][0];
 }
 
-describe('mountHtmlExportWizard — generate composes ONE prompt from all four selections + the free requirement', () => {
-  it('sends a single aiGenerate prompt reflecting orientation, layout, design, A/B/C/D mode, and the free requirement', async () => {
+describe('mountHtmlExportWizard — generate composes ONE direct-authoring prompt from the selections + the free requirement', () => {
+  it('sends a single direct prompt reflecting orientation, layout, design.md, and the free requirement', async () => {
     const { host, deps, handle, mdRef } = setup();
     expect(handle.getState().step).toBe('choose-orientation');
 
@@ -113,44 +90,27 @@ describe('mountHtmlExportWizard — generate composes ONE prompt from all four s
     expect(handle.getState().step).toBe('summary-requirement');
     expect(handle.getState().designSource).toBe('getdesign');
 
-    // Core selection 4: summary/chart strength A/B/C/D.
-    click(host, 'summary-C');
-    expect(handle.getState().summaryChartMode).toBe('C');
-
     // The single free-text requirement.
     setField(host, 'free-requirement', 'keep it punchy and chart-heavy');
     click(host, 'generate-submit');
 
-    // Exactly ONE composed prompt block is sent to the model.
-    expect(deps.aiGenerate).toHaveBeenCalledTimes(1);
-    const prompt = lastPrompt(deps);
-    // Every selection is provably reflected in that single block.
-    expect(prompt).toContain('VERTICAL'); // orientation
-    expect(prompt).toContain('SLIDES'); // layout
-    expect(prompt).toContain('design source: getdesign'); // design provenance
+    // Exactly ONE composed prompt is sent to the main-owned generator.
+    expect(deps.generateHtmlExport).toHaveBeenCalledTimes(1);
+    const { prompt } = lastRequest(deps);
+    // Every selection is provably reflected in that single prompt.
+    expect(prompt).toContain('PORTRAIT'); // orientation (vertical → portrait)
+    expect(prompt).toContain('SLIDE'); // layout (slides → slide)
     expect(prompt).toContain('## tokens'); // the fetched design.md content
-    expect(prompt).toContain('summary/chart mode: C'); // A/B/C/D selection
     expect(prompt).toContain('keep it punchy and chart-heavy'); // free requirement
 
-    // The reply is parsed into a validated content model — no HTML is authored.
+    // The reply is a finalized artifact descriptor — no HTML is authored in the renderer.
     expect(handle.getState().step).toBe('generating');
     await flush();
     expect(handle.getState().step).toBe('generated');
-    expect(handle.getState().contentModel?.title).toBe('My Report');
+    expect(handle.getState().finalized?.finalizedArtifactId).toBe('final-1');
 
     // The Markdown source was never mutated by the wizard.
     expect(mdRef.value).toBe('# Title\n\nSome body.');
-  });
-
-  it('defaults to summary mode B when the user does not pick one', async () => {
-    const { host, deps } = setup();
-    click(host, 'orient-vertical');
-    click(host, 'layout-scroll');
-    click(host, 'design-default');
-    setField(host, 'free-requirement', '');
-    click(host, 'generate-submit');
-    await flush();
-    expect(lastPrompt(deps)).toContain('summary/chart mode: B');
   });
 
   it('keeps the typed free requirement when switching A/B/C/D (no re-render wipe)', async () => {
@@ -158,16 +118,14 @@ describe('mountHtmlExportWizard — generate composes ONE prompt from all four s
     click(host, 'orient-vertical');
     click(host, 'layout-scroll');
     click(host, 'design-default');
-    // Type the requirement, then change the summary mode (which re-renders).
     const ta = host.querySelector<HTMLTextAreaElement>('[data-he-field="free-requirement"]')!;
     ta.value = 'audience: execs';
     ta.dispatchEvent(new Event('input', { bubbles: true }));
     click(host, 'summary-A');
-    // The textarea is repopulated from state after the re-render.
     expect(host.querySelector<HTMLTextAreaElement>('[data-he-field="free-requirement"]')!.value).toBe('audience: execs');
     click(host, 'generate-submit');
     await flush();
-    expect(lastPrompt(deps)).toContain('audience: execs');
+    expect(lastRequest(deps).prompt).toContain('audience: execs');
   });
 });
 
@@ -187,7 +145,7 @@ describe('mountHtmlExportWizard — design fetch failure keeps choose-design (de
     expect(handle.getState().fetchError).toBe('offline');
     expect(handle.getState().design).toBeUndefined();
     expect(host.querySelector('.he-error')).toBeTruthy();
-    expect(deps.aiGenerate).not.toHaveBeenCalled();
+    expect(deps.generateHtmlExport).not.toHaveBeenCalled();
 
     // The explicit default-design action is the only no-fetch way forward.
     click(host, 'design-default');
@@ -197,35 +155,33 @@ describe('mountHtmlExportWizard — design fetch failure keeps choose-design (de
     expect(handle.getState().step).toBe('generating');
     await flush();
     expect(handle.getState().step).toBe('generated');
-    // The default-design provenance is recorded in the single prompt.
-    expect(lastPrompt(deps)).toContain('design source: default');
   });
 });
 
-describe('mountHtmlExportWizard — token warning gate', () => {
-  it('a long document stops at token-warning until confirmed', async () => {
-    const { host, deps, handle } = setup({ maxSourceCharsForModel: () => 1000 }, 'z'.repeat(20000));
+describe('mountHtmlExportWizard — save wires the finalized artifact through the main pipeline', () => {
+  it('save-html submits ONLY the opaque finalized IDs (never bytes) to saveHtmlFinalized', async () => {
+    const { host, deps } = setup();
     click(host, 'orient-vertical');
     click(host, 'layout-scroll');
     click(host, 'design-default');
-    expect(handle.getState().step).toBe('summary-requirement');
-
-    setField(host, 'free-requirement', 'bold');
+    setField(host, 'free-requirement', '');
     click(host, 'generate-submit');
-    // Generation must NOT start before confirmation.
-    expect(handle.getState().step).toBe('token-warning');
-    expect(deps.aiGenerate).not.toHaveBeenCalled();
-
-    click(host, 'token-confirm');
-    expect(handle.getState().step).toBe('generating');
-    expect(deps.aiGenerate).toHaveBeenCalledTimes(1);
     await flush();
-    expect(handle.getState().step).toBe('generated');
+    click(host, 'save-html');
+    await settle(() => (deps.saveHtmlFinalized as ReturnType<typeof vi.fn>).mock.calls.length > 0);
+
+    expect(deps.saveHtmlFinalized).toHaveBeenCalledTimes(1);
+    const arg = (deps.saveHtmlFinalized as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(arg.attemptId).toBe('attempt-1');
+    expect(arg.finalizedArtifactId).toBe('final-1');
+    // The renderer never touches HTML bytes on the save path.
+    expect(arg).not.toHaveProperty('html');
+    expect(host.querySelector('.he-card-saved')).toBeTruthy();
   });
 });
 
 describe('mountHtmlExportWizard — HTML-only model picker', () => {
-  it('renders a model picker on summary-requirement and routes the chosen model to aiGenerate', async () => {
+  it('renders a model picker on summary-requirement and routes the chosen model to generateHtmlExport', async () => {
     const { host, deps } = setup({
       listHtmlModels: async () => [
         { provider: 'chatgpt', id: 'gpt-5.4-mini', label: 'GPT-5.4 mini', contextWindow: 400_000 },
@@ -244,21 +200,19 @@ describe('mountHtmlExportWizard — HTML-only model picker', () => {
     const optText = Array.from(select!.querySelectorAll('option')).map((o) => o.textContent);
     expect(optText).toContain('GPT-5.6 · 1M');
     expect(optText).toContain('GPT-5.4 mini · 400K');
-    expect(optText).not.toContain('GPT-5.4 · 1M');
     // Pick the bigger model.
     select!.value = 'chatgpt:gpt-5.6';
     click(host, 'generate-submit');
     await flush();
-    expect(deps.aiGenerate).toHaveBeenCalledTimes(1);
-    const passedModel = (deps.aiGenerate as ReturnType<typeof vi.fn>).mock.calls[0][1];
-    expect(passedModel).toEqual({ provider: 'chatgpt', id: 'gpt-5.6' });
+    expect(deps.generateHtmlExport).toHaveBeenCalledTimes(1);
+    expect(lastRequest(deps).model).toEqual({ provider: 'chatgpt', id: 'gpt-5.6' });
   });
 });
 
-describe('mountHtmlExportWizard — invalid AI reply surfaces an error', () => {
-  it('an AI reply that is not a valid content model → error step', async () => {
+describe('mountHtmlExportWizard — a non-final generation result surfaces an error', () => {
+  it('a failed/partial pipeline result → error step (no finalized artifact to save)', async () => {
     const { host, handle } = setup({
-      aiGenerate: vi.fn(() => ({ result: Promise.resolve('Sorry, here is some markdown instead'), cancel: vi.fn() })),
+      generateHtmlExport: vi.fn(async () => FAILED_RESULT),
     });
     click(host, 'orient-vertical');
     click(host, 'layout-scroll');
@@ -268,22 +222,6 @@ describe('mountHtmlExportWizard — invalid AI reply surfaces an error', () => {
     await flush();
     expect(handle.getState().step).toBe('error');
     expect(host.querySelector('.he-error')).toBeTruthy();
-  });
-
-  it('an AI reply that smuggles HTML is rejected (content models never contain markup)', async () => {
-    const { host, handle } = setup({
-      aiGenerate: vi.fn(() => ({
-        result: Promise.resolve('<!doctype html><html><body><h1>nope</h1></body></html>'),
-        cancel: vi.fn(),
-      })),
-    });
-    click(host, 'orient-vertical');
-    click(host, 'layout-scroll');
-    click(host, 'design-default');
-    setField(host, 'free-requirement', '');
-    click(host, 'generate-submit');
-    await flush();
-    expect(handle.getState().step).toBe('error');
   });
 });
 
@@ -345,15 +283,12 @@ describe('mountHtmlExportWizard — purpose/density/etc are demoted to an option
   it('shows the core controls and keeps the advanced knobs collapsed/optional', () => {
     const { host } = setup();
     toSummary(host);
-    // Core controls are present and not gated by the advanced panel.
     expect(host.querySelector('[data-he-field="free-requirement"]')).toBeTruthy();
     expect(host.querySelector('[data-he="summary-A"]')).toBeTruthy();
     expect(host.querySelector('[data-he="summary-D"]')).toBeTruthy();
-    // Advanced is a collapsed <details> by default.
     const adv = host.querySelector('details.he-advanced');
     expect(adv).toBeTruthy();
     expect((adv as HTMLDetailsElement).open).toBe(false);
-    // Purpose lives inside advanced; auto mode hides the detail knobs.
     expect(host.querySelector('[data-he-field="purpose"]')).toBeTruthy();
     expect(host.querySelector('[data-he-field="density"]')).toBeNull();
     expect(host.querySelector('[data-he-field="interactive"]')).toBeNull();
@@ -368,98 +303,16 @@ describe('mountHtmlExportWizard — purpose/density/etc are demoted to an option
     expect(host.querySelector('[data-he-field="readable-width"]')).toBeTruthy();
     expect(host.querySelector('[data-he-field="interactive"]')).toBeTruthy();
   });
-  it('passes detail density and readable-width selections through to saved HTML', async () => {
-    let savedHtml = '';
-    const { host } = setup({
-      saveHtml: vi.fn(async ({ html }) => {
-        savedHtml = html;
-        return { saved: true, filePath: '/tmp/export.html' };
-      }),
-    });
+
+  it('passes the detail density selection through to the direct prompt', async () => {
+    const { host, deps } = setup();
     toSummary(host);
     click(host, 'mode-detail');
     setField(host, 'density', 'roomy');
-    setField(host, 'readable-width', 'wide');
     click(host, 'generate-submit');
     await flush();
-    click(host, 'save-html');
-    await flush();
-
-    expect(savedHtml).toContain('--he-readable-width: clamp(820px, 88vw, 1280px);');
-    expect(savedHtml).toContain('--he-rhythm: 48px;');
-  });
-  it('saves a contained scroll document when the requested slide plan misses the font floor', async () => {
-    let savedHtml = '';
-    const originalScrollHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollHeight');
-    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
-      configurable: true,
-      get: () => 10_000,
-    });
-
-    try {
-      const { host, deps } = setup({
-        saveHtml: vi.fn(async ({ html }) => {
-          savedHtml = html;
-          return { saved: true, filePath: '/tmp/export.html' };
-        }),
-      });
-      click(host, 'orient-horizontal');
-      click(host, 'layout-slides');
-      click(host, 'design-default');
-      setField(host, 'free-requirement', '');
-      click(host, 'generate-submit');
-      await flush();
-      click(host, 'save-html');
-      await settle(() => (deps.saveHtml as ReturnType<typeof vi.fn>).mock.calls.length > 0);
-
-      expect(deps.saveHtml).toHaveBeenCalledTimes(1);
-      expect(validationGate.selfContained).toHaveBeenCalledTimes(1);
-      expect(validationGate.exportDom).toHaveBeenCalledTimes(1);
-      expect(validationGate.selfContained.mock.calls[0][0]).toBe(savedHtml);
-      expect(validationGate.exportDom.mock.calls[0][0]).toBe(savedHtml);
-      expect(validationGate.selfContainedVerdicts[0]).toEqual({ ok: true, violations: [] });
-      expect(validationGate.exportDomVerdicts[0]).toEqual({ ok: true, violations: [] });
-      expect(savedHtml).toContain('data-he-layout="scroll"');
-      expect(savedHtml).not.toContain('class="he-doc he-slides"');
-      expect(savedHtml).toContain('My Report');
-      expect(savedHtml).toContain('Intro');
-      expect(savedHtml).toContain('Hello world.');
-      expect(host.textContent).not.toContain('he.error.containment');
-    } finally {
-      if (originalScrollHeight) Object.defineProperty(HTMLElement.prototype, 'scrollHeight', originalScrollHeight);
-      else delete (HTMLElement.prototype as { scrollHeight?: number }).scrollHeight;
-    }
-  });
-  it('keeps the self-containment hard gate when the fallback artifact fails validation', async () => {
-    const originalScrollHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollHeight');
-    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
-      configurable: true,
-      get: () => 10_000,
-    });
-    validationGate.forceSelfContainedFailure = true;
-
-    try {
-      const { host, deps } = setup({
-        saveHtml: vi.fn(async () => ({ saved: true, filePath: '/tmp/export.html' })),
-      });
-      click(host, 'orient-horizontal');
-      click(host, 'layout-slides');
-      click(host, 'design-default');
-      setField(host, 'free-requirement', '');
-      click(host, 'generate-submit');
-      await flush();
-      click(host, 'save-html');
-      await settle(() => validationGate.selfContained.mock.calls.length > 0);
-
-      expect(validationGate.selfContained).toHaveBeenCalledTimes(1);
-      expect(validationGate.exportDom).toHaveBeenCalledTimes(1);
-      expect((validationGate.selfContained.mock.calls[0][0] as string)).toContain('data-he-layout="scroll"');
-      expect(deps.saveHtml).not.toHaveBeenCalled();
-      expect(host.textContent).toContain('he.error.notSelfContained');
-    } finally {
-      if (originalScrollHeight) Object.defineProperty(HTMLElement.prototype, 'scrollHeight', originalScrollHeight);
-      else delete (HTMLElement.prototype as { scrollHeight?: number }).scrollHeight;
-    }
+    // roomy → full density directive in the single direct prompt.
+    expect(lastRequest(deps).prompt).toContain('FULL');
   });
 });
 

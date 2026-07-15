@@ -5,14 +5,22 @@
  * The controller (`html-export-wizard.ts`) owns fetch/AI side effects and feeds
  * their results back in as events. The user makes four core selections —
  * orientation, layout, a design.md, and summary/chart strength (A/B/C/D) — plus
- * a free-text requirement; "generate" composes them into a single content-model
+ * a free-text requirement; "generate" composes them into a single direct-authoring
  * prompt. A design is mandatory: a failed fetch keeps the user on choose-design,
  * and the only no-fetch path forward is an explicit "use the default design".
- * The deterministic HTML renderer lands later (G004); for now AI_DONE holds the
- * validated ContentModel rather than authored HTML.
+ * The model authors the HTML/CSS directly and the main pipeline finalizes it, so
+ * AI_DONE holds an opaque FinalizedArtifactId descriptor rather than any bytes.
  */
 
-import type { SummaryChartMode, DesignSource, ContentModel } from './html-export-model';
+import type { SummaryChartMode, DesignSource } from './html-export-model';
+import type { FinalizedArtifactId, HtmlExportAttemptId } from '../shared/html-export-pipeline';
+
+/** Renderer-safe descriptor of a finalized artifact (main-owned; opaque IDs only). */
+export type HtmlExportFinalized = {
+  attemptId: HtmlExportAttemptId;
+  finalizedArtifactId: FinalizedArtifactId;
+};
+
 
 export type Orientation = 'vertical' | 'horizontal';
 export type LayoutKind = 'scroll' | 'slides';
@@ -69,8 +77,8 @@ export type HtmlExportState = {
   interactive?: boolean;
   /** Free requirement awaiting an explicit token-warning confirmation before generation. */
   pendingRequirement?: string;
-  /** The validated content model held in renderer memory (the AI_DONE result). */
-  contentModel?: ContentModel;
+  /** The finalized artifact (opaque IDs) the main pipeline produced (AI_DONE result). */
+  finalized?: HtmlExportFinalized;
   /** Error message for the error step. */
   error?: string;
 };
@@ -97,7 +105,7 @@ export type HtmlExportEvent =
       interactive?: boolean;
     }
   | { type: 'CONFIRM_TOKEN_WARNING' }
-  | { type: 'AI_DONE'; model: ContentModel }
+  | { type: 'AI_DONE'; finalized: HtmlExportFinalized }
   | { type: 'AI_ERROR'; error: string }
   | { type: 'BACK' }
   | { type: 'CANCEL' };
@@ -223,7 +231,7 @@ export function htmlExportReducer(state: HtmlExportState, event: HtmlExportEvent
 
     case 'AI_DONE':
       if (state.step !== 'generating') return state;
-      return { ...state, step: 'generated', contentModel: event.model, error: undefined };
+      return { ...state, step: 'generated', finalized: event.finalized, error: undefined };
 
     case 'AI_ERROR':
       if (state.step !== 'generating') return state;

@@ -536,29 +536,10 @@ export function registerHtmlExportIpc({
     }
   });
 
-  handleTrusted('html:save', async (event, args: { html?: string; defaultName?: string }) => {
-    const win = windowForWebContents(event.sender.id);
-    if (!win || typeof args?.html !== 'string') return { saved: false as const };
-    const result = await dialog.showSaveDialog(win, {
-      filters: [{ name: 'HTML', extensions: ['html'] }],
-      defaultPath: htmlSaveFileName(args.defaultName),
-    });
-    if (result.canceled || !result.filePath) return { saved: false as const };
-    let target = result.filePath;
-    if (!/\.html?$/i.test(target)) target += '.html';
-    try {
-      await fs.writeFile(target, args.html, 'utf-8');
-    } catch (e) {
-      return { saved: false as const, error: e instanceof Error ? e.message : 'write-failed' };
-    }
-    return { saved: true as const, filePath: target };
-  });
-
   // AC-M1d: save the main-held FinalizedArtifactId bytes to a single HTML file
   // via an atomic write. The renderer submits only opaque IDs — never bytes — and
-  // the previous `html:save` path stays live until the single cutover. No partial
-  // file is ever left on failure; the returned sha256 lets a caller assert
-  // preview == save-finalized digest.
+  // no partial file is ever left on failure; the returned sha256 lets a caller
+  // assert preview == save-finalized digest.
   handleTrusted('html:save-finalized', async (event, input: unknown): Promise<SaveFinalizedResult> => {
     const binding = await bindSenderInvalidation(event.sender);
     if (!binding) return { saved: false as const };

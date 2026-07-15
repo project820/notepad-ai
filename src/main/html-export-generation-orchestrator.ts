@@ -117,6 +117,7 @@ type GenerationFailedStage =
 export type GenerationAttemptResult =
   | {
       state: 'final';
+      attemptId: HtmlExportAttemptId;
       finalizedArtifactId: FinalizedArtifactId;
       resolvedArtifactId: ResolvedArtifactId;
       sanitizedArtifactId: SanitizedArtifactId;
@@ -125,6 +126,7 @@ export type GenerationAttemptResult =
     }
   | {
       state: 'partial';
+      attemptId: HtmlExportAttemptId;
       resolvedArtifactId: ResolvedArtifactId;
       quarantineKind: HtmlExportQuarantineErrorKind;
       route: GenerationRoute;
@@ -289,6 +291,7 @@ export class HtmlExportGenerationOrchestrator {
             // Artifact resolved but could not be behaviorally proven.
             return {
               state: 'partial',
+              attemptId,
               resolvedArtifactId,
               quarantineKind: measured.kind,
               route: route!,
@@ -310,6 +313,7 @@ export class HtmlExportGenerationOrchestrator {
 
       return {
         state: 'final',
+        attemptId,
         finalizedArtifactId: finalized.value.artifact.id,
         resolvedArtifactId,
         sanitizedArtifactId,

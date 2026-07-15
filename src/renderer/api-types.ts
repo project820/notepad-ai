@@ -120,7 +120,6 @@ export type Api = HtmlExportPipelineApi & HtmlExportAssetApi & {
   convertAttachment: (base64: string, ext: string) => Promise<{ ok: boolean; markdown?: string; error?: string }>;
   fetchDesignMd: (input: string) => Promise<{ ok: boolean; designMd?: string; rawUrl?: string; error?: string }>;
   listDesigns: () => Promise<{ ok: boolean; designs?: { slug: string; name: string; pageUrl: string }[]; error?: string }>;
-  saveHtml: (args: { html: string; defaultName?: string }) => Promise<{ saved: boolean; filePath?: string; error?: string }>;
   generateHtmlExport: (
     request: { prompt: string; model: { provider: AiProviderId; id: string }; instructions?: string },
   ) => Promise<GenerationAttemptResult>;

@@ -713,11 +713,10 @@ describe('HTML export pipeline IPC', () => {
     expect(assetLifecycle.releaseWebContents).not.toHaveBeenCalled();
     expect(ipc.handler('design:fetch')).toBeDefined();
     expect(ipc.handler('design:list')).toBeDefined();
-    expect(ipc.handler('html:save')).toBeDefined();
     expect(ipc.handler('html:open-saved')).toBeDefined();
   });
 
-  it('keeps legacy save and open behavior fail-closed', async () => {
+  it('keeps open-saved behavior fail-closed', async () => {
     const service = createService();
     const sender: Sender = { id: 45, once: vi.fn() };
     registerHtmlExportIpc({
@@ -726,13 +725,8 @@ describe('HTML export pipeline IPC', () => {
       assetLifecycle: createNoopAssetLifecycle(),
     });
 
-    const save = await ipc.handler('html:save')!(eventFor(sender), {
-      html: '<!doctype html><p>legacy</p>',
-      defaultName: 'legacy.html',
-    });
     const open = await ipc.handler('html:open-saved')!(eventFor(sender), 'not-html.txt');
 
-    expect(save).toStrictEqual({ saved: false });
     expect(open).toStrictEqual({ opened: false, error: 'Not an openable HTML file.' });
   });
   it('finalizes on quarantine PASS and returns finalizedArtifactId', async () => {
@@ -1073,7 +1067,6 @@ describe('HTML export pipeline IPC', () => {
         pipelineService: service as never,
         assetLifecycle: createNoopAssetLifecycle(),
       });
-      expect(ipc.handler('html:save')).toBeDefined();
       expect(ipc.handler('html:save-finalized')).toBeDefined();
     });
   });
