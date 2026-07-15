@@ -119,7 +119,14 @@ const htmlExportGenerator = createHtmlExportGenerator({
     signal.addEventListener('abort', onAbort, { once: true });
     try {
       const measured = await htmlExportQuarantine.measure(webContentsId, attemptId, resolvedArtifactId);
-      return measured.ok ? { ok: true as const } : { ok: false as const, kind: measured.error.kind };
+      if (!measured.ok) return { ok: false as const, kind: measured.error.kind };
+      // The quarantine gate must reject a document that renders but overflows its
+      // viewport horizontally (a broken/uncontained layout) — otherwise an
+      // overflowing export is finalized as a success. See #29 review (P1).
+      if (measured.value.measurement.horizontalOverflow) {
+        return { ok: false as const, kind: 'layout-violation' as const };
+      }
+      return { ok: true as const };
     } finally {
       signal.removeEventListener('abort', onAbort);
     }
