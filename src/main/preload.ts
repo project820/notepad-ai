@@ -2,6 +2,17 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type { AiProviderErrorKind, AiProviderId, ModelRef, ProviderAuthStatus, ReasoningEffort } from './ai/types';
 import type { FileTreeEntry } from '../shared/file-types';
 import type { AuthSnapshot, LoginUpdate, SubscriptionLoginUpdate, SubscriptionProvider } from '../shared/auth-protocol';
+import type {
+  BeginAttemptRequest,
+  BeginAttemptResult,
+  CancelAttemptRequest,
+  CancelAttemptResult,
+  HtmlExportPipelineApi,
+  ResolveRequest,
+  ResolveResult,
+  SanitizeRequest,
+  SanitizeResult,
+} from '../shared/html-export-pipeline';
 
 type OpenedFile = {
   filePath: string | null;
@@ -280,10 +291,18 @@ const api = {
     designs?: { slug: string; name: string; pageUrl: string }[];
     error?: string;
   }> => ipcRenderer.invoke('design:list'),
-  saveHtml: (args: { html: string; defaultName?: string }): Promise<{ saved: boolean; filePath?: string }> =>
+  saveHtml: (args: { html: string; defaultName?: string }): Promise<{ saved: boolean; filePath?: string; error?: string }> =>
     ipcRenderer.invoke('html:save', args),
   openSavedHtml: (filePath: string): Promise<{ opened: boolean; error?: string }> =>
     ipcRenderer.invoke('html:open-saved', filePath),
+  beginHtmlExportAttempt: (request: BeginAttemptRequest): Promise<BeginAttemptResult> =>
+    ipcRenderer.invoke('html:attempt:generate', request),
+  sanitizeHtmlExport: (request: SanitizeRequest): Promise<SanitizeResult> =>
+    ipcRenderer.invoke('html:pipeline:sanitize', request),
+  resolveHtmlExport: (request: ResolveRequest): Promise<ResolveResult> =>
+    ipcRenderer.invoke('html:pipeline:resolve', request),
+  cancelHtmlExportAttempt: (request: CancelAttemptRequest): Promise<CancelAttemptResult> =>
+    ipcRenderer.invoke('html:attempt:cancel', request),
 
   // OS integration (⑥) — default .md editor handler
   mdHandlerStatus: (): Promise<{ supported: boolean; registered?: boolean }> =>
@@ -291,5 +310,7 @@ const api = {
   registerMdHandler: (): Promise<{ ok: boolean; registered?: boolean; defaultSet?: boolean; error?: string }> =>
     ipcRenderer.invoke('os:register-md-handler'),
 };
+
+api satisfies HtmlExportPipelineApi;
 
 contextBridge.exposeInMainWorld('api', api);

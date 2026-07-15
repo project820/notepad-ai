@@ -19,6 +19,9 @@ import { registerAuthIpc } from './ipc/auth-ipc';
 import { registerProviderAuthIpc } from './ipc/provider-auth-ipc';
 import { registerFileIpc } from './ipc/file-ipc';
 import { registerHtmlExportIpc } from './ipc/html-export-ipc';
+import { HtmlExportAttemptRegistry } from './html-export-attempt-registry';
+import { HtmlExportParseHost } from './html-export-parse-host';
+import { HtmlExportPipelineService } from './html-export-pipeline-service';
 import { registerOsIpc } from './ipc/os-ipc';
 import { registerSessionIpc } from './ipc/session-ipc';
 import { registerWizardIpc } from './ipc/wizard-ipc';
@@ -47,6 +50,12 @@ if (shouldUseMockKeychain(process.env)) app.commandLine.appendSwitch('use-mock-k
 configureAppIdentity();
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 const converterHost = createConverterHost();
+const htmlExportAttemptRegistry = new HtmlExportAttemptRegistry();
+const htmlExportParseHost = new HtmlExportParseHost();
+const htmlExportPipelineService = new HtmlExportPipelineService({
+  registry: htmlExportAttemptRegistry,
+  parseHost: htmlExportParseHost,
+});
 const testCloseChoice = process.env.NOTEPAD_AI_CLOSE_DIALOG_CHOICE;
 const windows = createAppWindows({
   registry,
@@ -87,7 +96,10 @@ handleTrusted('app:relaunch', async () => {
 });
 handleTrusted('shell:open-external', async (_e, url: string) => { if (isAllowedExternalUrl(url)) await shell.openExternal(url); });
 registerOsIpc();
-registerHtmlExportIpc({ windowForWebContents: (id) => windows.windowFromRecord(registry.getByWebContents(id)) });
+registerHtmlExportIpc({
+  windowForWebContents: (id) => windows.windowFromRecord(registry.getByWebContents(id)),
+  pipelineService: htmlExportPipelineService,
+});
 
 let quitGuardPending = false;
 let quitApproved = false;
