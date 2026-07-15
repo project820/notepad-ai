@@ -229,6 +229,21 @@ describe('buildDirectHtmlPrompt — 30k single-pass boundary + no silent truncat
     expect(under.prompt).toContain(source);
     expect(over.prompt).toContain(source);
   });
+
+  it('clamps a per-model singlePassLimit to the frozen 30k ceiling (never raises it)', () => {
+    // A large-context model budget must NOT lift the single-pass window above
+    // SINGLE_PASS_SOURCE_LIMIT: this direct path has no outline/batch fallback,
+    // so a >30k source still trips the fail-fast gate.
+    const source = 'q'.repeat(SINGLE_PASS_SOURCE_LIMIT + 1);
+    const config = resolveDirectExportConfig({ purpose: 'document' });
+    const huge = buildDirectHtmlPrompt(config, source, { singlePassLimit: SINGLE_PASS_SOURCE_LIMIT + 500_000 });
+    expect(huge.coverage.withinSinglePass).toBe(false);
+    expect(huge.coverage.complete).toBe(true);
+    expect(huge.prompt).toContain(source);
+    // A smaller per-model budget still tightens below the ceiling.
+    const tight = buildDirectHtmlPrompt(config, 'q'.repeat(60), { singlePassLimit: 50 });
+    expect(tight.coverage.withinSinglePass).toBe(false);
+  });
 });
 
 describe('buildOutlinePrompt — whole-source coverage + stable ids + ranges', () => {

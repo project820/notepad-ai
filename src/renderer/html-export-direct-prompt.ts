@@ -197,9 +197,13 @@ export function buildDirectHtmlPrompt(
   source: string,
   opts?: { singlePassLimit?: number },
 ): { prompt: string; coverage: SourceCoverage } {
+  // A per-model budget may only TIGHTEN the single-pass window, never raise it
+  // above the frozen 30k ceiling: this direct path has no outline/batch fallback
+  // (that is deferred), so a source over SINGLE_PASS_SOURCE_LIMIT must still trip
+  // the fail-fast within-single-pass gate even for a large-context model.
   const limit =
     typeof opts?.singlePassLimit === 'number' && opts.singlePassLimit > 0
-      ? Math.floor(opts.singlePassLimit)
+      ? Math.min(Math.floor(opts.singlePassLimit), SINGLE_PASS_SOURCE_LIMIT)
       : SINGLE_PASS_SOURCE_LIMIT;
   const body = typeof source === 'string' ? source : '';
   const coverage = fullSourceCoverage(body, limit);
