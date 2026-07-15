@@ -136,13 +136,14 @@ describe('buildDirectHtmlPrompt — 1:1 config mapping + full source', () => {
     expect(prompt).toMatch(/Sure, here is/i);
     expect(prompt).toMatch(/I hope this helps/i);
     expect(prompt).toMatch(/whether bare text or wrapped in an element/i);
-    // Raster images are not supported in the direct export (no asset-ID injection
-    // and the sanitizer rejects non-asset src); the prompt must not advertise them
-    // and must tell the model not to emit them, so image-heavy sources are not
-    // rejected at sanitization. Inline <svg> stays supported (#29 review).
-    expect(prompt).toMatch(/Raster images.*NOT supported/i);
+    // Image contract (aligned with main #31): an <img> src may ONLY be an app-issued
+    // opaque asset ID (asset:…); data: URIs and remote/relative URLs are forbidden, and
+    // with no asset IDs provided the model must emit no <img>. The sanitizer enforces the
+    // asset: src policy, so the prompt must state it and must NOT promise data: images.
+    expect(prompt).toMatch(/asset:/i);
+    expect(prompt).toMatch(/only.{0,40}asset ID/i);
+    expect(prompt).toMatch(/never.{0,40}data: URIs|NEVER emit data:/i);
     expect(prompt).not.toMatch(/inline data: images/i);
-    expect(prompt).not.toMatch(/img\/picture\/source/);
     // The legacy content-model guidance that forbids encoding HTML/CSS must NOT
     // appear in a direct-authoring prompt (AC-M1a contradiction guard).
     expect(prompt).not.toMatch(/never encode CSS, HTML/i);
@@ -338,5 +339,41 @@ describe('design.md clamp', () => {
     expect(prompt).toContain('\n…');
     // Source still fully present.
     expect(prompt).toContain('short source');
+  });
+});
+
+describe('image directives — prompt must mirror the sanitizer asset-ID contract', () => {
+  const config = resolveDirectExportConfig({ purpose: 'presentation' });
+  const source = 'sample source';
+  const section = { id: 'section-1', title: 'Intro', sourceRange: { start: 0, end: source.length } };
+
+  const prompts = [
+    buildDirectHtmlPrompt(config, source).prompt,
+    buildOutlinePrompt(config, source).prompt,
+    buildSectionPrompt(config, section, source).prompt,
+  ];
+
+  it('never instructs the model to use inline data: URI images', () => {
+    for (const prompt of prompts) {
+      expect(prompt).not.toMatch(/inline data: images/i);
+      expect(prompt).not.toMatch(/use\s+(only\s+)?data:\s*(uri|url|image)/i);
+    }
+  });
+
+  it('directs the app-issued asset-ID contract and forbids data:/remote URLs', () => {
+    for (const prompt of prompts) {
+      expect(prompt).toContain('src="asset:');
+      expect(prompt).toMatch(/never\s+(emit\s+)?data:\s*URIs/i);
+    }
+  });
+
+  it('authoring prompts instruct: no provided asset IDs means no <img>', () => {
+    const authoring = [
+      buildDirectHtmlPrompt(config, source).prompt,
+      buildSectionPrompt(config, section, source).prompt,
+    ];
+    for (const prompt of authoring) {
+      expect(prompt).toMatch(/no provided asset ids means no <img>/i);
+    }
   });
 });
