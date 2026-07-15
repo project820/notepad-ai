@@ -244,6 +244,14 @@ describe('sanitizeHtmlExport', () => {
     }
   });
   it.each([
+    ['active ancestor', '<form><svg><path d="M,0 0"/></svg></form>', 'html_active_tag'],
+    ['event ancestor', '<div onclick="x"><svg><path d="M,0 0"/></svg></div>', 'html_event_handler'],
+    ['reserved ancestor', '<div class="he-shell"><svg><path d="M,0 0"/></svg></div>', 'html_reserved_namespace'],
+    ['structural ancestor', '<p contenteditable="true"><svg><path d="M,0 0"/></svg></p>', 'html_attribute'],
+  ])('gives outer HTML boundaries precedence over malformed SVG: %s', (_name, html, code) => {
+    expect(failureCode(html)).toBe(code);
+  });
+  it.each([
     ['style before reserved class', '<p style="@" class="he-shell">x</p>', 'html_reserved_namespace'],
     ['reserved class before style', '<p class="he-shell" style="@">x</p>', 'html_reserved_namespace'],
     ['style before reserved id', '<p style="@" id="runtime-root">x</p>', 'html_reserved_namespace'],
@@ -309,5 +317,92 @@ describe('sanitizeHtmlExport', () => {
     const exact = Array.from({ length: HTML_SANITIZER_LIMITS.maxAttributes / HTML_SANITIZER_LIMITS.maxAttributesPerElement }, () => HTML_SANITIZER_LIMITS.maxAttributesPerElement);
     expect(sanitizeHtmlExport({ html: '', parse: injectedParse(documentWithElements(exact)) }).ok).toBe(true);
     expect(failureCodeWithParse(documentWithElements([...exact, 1]))).toBe('html_cap');
+  });
+  it('reconstructs safe SVG primitives without SVG CSS markers and is idempotent', () => {
+    const source = '<svg width="10" height="10" viewBox="0 0 10 10" role="img" aria-label="chart">' +
+      '<!--comment--><title>Chart</title><desc>Static data</desc><defs><path id="p" d="M0 0L1 1"/></defs><g transform="translate(1 2)" fill="#AbC">' +
+      '<path d="M0 0"/><rect x="0" y="0" width="1" height="1"/><circle cx="1" cy="1" r="1"/>' +
+      '<ellipse cx="1" cy="1" rx="1" ry="1"/><line x1="0" y1="0" x2="1" y2="1"/>' +
+      '<polyline points="0,0 1,1"/><polygon points="0,0 1,1"/><text id="label"> A<tspan> B</tspan></text>' +
+      '<use href="#p"/><use href="#label"/></g></svg>';
+    const first = sanitize(source);
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    expect(first.bodyHtml).toContain('<svg width="10" height="10" viewBox="0 0 10 10" role="img" aria-label="chart">');
+    expect(first.bodyHtml).not.toContain('<!--');
+    expect(first.bodyHtml).not.toContain('data-he-inline-style');
+    expect(first.contentCss).toBe('@layer he-authored{}');
+    expect(sanitize(source)).toEqual(first);
+    const second = sanitize(first.bodyHtml);
+    expect(second.ok).toBe(true);
+    if (second.ok) expect(second.bodyHtml).toBe(first.bodyHtml);
+  });
+  it.each([
+    ['mixed-case url function', 'UrL (https://e.test/x)', 'css_rejected'],
+    ['comment-obfuscated url function', 'u/**/r/**/l/**/(https://e.test/x)', 'css_rejected'],
+    ['escaped import at-keyword', '@\\69mport x', 'css_rejected'],
+    ['ordinary curl text', 'curl(', null],
+    ['ordinary important text', '@important', null],
+  ])('applies SVG CSS token boundaries through the HTML sanitizer: %s', (_name, label, code) => {
+    const result = sanitize(`<svg aria-label="${label}"><path d="M0 0"/></svg>`);
+    expect(result.ok).toBe(code === null);
+    if (code !== null && !result.ok) expect(result.violations[0].code).toBe(code);
+  });
+
+  it('preserves SVG text while omitting formatting-only whitespace during document reconstruction', () => {
+    const result = sanitize('<svg>\n  <text>&lt;&amp;<tspan> &gt; </tspan></text>\n</svg>');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bodyHtml).toBe('<svg><text>&lt;&amp;<tspan> &gt; </tspan></text></svg>');
+  });
+
+  it.each([
+    ['script', '<svg><script>alert(1)</script></svg>', 'html_active_tag'],
+    ['foreignObject', '<svg><foreignObject><p>x</p></foreignObject></svg>', 'html_active_tag'],
+    ['event handler', '<svg><path d="M0 0" onload="x"/></svg>', 'html_event_handler'],
+    ['javascript href', '<svg><use href="javascript:alert(1)"/></svg>', 'html_url'],
+    ['external href', '<svg><use href="https://e.test/x"/></svg>', 'html_url'],
+    ['external xlink href', '<svg><use xlink:href="https://e.test/x"/></svg>', 'html_reserved_namespace'],
+    ['fragment xlink href regression', '<svg><use xlink:href="#p"/></svg>', 'html_reserved_namespace'],
+    ['network image', '<svg><image href="https://e.test/x"/></svg>', 'html_active_tag'],
+    ['asset image', '<svg><image href="asset:abcdefghijklmnop"/></svg>', 'html_active_tag'],
+    ['style element', '<svg><style>path{fill:red}</style></svg>', 'html_active_tag'],
+    ['style attribute', '<svg><path d="M0 0" style="fill:red"/></svg>', 'css_rejected'],
+    ['animate', '<svg><animate attributeName="x" values="0;1"/></svg>', 'html_active_tag'],
+    ['set', '<svg><set attributeName="fill" to="red"/></svg>', 'html_active_tag'],
+    ['foreign namespace element', '<svg><math><mi>x</mi></math></svg>', 'html_reserved_namespace'],
+    ['CSS url', '<svg><path d="M0 0" fill="url(https://e.test/x)"/></svg>', 'css_rejected'],
+    ['obfuscated CSS url', '<svg><path d="M0 0" fill="u/**/rl (https://e.test/x)"/></svg>', 'css_rejected'],
+    ['line-continuation CSS url', '<svg><path d="M0 0" fill="u\\\nrl(https://e.test/x)"/></svg>', 'css_rejected'],
+    ['CSS import', '<svg><path d="M0 0" style="@import url(https://e.test/x)"/></svg>', 'css_rejected'],
+    ['escaped CSS import', '<svg><path d="M0 0" style="@\\69mport url(https://e.test/x)"/></svg>', 'css_rejected'],
+  ])('rejects frozen SVG vector: %s', (_name, html, code) => {
+    expect(failureCode(html)).toBe(code);
+  });
+
+  it.each([
+    ['unknown filter', '<svg><filter><path d="M0 0"/></filter></svg>'],
+    ['unknown link', '<svg><a><path d="M0 0"/></a></svg>'],
+    ['nested svg', '<svg><svg><path d="M0 0"/></svg></svg>'],
+    ['defs under group', '<svg><g><defs><path d="M0 0"/></defs></g></svg>'],
+    ['geometry child', '<svg><path d="M0 0"><path d="M0 0"/></path></svg>'],
+    ['stray container text', '<svg>text<path d="M0 0"/></svg>'],
+    ['unknown attribute', '<svg><path d="M0 0" data-x="x"/></svg>'],
+    ['class attribute', '<svg><path d="M0 0" class="x"/></svg>'],
+    ['dangling use', '<svg><use href="#missing"/></svg>'],
+    ['container use target', '<svg><g id="g"><path d="M0 0"/></g><use href="#g"/></svg>'],
+    ['cross-root use target', '<svg><use href="#p"/></svg><svg><path id="p" d="M0 0"/></svg>'],
+    ['duplicate document ID use target', '<p id="p">x</p><svg><path id="p" d="M0 0"/><use href="#p"/></svg>'],
+  ])('rejects SVG structural failure: %s', (_name, html) => {
+    expect(failureCode(html)).toBe('html_svg_rejected');
+  });
+
+  it('rejects forged SVG attribute namespaces before generic attribute handling', () => {
+    const document = documentWithElement('svg') as unknown as {
+      childNodes: Array<Record<string, unknown>>;
+    };
+    document.childNodes[0].namespaceURI = 'http://www.w3.org/2000/svg';
+    document.childNodes[0].attrs = [{ name: 'href', value: '#p', prefix: 'xlink', namespace: 'http://www.w3.org/1999/xlink' }];
+    expect(failureCodeWithParse(document)).toBe('html_reserved_namespace');
   });
 });

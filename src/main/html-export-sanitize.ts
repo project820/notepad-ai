@@ -8,6 +8,12 @@ import {
   type CssSanitizeContext,
   type CssViolation,
 } from './html-export-css-sanitize';
+import {
+  preflightSvgSubtrees,
+  reconstructSvgRoot,
+  type SvgRootPlan,
+  type SvgViolationCode,
+} from './html-export-svg-sanitize';
 
 /** Resource limits applied to the parsed, model-authored tree. */
 export const HTML_SANITIZER_LIMITS = {
@@ -25,12 +31,13 @@ export const HTML_VIOLATION_CODES = {
   url: 'html_url',
   assetId: 'html_asset_id',
   attribute: 'html_attribute',
+  svgRejected: 'html_svg_rejected',
   cap: 'html_cap',
   cssRejected: 'css_rejected',
   internal: 'html_internal',
 } as const;
 
-type HtmlSanitizerViolationCode = (typeof HTML_VIOLATION_CODES)[keyof typeof HTML_VIOLATION_CODES];
+type HtmlSanitizerViolationCode = (typeof HTML_VIOLATION_CODES)[keyof typeof HTML_VIOLATION_CODES] | SvgViolationCode;
 type HtmlSanitizerViolation = { code: HtmlSanitizerViolationCode; detail: string };
 type HtmlSanitizerCounts = { nodeCount: number; maxDepth: number; attributeCount: number };
 export type HtmlExportParse = (html: string) => DefaultTreeAdapterTypes.Document;
@@ -66,6 +73,7 @@ type Context = {
   inlineRules: string[];
   nextInlineStyle: number;
   cssContext: CssSanitizeContext;
+  svgPlans: Map<Node, SvgRootPlan>;
 };
 type Failure = { violation: HtmlSanitizerViolation };
 
@@ -227,6 +235,28 @@ function preflightAttributeFailure(
   }
   return null;
 }
+function preflightHtmlBoundary(root: Node, isAllowedAssetId: (src: string) => boolean): Failure | null {
+  const visit = (node: Node): Failure | null => {
+    const name = tagName(node);
+    if (name === 'svg') {
+      // SVG attributes are preflighted by the static SVG sanitizer after outer HTML boundaries.
+      return null;
+    }
+    if (name) {
+      if (ACTIVE_TAGS.has(name) || (name === 'meta' && attrs(node).some((attribute) => attribute.name.toLowerCase() === 'http-equiv'))) {
+        return fail(HTML_VIOLATION_CODES.activeTag, `active tag ${name}`);
+      }
+      const attributeFailure = preflightAttributeFailure(node, name, ALLOWED_TAGS.has(name), isAllowedAssetId);
+      if (attributeFailure) return attributeFailure;
+    }
+    for (const child of childNodes(node)) {
+      const childFailure = visit(child);
+      if (childFailure) return childFailure;
+    }
+    return null;
+  };
+  return visit(root);
+}
 
 function cssFailure(violation: CssViolation): Failure {
   return fail(HTML_VIOLATION_CODES.cssRejected, `${violation.code}: ${violation.detail}`);
@@ -293,6 +323,7 @@ function validateStyleAttributes(node: Node): Failure | null {
 }
 
 function scanDiscardedNode(node: Node, context: Context): Failure | null {
+  if (context.svgPlans.has(node)) return null;
   const name = tagName(node);
   if (!name) return null;
   if (ACTIVE_TAGS.has(name) || (name === 'meta' && attrs(node).some((attribute) => attribute.name.toLowerCase() === 'http-equiv'))) {
@@ -315,19 +346,28 @@ function scanDiscardedNode(node: Node, context: Context): Failure | null {
   return null;
 }
 
-function registerDocumentKeyframes(node: Node, context: CssSanitizeContext): Failure | null {
+function registerDocumentKeyframes(
+  node: Node,
+  context: CssSanitizeContext,
+  svgPlans: Map<Node, SvgRootPlan>,
+): Failure | null {
+  if (svgPlans.has(node)) return null;
   if (tagName(node) === 'style') {
     const registration = registerCssKeyframes(styleText(node), context);
     if (!registration.ok) return cssFailure(registration.violations[0]);
   }
   for (const child of childNodes(node)) {
-    const childFailure = registerDocumentKeyframes(child, context);
+    const childFailure = registerDocumentKeyframes(child, context, svgPlans);
     if (childFailure) return childFailure;
   }
   const templateContent = (node as { content?: Node }).content;
-  return templateContent ? registerDocumentKeyframes(templateContent, context) : null;
+  return templateContent ? registerDocumentKeyframes(templateContent, context, svgPlans) : null;
 }
-function preflightCssSurfaces(root: Node, isAllowedAssetId: (src: string) => boolean): Failure | null {
+function preflightCssSurfaces(
+  root: Node,
+  isAllowedAssetId: (src: string) => boolean,
+  svgPlans: Map<Node, SvgRootPlan>,
+): Failure | null {
   let cssBytes = 0;
   const addBytes = (css: string): Failure | null => {
     cssBytes += Buffer.byteLength(css, 'utf8');
@@ -336,6 +376,7 @@ function preflightCssSurfaces(root: Node, isAllowedAssetId: (src: string) => boo
       : null;
   };
   const visit = (node: Node): Failure | null => {
+    if (svgPlans.has(node)) return null;
     const name = tagName(node);
     if (name && (ACTIVE_TAGS.has(name) || (name === 'meta' && attrs(node).some((attribute) => attribute.name.toLowerCase() === 'http-equiv')))) {
       return fail(HTML_VIOLATION_CODES.activeTag, `active tag ${name}`);
@@ -366,6 +407,8 @@ function preflightCssSurfaces(root: Node, isAllowedAssetId: (src: string) => boo
 }
 
 function sanitizeNode(node: Node, context: Context, parentNode: DefaultTreeAdapterTypes.ParentNode | null): SanitizedNode[] | Failure {
+  const svgPlan = context.svgPlans.get(node);
+  if (svgPlan) return [reconstructSvgRoot(svgPlan, parentNode)];
   const name = tagName(node);
   if (!name) {
     if ((node as { nodeName?: string }).nodeName === '#text') return [makeText(textValue(node), parentNode)];
@@ -451,7 +494,11 @@ export function sanitizeHtmlExport(options: HtmlExportSanitizeOptions): HtmlExpo
     const counts = countParsedTree(document);
     if (isFailure(counts)) return { ok: false, violations: [counts.violation] };
     const isAllowedAssetId = options.isAllowedAssetId ?? (() => true);
-    const preflightFailure = preflightCssSurfaces(document, isAllowedAssetId);
+    const htmlBoundaryFailure = preflightHtmlBoundary(document, isAllowedAssetId);
+    if (htmlBoundaryFailure) return { ok: false, violations: [htmlBoundaryFailure.violation] };
+    const svgPreflight = preflightSvgSubtrees(document, isReservedValue);
+    if (!svgPreflight.ok) return { ok: false, violations: [svgPreflight.violation] };
+    const preflightFailure = preflightCssSurfaces(document, isAllowedAssetId, svgPreflight.plans);
     if (preflightFailure) return { ok: false, violations: [preflightFailure.violation] };
 
     const sourceNodes = childNodes(document);
@@ -462,8 +509,9 @@ export function sanitizeHtmlExport(options: HtmlExportSanitizeOptions): HtmlExpo
       inlineRules: [],
       nextInlineStyle: 0,
       cssContext,
+      svgPlans: svgPreflight.plans,
     };
-    const registrationFailure = registerDocumentKeyframes(document, cssContext);
+    const registrationFailure = registerDocumentKeyframes(document, cssContext, svgPreflight.plans);
     if (registrationFailure) return { ok: false, violations: [registrationFailure.violation] };
     const outputDocument = parse('<!doctype html><html><head></head><body></body></html>');
     const outputBody = findBody(outputDocument);
