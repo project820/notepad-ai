@@ -92,6 +92,71 @@ export type CancelAttemptRequest = {
 };
 export type CancelAttemptResult = HtmlExportPipelineResult<Record<string, never>>;
 
+/**
+ * Renderer-safe error union for the additive pre-finalization quarantine gate
+ * (PR-S3b / §5.12). `quarantine-*` kinds are produced by the sandboxed
+ * measurement itself; the remaining kinds are surfaced when the ResolvedArtifactId
+ * cannot be read from the registry. Bytes and native detail never cross this line.
+ */
+export type HtmlExportQuarantineErrorKind =
+  | 'quarantine-busy'
+  | 'quarantine-oversize'
+  | 'quarantine-timeout'
+  | 'quarantine-cancelled'
+  | 'quarantine-crashed'
+  | 'quarantine-unresponsive'
+  | 'quarantine-unavailable'
+  | 'layout-violation'
+  | 'recoverable-failure'
+  | 'unknown-artifact'
+  | 'stale-artifact'
+  | 'wrong-sender'
+  | 'attempt-superseded'
+  | 'pipeline-reject';
+
+export type HtmlExportQuarantineError = {
+  readonly kind: HtmlExportQuarantineErrorKind;
+  readonly detail: string;
+};
+
+export function createHtmlExportQuarantineError(
+  kind: HtmlExportQuarantineErrorKind,
+  detail = `HTML export quarantine error: ${kind}`,
+): HtmlExportQuarantineError {
+  return { kind, detail };
+}
+
+/**
+ * Bounded, renderer-safe summary of the sandboxed measurement. All values are
+ * numeric/boolean observations; no bytes, paths, or native handles are exposed.
+ */
+export type HtmlExportQuarantineMeasurement = {
+  readonly nodeCount: number;
+  readonly maxDepth: number;
+  readonly documentWidth: number;
+  readonly documentHeight: number;
+  readonly viewportWidth: number;
+  readonly viewportHeight: number;
+  readonly horizontalOverflow: boolean;
+  readonly activeRegionCount: number;
+  readonly printNavHidden: boolean;
+  readonly printSectionsOrdered: boolean;
+};
+
+type HtmlExportQuarantineVerdict = {
+  readonly verdict: 'pass';
+  readonly measurement: HtmlExportQuarantineMeasurement;
+};
+
+export type QuarantineMeasureRequest = {
+  attemptId: HtmlExportAttemptId;
+  resolvedArtifactId: ResolvedArtifactId;
+};
+
+export type QuarantineMeasureResult =
+  | { ok: true; value: HtmlExportQuarantineVerdict }
+  | { ok: false; error: HtmlExportQuarantineError };
+
 export type HtmlExportPipelineApi = {
   beginHtmlExportAttempt: (request: BeginAttemptRequest) => Promise<BeginAttemptResult>;
   sanitizeHtmlExport: (request: SanitizeRequest) => Promise<SanitizeResult>;

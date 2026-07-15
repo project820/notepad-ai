@@ -18,6 +18,7 @@
     "test:watch": "vitest",
     "test:main": "tsc -p tsconfig.main.json && node --test dist/main/overview-traversal.test.js",
     "test:html-export": "electron scripts/html-export-containment-runner.mjs",
+    "test:quarantine-smoke": "electron scripts/html-export-quarantine-smoke-runner.mjs",
     "test:security-e2e": "electron scripts/security-e2e-runner.mjs",
     "test:converter-e2e": "electron scripts/converter-e2e-runner.mjs",
     "test:roundtrip-smoke": "node scripts/roundtrip-smoke-runner.mjs",
