@@ -360,6 +360,46 @@ describe('mountHtmlExportWizard — purpose/density/etc are demoted to an option
     // roomy → full density directive in the single direct prompt.
     expect(lastRequest(deps).prompt).toContain('FULL');
   });
+
+  it('drops stale detail directives when the user switches back to Auto', async () => {
+    const { host, deps } = setup();
+    toSummary(host);
+    click(host, 'mode-detail');
+    setField(host, 'readable-width', 'wide');
+    click(host, 'generate-submit');
+    await flush();
+    // Detail mode → the readable-width directive is present.
+    expect(lastRequest(deps).prompt).toContain('WIDE reading measure');
+
+    // Back to the form, switch to Auto, regenerate: the stale detail directive is gone.
+    click(host, 'back');
+    click(host, 'mode-auto');
+    click(host, 'generate-submit');
+    await flush();
+    expect(lastRequest(deps).prompt).not.toContain('WIDE reading measure');
+  });
+
+  it('clears the custom-purpose directive when the input is emptied', async () => {
+    const { host, deps } = setup();
+    toSummary(host);
+    click(host, 'mode-detail');
+    const purposeSel = host.querySelector<HTMLSelectElement>('[data-he-field="purpose"]')!;
+    purposeSel.value = 'custom';
+    purposeSel.dispatchEvent(new Event('change', { bubbles: true }));
+    setField(host, 'custom-purpose', 'a snazzy microsite');
+    click(host, 'generate-submit');
+    await flush();
+    expect(lastRequest(deps).prompt).toContain('a snazzy microsite');
+
+    // Back, clear the custom-purpose input, submit again: the directive is dropped.
+    click(host, 'back');
+    const cp = host.querySelector<HTMLInputElement>('[data-he-field="custom-purpose"]')!;
+    cp.value = '';
+    cp.dispatchEvent(new Event('input', { bubbles: true }));
+    click(host, 'generate-submit');
+    await flush();
+    expect(lastRequest(deps).prompt).not.toContain('a snazzy microsite');
+  });
 });
 
 describe('mountHtmlExportWizard — getdesign list rows', () => {

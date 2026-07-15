@@ -278,18 +278,23 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
 
   /** Build the direct HTML-authoring prompt from the current selections + document. */
   function buildDirectPrompt(): { prompt: string; withinSinglePass: boolean } {
+    // Advanced knobs only apply in the DETAIL advanced mode; in AUTO they must not
+    // leak a prior detail selection into the prompt. custom-purpose only applies
+    // when the chosen purpose is actually 'custom'. summary/chart mode is a core
+    // control and always applies.
+    const detail = state.mode === 'detail';
     const config = resolveDirectExportConfig({
       purpose: mapPurpose(state.purpose),
       orientation: state.orientation === 'horizontal' ? 'landscape' : 'portrait',
       mode: state.layout === 'slides' ? 'slide' : 'scroll',
-      density: mapDensity(state.density),
+      density: detail ? mapDensity(state.density) : undefined,
       designMd: state.design?.designMd,
       userRequest: state.freeRequirement,
       model: pendingModel ? modelKey(pendingModel) : undefined,
       summaryChartMode: state.summaryChartMode,
-      readableWidth: state.readableWidth,
-      interactive: state.interactive,
-      customPurpose: state.customPurpose,
+      readableWidth: detail ? state.readableWidth : undefined,
+      interactive: detail ? state.interactive : undefined,
+      customPurpose: state.purpose === 'custom' ? state.customPurpose : undefined,
     });
     const { prompt, coverage } = buildDirectHtmlPrompt(config, deps.getMarkdown());
     return { prompt, withinSinglePass: coverage.withinSinglePass };
@@ -304,7 +309,10 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
     const summaryChartMode = state.summaryChartMode ?? DEFAULT_SUMMARY_MODE;
     // Advanced (optional) knobs — read only if the advanced panel rendered them.
     const purpose = ((field<HTMLSelectElement>('purpose')?.value as HtmlPurpose) || state.purpose) ?? undefined;
-    const customPurpose = field<HTMLInputElement>('custom-purpose')?.value.trim() || state.customPurpose;
+    // Distinguish an absent control (advanced panel not rendered → keep prior state)
+    // from a present-but-cleared input (user emptied it → clear it, no stale fallback).
+    const customPurposeField = field<HTMLInputElement>('custom-purpose');
+    const customPurpose = customPurposeField ? customPurposeField.value.trim() : state.customPurpose;
     const density = ((field<HTMLSelectElement>('density')?.value as Density) || state.density) ?? undefined;
     const readableWidth =
       ((field<HTMLSelectElement>('readable-width')?.value as ReadableWidth) || state.readableWidth) ?? undefined;
