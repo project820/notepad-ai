@@ -465,4 +465,39 @@ describe('sanitizeHtmlExport — fail-closed structural gate (issue #27)', () =>
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.bodyHtml).toContain('<h1>Title</h1>');
   });
+
+  it('rejects mixed narration / code-fence siblings of otherwise-valid HTML', () => {
+    // Provider responses that wrap valid HTML in a fence or chat preamble still
+    // have bodyElementCount >= 1; top-level non-whitespace text must still fail closed.
+    const fenced = ['```html', '<h1>Title</h1>', '<p>Body copy.</p>', '```'].join('\n');
+    const withPreamble =
+      'Sure, here is the document:\n\n<section><h1>Title</h1><p>Body copy.</p></section>';
+    expect(failureCode(fenced, structural)).toBe(HTML_VIOLATION_CODES.noStructure);
+    expect(failureCode(withPreamble, structural)).toBe(HTML_VIOLATION_CODES.noStructure);
+    // Without the pipeline flag the sanitizer remains a pure filter.
+    expect(sanitize(withPreamble).ok).toBe(true);
+  });
+
+  it('accepts whitespace-only text between top-level structural elements', () => {
+    const doc =
+      '<!doctype html><html><body>\n  <h1>Title</h1>\n  <p>Body copy.</p>\n</body></html>';
+    const result = sanitize(doc, structural);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.bodyHtml).toContain('<h1>Title</h1>');
+      expect(result.bodyHtml).toContain('<p>Body copy.</p>');
+    }
+  });
+
+  it('preserves main and aside semantic containers with class/id intact', () => {
+    const result = sanitize(
+      '<main class="container"><p>Primary</p></main><aside id="notes"><p>Side</p></aside>',
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bodyHtml).toContain('<main class="container">');
+    expect(result.bodyHtml).toContain('<aside id="notes">');
+    expect(result.bodyHtml).toContain('<p>Primary</p>');
+    expect(result.bodyHtml).toContain('<p>Side</p>');
+  });
 });

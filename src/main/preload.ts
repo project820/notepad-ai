@@ -312,7 +312,12 @@ const api = {
   pickHtmlExportAssets: (request: PickHtmlAssetsRequest): Promise<PickHtmlAssetsResponse> =>
     ipcRenderer.invoke('html:asset:pick', request),
   generateHtmlExport: (
-    request: { prompt: string; model: { provider: AiProviderId; id: string }; instructions?: string },
+    request: {
+      prompt: string;
+      model: { provider: AiProviderId; id: string };
+      instructions?: string;
+      viewport?: { width: number; height: number };
+    },
   ): Promise<GenerationAttemptResult> => ipcRenderer.invoke('html:generate', request),
   cancelHtmlGeneration: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('html:generate:cancel'),
   saveHtmlFinalized: (request: SaveFinalizedRequest): Promise<SaveFinalizedResult> =>

@@ -51,6 +51,7 @@ type HtmlExportQuarantineLifecycle = {
     webContentsId: number,
     attemptId: HtmlExportAttemptId,
     resolvedArtifactId: ResolvedArtifactId,
+    viewport?: { width: number; height: number },
   ): Promise<QuarantineMeasureResult>;
   cancelWebContents(webContentsId: number): void;
   cancelAttempt(webContentsId: number, attemptId: HtmlExportAttemptId): void;
@@ -69,7 +70,12 @@ type HtmlExportIpcDeps = {
   /** Main-owned generation: streams the model, drives the pipeline, finalizes. */
   generateHtml?: (
     webContentsId: number,
-    input: { prompt: string; model: { provider: AiProviderId; id: string }; instructions?: string },
+    input: {
+      prompt: string;
+      model: { provider: AiProviderId; id: string };
+      instructions?: string;
+      viewport?: { width: number; height: number };
+    },
   ) => Promise<GenerationAttemptResult>;
   cancelGenerateHtml?: (webContentsId: number) => void;
 };
@@ -217,10 +223,17 @@ const HTML_GENERATE_PROMPT_MAX = 4 * 1024 * 1024;
 
 function isGenerateRequest(
   input: unknown,
-): input is { prompt: string; model: { provider: AiProviderId; id: string }; instructions?: string } {
+): input is {
+  prompt: string;
+  model: { provider: AiProviderId; id: string };
+  instructions?: string;
+  viewport?: { width: number; height: number };
+} {
   if (!isExactPlainObject(input) || Object.getOwnPropertySymbols(input).length !== 0) return false;
   const keys = Object.keys(input);
-  if (!keys.every((key) => key === 'prompt' || key === 'model' || key === 'instructions')) return false;
+  if (!keys.every((key) => key === 'prompt' || key === 'model' || key === 'instructions' || key === 'viewport')) {
+    return false;
+  }
   if (!Object.hasOwn(input, 'prompt') || typeof input.prompt !== 'string') return false;
   if (input.prompt.length === 0 || input.prompt.length > HTML_GENERATE_PROMPT_MAX) return false;
   if (!Object.hasOwn(input, 'model') || !isExactPlainObject(input.model)) return false;
@@ -233,6 +246,8 @@ function isGenerateRequest(
   if ('instructions' in input && input.instructions !== undefined) {
     if (typeof input.instructions !== 'string' || input.instructions.length > 65_536) return false;
   }
+  // Viewport is optional; shape is validated/clamped later in main (never trust raw dims).
+  if ('viewport' in input && input.viewport !== undefined && !isExactPlainObject(input.viewport)) return false;
   return true;
 }
 
@@ -407,7 +422,8 @@ export function registerHtmlExportIpc({
   });
 
   // PR-R1 cutover: main-owned one-call generation. The renderer submits only the
-  // prompt + model; main streams the model, drives the pipeline, and finalizes.
+  // prompt + model (+ optional viewport for quarantine overflow gate); main streams
+  // the model, drives the pipeline, and finalizes.
   handleTrusted('html:generate', async (event, input: unknown): Promise<GenerationAttemptResult> => {
     const binding = await bindSenderInvalidation(event.sender);
     if (!binding || !generateHtml) return { state: 'failed', stage: 'begin', kind: 'pipeline-reject' };
@@ -417,6 +433,7 @@ export function registerHtmlExportIpc({
         prompt: input.prompt,
         model: input.model,
         ...(input.instructions !== undefined ? { instructions: input.instructions } : {}),
+        ...(input.viewport !== undefined ? { viewport: input.viewport } : {}),
       });
     } catch {
       return { state: 'failed', stage: 'generate', kind: 'pipeline-reject' };
@@ -424,8 +441,16 @@ export function registerHtmlExportIpc({
   });
 
   handleTrusted('html:generate:cancel', async (event) => {
+    // Abort any in-flight generation, then drop the sender's active/finalized
+    // attempt so abandoned wizard IDs cannot still save. Finalize leaves the
+    // attempt in activeAttempts, so invalidateSender (via clearSenderState) is enough.
     try {
       cancelGenerateHtml?.(event.sender.id);
+    } catch {
+      // best effort
+    }
+    try {
+      await clearSenderState(event.sender.id);
     } catch {
       // best effort
     }

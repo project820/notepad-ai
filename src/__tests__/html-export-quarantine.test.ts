@@ -3,12 +3,15 @@ import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  DEFAULT_VIEWPORT,
   HTML_EXPORT_QUARANTINE_MAX_BYTES,
   HtmlExportQuarantinePool,
+  normalizeQuarantineViewport,
   type QuarantineHost,
   type QuarantineHostOutcome,
   type QuarantineRegistryReader,
   type QuarantineSlotSession,
+  type QuarantineViewport,
 } from '../main/html-export-quarantine';
 import {
   HTML_EXPORT_STAGE_ARTIFACT_MAX_BYTES,
@@ -49,13 +52,13 @@ function errorKind(result: Awaited<ReturnType<HtmlExportQuarantinePool['measure'
 type SlotHooks = {
   measureImpl?: (
     html: string,
-    opts: { deadlineMs: number; signal: AbortSignal },
+    opts: { deadlineMs: number; signal: AbortSignal; viewport?: QuarantineViewport },
   ) => Promise<QuarantineHostOutcome>;
   resetImpl?: () => Promise<void>;
 };
 
 class FakeSlot implements QuarantineSlotSession {
-  readonly measureCalls: Array<{ html: string; deadlineMs: number }> = [];
+  readonly measureCalls: Array<{ html: string; deadlineMs: number; viewport?: QuarantineViewport }> = [];
   readonly resetCalls: number[] = [];
   private resetCount = 0;
   private entered!: { resolve: () => void; promise: Promise<void> };
@@ -113,9 +116,9 @@ class FakeSlot implements QuarantineSlotSession {
 
   async measure(
     html: string,
-    opts: { deadlineMs: number; signal: AbortSignal },
+    opts: { deadlineMs: number; signal: AbortSignal; viewport?: QuarantineViewport },
   ): Promise<QuarantineHostOutcome> {
-    this.measureCalls.push({ html, deadlineMs: opts.deadlineMs });
+    this.measureCalls.push({ html, deadlineMs: opts.deadlineMs, viewport: opts.viewport });
     if (this.measureImpl) return this.measureImpl(html, opts);
 
     if (this.hang) {
@@ -643,5 +646,74 @@ describe('HtmlExportQuarantinePool — teardown guarantees', () => {
     const result = await pool.measure(1, attempt('a1'), artifact('r1'));
     expect(errorKind(result)).toBe('layout-violation');
     errorSpy.mockRestore();
+  });
+});
+
+describe('HtmlExportQuarantinePool — viewport', () => {
+  it('forwards a portrait viewport to the host measure (overflow gate at 720 wide)', async () => {
+    const host = new FakeHost({
+      0: {
+        measureImpl: async (_html, opts) => {
+          // Simulate a 1000px-wide document: passes at 1280, overflows at 720.
+          const viewportWidth = opts.viewport?.width ?? DEFAULT_VIEWPORT.width;
+          const horizontalOverflow = 1000 > viewportWidth + 1;
+          return {
+            kind: 'measured',
+            measurement: {
+              ...PASS_MEASUREMENT,
+              documentWidth: 1000,
+              viewportWidth,
+              viewportHeight: opts.viewport?.height ?? DEFAULT_VIEWPORT.height,
+              horizontalOverflow,
+            },
+          };
+        },
+      },
+    });
+    const { pool, registry } = poolFor({ host });
+    seedPass(registry, 1, 'a1', 'r1');
+
+    const portrait = await pool.measure(1, attempt('a1'), artifact('r1'), { width: 720, height: 1280 });
+    expect(portrait.ok).toBe(true);
+    if (portrait.ok) {
+      expect(portrait.value.measurement.horizontalOverflow).toBe(true);
+      expect(portrait.value.measurement.viewportWidth).toBe(720);
+    }
+    expect(host.slots[0].measureCalls[0]?.viewport).toEqual({ width: 720, height: 1280 });
+
+    seedPass(registry, 1, 'a1', 'r2');
+    const landscape = await pool.measure(1, attempt('a1'), artifact('r2'), { width: 1280, height: 720 });
+    expect(landscape.ok).toBe(true);
+    if (landscape.ok) {
+      expect(landscape.value.measurement.horizontalOverflow).toBe(false);
+    }
+  });
+
+  it('omits viewport on the host call when the caller supplies none (host falls back to DEFAULT)', async () => {
+    const host = new FakeHost({
+      0: {
+        measureImpl: async () => ({ kind: 'measured', measurement: PASS_MEASUREMENT }),
+      },
+    });
+    const { pool, registry } = poolFor({ host });
+    seedPass(registry, 1, 'a1', 'r1');
+
+    await pool.measure(1, attempt('a1'), artifact('r1'));
+    expect(host.slots[0].measureCalls[0]?.viewport).toBeUndefined();
+  });
+});
+
+describe('normalizeQuarantineViewport', () => {
+  it('returns DEFAULT_VIEWPORT for absent/invalid input and clamps to the sane range', () => {
+    expect(normalizeQuarantineViewport(undefined)).toEqual(DEFAULT_VIEWPORT);
+    expect(normalizeQuarantineViewport(null)).toEqual(DEFAULT_VIEWPORT);
+    expect(normalizeQuarantineViewport({})).toEqual(DEFAULT_VIEWPORT);
+    expect(normalizeQuarantineViewport({ width: 0, height: 720 })).toEqual(DEFAULT_VIEWPORT);
+    expect(normalizeQuarantineViewport({ width: 1280, height: -1 })).toEqual(DEFAULT_VIEWPORT);
+    expect(normalizeQuarantineViewport({ width: 5000, height: 720 })).toEqual(DEFAULT_VIEWPORT);
+    expect(normalizeQuarantineViewport({ width: 1280.9, height: 720.1 })).toEqual({ width: 1280, height: 720 });
+    expect(normalizeQuarantineViewport({ width: 720, height: 1280 })).toEqual({ width: 720, height: 1280 });
+    expect(normalizeQuarantineViewport({ width: 320, height: 4096 })).toEqual({ width: 320, height: 4096 });
+    expect(normalizeQuarantineViewport({ width: 319, height: 720 })).toEqual(DEFAULT_VIEWPORT);
   });
 });

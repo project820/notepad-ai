@@ -69,8 +69,13 @@ export type HtmlExportDeps = {
   /** Open a previously saved .html in the user's browser. */
   openSavedHtml?: (filePath: string) => Promise<{ opened: boolean; error?: string }>;
   /** Main-owned generation: streams the model, drives the pipeline, and finalizes. */
-  generateHtmlExport: (request: { prompt: string; model: { provider: AiProviderId; id: string }; instructions?: string }) => Promise<GenerationAttemptResult>;
-  /** Cancel the in-flight main-owned generation for this window. */
+  generateHtmlExport: (request: {
+    prompt: string;
+    model: { provider: AiProviderId; id: string };
+    instructions?: string;
+    viewport?: { width: number; height: number };
+  }) => Promise<GenerationAttemptResult>;
+  /** Cancel/abandon the in-flight or finalized main-owned generation for this window. */
   cancelHtmlGeneration?: () => void;
   /** Open an external URL (the getdesign.md gallery). */
   openExternal?: (url: string) => void;
@@ -381,8 +386,13 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
     const provider = model.provider;
     generating = true;
     const token = ++generationToken;
+    // Quarantine measures at the selected export viewport (overflow gate only).
+    const viewport =
+      state.orientation === 'horizontal'
+        ? { width: 1280, height: 720 }
+        : { width: 720, height: 1280 };
     deps
-      .generateHtmlExport({ prompt: pendingPrompt, model: { provider, id: model.id } })
+      .generateHtmlExport({ prompt: pendingPrompt, model: { provider, id: model.id }, viewport })
       .then((result) => {
         if (disposed || token !== generationToken) return;
         generating = false;
@@ -492,6 +502,10 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
         if (savedPath) deps.openSavedHtml?.(savedPath);
         return;
       case 'back':
+        // Leaving the generated step abandons the saveable finalized attempt.
+        if (state.step === 'generated') {
+          deps.cancelHtmlGeneration?.();
+        }
         return dispatch({ type: 'BACK' });
       case 'cancel':
         // Abort any in-flight generation so a slow AI request doesn't keep

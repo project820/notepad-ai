@@ -74,10 +74,11 @@ export type HtmlExportSanitizeOptions = {
   isAllowedAssetId?: (src: string) => boolean;
   /**
    * When true, require the sanitized body to be a structural HTML document (at
-   * least `HTML_MIN_BODY_ELEMENT_NODES` element nodes) — the pipeline enables this
-   * so a non-HTML answer (model narration/prose) is rejected fail-closed, never
-   * finalized (issue #27). The raw sanitizer (unit tests, ad-hoc fragments) leaves
-   * it off and stays a pure filter.
+   * least `HTML_MIN_BODY_ELEMENT_NODES` element nodes, and no non-whitespace
+   * top-level text siblings) — the pipeline enables this so a non-HTML answer
+   * (model narration/prose, or mixed preamble + HTML) is rejected fail-closed,
+   * never finalized (issue #27). The raw sanitizer (unit tests, ad-hoc fragments)
+   * leaves it off and stays a pure filter.
    */
   requireStructuralDocument?: boolean;
 };
@@ -99,7 +100,7 @@ type Failure = { violation: HtmlSanitizerViolation };
 
 const HTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
 const ALLOWED_TAGS = new Set([
-  'section', 'div', 'article', 'header', 'footer', 'nav', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p',
+  'section', 'div', 'article', 'main', 'aside', 'header', 'footer', 'nav', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p',
   'span', 'strong', 'em', 'b', 'i', 'u', 's', 'small', 'mark', 'sub', 'sup', 'br', 'hr', 'ul', 'ol',
   'li', 'dl', 'dt', 'dd', 'blockquote', 'figure', 'figcaption', 'img', 'picture', 'source', 'svg',
   'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'caption', 'code', 'pre', 'kbd', 'samp',
@@ -558,19 +559,39 @@ export function sanitizeHtmlExport(options: HtmlExportSanitizeOptions): HtmlExpo
 
     // Fail-closed structural gate (issue #27): a response that is not a structural
     // HTML document — e.g. model narration/prose — parses to a body of text nodes
-    // with (near-)zero elements. Reject it here so it can never sanitize→finalize→
-    // save as an export; the pipeline maps this to a retryable pipeline-reject.
-    const bodyElementCount = countElementDescendants(outputBody);
-    if (options.requireStructuralDocument && bodyElementCount < HTML_MIN_BODY_ELEMENT_NODES) {
-      return {
-        ok: false,
-        violations: [
-          {
-            code: HTML_VIOLATION_CODES.noStructure,
-            detail: `sanitized body has ${bodyElementCount} element node(s); a structural HTML document is required (>= ${HTML_MIN_BODY_ELEMENT_NODES})`,
-          },
-        ],
-      };
+    // with (near-)zero elements. Also reject mixed narration: a non-whitespace
+    // top-level text sibling of real elements (code fences, chat preamble) so it
+    // can never sanitize→finalize→save as an export; the pipeline maps this to a
+    // retryable pipeline-reject. Nested text inside elements is legitimate content.
+    if (options.requireStructuralDocument) {
+      const bodyElementCount = countElementDescendants(outputBody);
+      if (bodyElementCount < HTML_MIN_BODY_ELEMENT_NODES) {
+        return {
+          ok: false,
+          violations: [
+            {
+              code: HTML_VIOLATION_CODES.noStructure,
+              detail: `sanitized body has ${bodyElementCount} element node(s); a structural HTML document is required (>= ${HTML_MIN_BODY_ELEMENT_NODES})`,
+            },
+          ],
+        };
+      }
+      const hasTopLevelNarration = childNodes(outputBody).some(
+        (child) =>
+          (child as { nodeName?: string }).nodeName === '#text' && textValue(child).trim() !== '',
+      );
+      if (hasTopLevelNarration) {
+        return {
+          ok: false,
+          violations: [
+            {
+              code: HTML_VIOLATION_CODES.noStructure,
+              detail:
+                'top-level narration/prose text is not allowed; sanitized body must contain only structural HTML elements (whitespace between elements is permitted)',
+            },
+          ],
+        };
+      }
     }
 
     return {

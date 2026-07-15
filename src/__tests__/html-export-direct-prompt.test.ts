@@ -128,6 +128,10 @@ describe('buildDirectHtmlPrompt — 1:1 config mapping + full source', () => {
     expect(prompt).toMatch(/Do NOT use tools, write files, or describe steps/i);
     expect(prompt).toMatch(/NEVER narrate progress, write files, or return a path/i);
     expect(prompt).toContain('DIRECT AUTHORING DESIGN GUIDE');
+    expect(prompt).toMatch(/Use ONLY the supported HTML tag vocabulary/i);
+    expect(prompt).toMatch(/unsupported tags are unwrapped/i);
+    expect(prompt).toMatch(/\bmain\b/);
+    expect(prompt).toMatch(/\baside\b/);
     // The legacy content-model guidance that forbids encoding HTML/CSS must NOT
     // appear in a direct-authoring prompt (AC-M1a contradiction guard).
     expect(prompt).not.toMatch(/never encode CSS, HTML/i);

@@ -66,7 +66,11 @@ function setField(host: HTMLElement, name: string, value: string) {
 }
 
 /** The request object passed to the last generateHtmlExport call. */
-function lastRequest(deps: HtmlExportDeps): { prompt: string; model: { provider: string; id: string } } {
+function lastRequest(deps: HtmlExportDeps): {
+  prompt: string;
+  model: { provider: string; id: string };
+  viewport?: { width: number; height: number };
+} {
   const calls = (deps.generateHtmlExport as ReturnType<typeof vi.fn>).mock.calls;
   return calls[calls.length - 1][0];
 }
@@ -272,6 +276,66 @@ describe('mountHtmlExportWizard — HTML-only model picker', () => {
     // The LM Studio model is not the current selection, yet it must remain offered.
     expect(values).toContain('lmstudio:local-llama');
     expect(values).toContain('chatgpt:gpt-5.4-mini');
+  });
+});
+
+describe('mountHtmlExportWizard — viewport + abandon invalidation', () => {
+  it('sends an orientation-derived viewport with generateHtmlExport (portrait 720×1280)', async () => {
+    const { host, deps } = setup();
+    click(host, 'orient-vertical');
+    click(host, 'layout-scroll');
+    click(host, 'design-default');
+    setField(host, 'free-requirement', '');
+    click(host, 'generate-submit');
+    await flush();
+
+    expect(deps.generateHtmlExport).toHaveBeenCalledTimes(1);
+    expect(lastRequest(deps).viewport).toEqual({ width: 720, height: 1280 });
+  });
+
+  it('sends landscape 1280×720 when orientation is horizontal', async () => {
+    const { host, deps } = setup();
+    click(host, 'orient-horizontal');
+    click(host, 'layout-scroll');
+    click(host, 'design-default');
+    setField(host, 'free-requirement', '');
+    click(host, 'generate-submit');
+    await flush();
+
+    expect(lastRequest(deps).viewport).toEqual({ width: 1280, height: 720 });
+  });
+
+  it('abandon (destroy) after generated invokes cancelHtmlGeneration so main can invalidate the finalized attempt', async () => {
+    const { host, deps, handle } = setup();
+    click(host, 'orient-vertical');
+    click(host, 'layout-scroll');
+    click(host, 'design-default');
+    setField(host, 'free-requirement', '');
+    click(host, 'generate-submit');
+    await flush();
+    expect(handle.getState().step).toBe('generated');
+    expect(handle.getState().finalized?.finalizedArtifactId).toBe('final-1');
+
+    // destroy() is the cleanup abandon path (generated step has no cancel button in the footer).
+    (deps.cancelHtmlGeneration as ReturnType<typeof vi.fn>).mockClear();
+    handle.destroy();
+    expect(deps.cancelHtmlGeneration).toHaveBeenCalledTimes(1);
+  });
+
+  it('BACK from generated also invokes cancelHtmlGeneration (abandons the finalized attempt)', async () => {
+    const { host, deps, handle } = setup();
+    click(host, 'orient-vertical');
+    click(host, 'layout-scroll');
+    click(host, 'design-default');
+    setField(host, 'free-requirement', '');
+    click(host, 'generate-submit');
+    await flush();
+    expect(handle.getState().step).toBe('generated');
+
+    (deps.cancelHtmlGeneration as ReturnType<typeof vi.fn>).mockClear();
+    click(host, 'back');
+    expect(deps.cancelHtmlGeneration).toHaveBeenCalledTimes(1);
+    expect(handle.getState().step).toBe('summary-requirement');
   });
 });
 

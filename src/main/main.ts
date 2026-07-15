@@ -94,9 +94,14 @@ const htmlExportPipelineService = new HtmlExportPipelineService({
 // module-level holder lets the IPC layer resolve it lazily.
 let htmlExportQuarantinePool: HtmlExportQuarantinePool | undefined;
 const htmlExportQuarantine = {
-  measure: (webContentsId: number, attemptId: HtmlExportAttemptId, resolvedArtifactId: ResolvedArtifactId) =>
+  measure: (
+    webContentsId: number,
+    attemptId: HtmlExportAttemptId,
+    resolvedArtifactId: ResolvedArtifactId,
+    viewport?: { width: number; height: number },
+  ) =>
     htmlExportQuarantinePool
-      ? htmlExportQuarantinePool.measure(webContentsId, attemptId, resolvedArtifactId)
+      ? htmlExportQuarantinePool.measure(webContentsId, attemptId, resolvedArtifactId, viewport)
       : Promise.resolve({
           ok: false as const,
           error: createHtmlExportQuarantineError('quarantine-unavailable'),
@@ -110,7 +115,7 @@ const htmlExportGenerator = createHtmlExportGenerator({
   pipeline: htmlExportPipelineService,
   stream: (req, onEvent) => getRegistry().streamProviderChat(req, onEvent),
   maxOutputTokens: (m) => htmlExportMaxTokens(m.provider, m.id),
-  quarantine: async ({ webContentsId, attemptId, resolvedArtifactId, signal }) => {
+  quarantine: async ({ webContentsId, attemptId, resolvedArtifactId, signal, viewport }) => {
     const onAbort = () => htmlExportQuarantine.cancelAttempt(webContentsId, attemptId);
     if (signal.aborted) {
       onAbort();
@@ -118,7 +123,12 @@ const htmlExportGenerator = createHtmlExportGenerator({
     }
     signal.addEventListener('abort', onAbort, { once: true });
     try {
-      const measured = await htmlExportQuarantine.measure(webContentsId, attemptId, resolvedArtifactId);
+      const measured = await htmlExportQuarantine.measure(
+        webContentsId,
+        attemptId,
+        resolvedArtifactId,
+        viewport,
+      );
       if (!measured.ok) return { ok: false as const, kind: measured.error.kind };
       // The quarantine gate must reject a document that renders but overflows its
       // viewport horizontally (a broken/uncontained layout) — otherwise an

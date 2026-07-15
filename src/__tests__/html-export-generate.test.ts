@@ -180,4 +180,23 @@ describe('createHtmlExportGenerator', () => {
     expect(quarantineSignal?.aborted).toBe(true);
     expect(result.state).toBe('cancelled');
   });
+
+  it('forwards the selected viewport into the quarantine seam', async () => {
+    const quarantine = vi.fn(async () => ({ ok: true as const }));
+    const stream = async (_req: AiChatRequest, onEvent: (e: AiChatEvent) => void) => {
+      onEvent({ kind: 'delta', text: '<html>ok</html>' });
+      onEvent({ kind: 'done', text: '' });
+    };
+    const gen = createHtmlExportGenerator({
+      pipeline: fakePipeline(),
+      stream,
+      quarantine,
+    });
+
+    const viewport = { width: 720, height: 1280 };
+    const result = await gen.run(7, { prompt: 'p', model: MODEL, viewport });
+    expect(result.state).toBe('final');
+    expect(quarantine).toHaveBeenCalledTimes(1);
+    expect(quarantine.mock.calls[0][0].viewport).toEqual(viewport);
+  });
 });

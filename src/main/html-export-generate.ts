@@ -19,18 +19,38 @@ import {
 } from './html-export-generation-orchestrator';
 import { createHtmlExportTransport, type PinnedTransportStream } from './html-export-transport';
 import type { AiProviderId } from './ai/types';
+import type {
+  HtmlExportAttemptId,
+  HtmlExportQuarantineErrorKind,
+  ResolvedArtifactId,
+} from '../shared/html-export-pipeline';
 
 type HtmlGenerateModel = { provider: AiProviderId; id: string };
+
+type HtmlGenerateViewport = { width: number; height: number };
 
 type HtmlGenerateInput = {
   prompt: string;
   model: HtmlGenerateModel;
   instructions?: string;
+  /** Selected export viewport for the quarantine overflow gate only. */
+  viewport?: HtmlGenerateViewport;
 };
 
 export type HtmlExportGeneratorDeps = {
   pipeline: OrchestratorPipeline;
-  quarantine: QuarantineMeasureFn;
+  /**
+   * Pre-finalization quarantine gate. Receives the selected export viewport so
+   * overflow is measured at the user-chosen size (landscape 1280×720 / portrait
+   * 720×1280). Viewport does not affect finalized bytes.
+   */
+  quarantine: (input: {
+    webContentsId: number;
+    attemptId: HtmlExportAttemptId;
+    resolvedArtifactId: ResolvedArtifactId;
+    signal: AbortSignal;
+    viewport?: HtmlGenerateViewport;
+  }) => Promise<{ ok: true } | { ok: false; kind: HtmlExportQuarantineErrorKind }>;
   /** Single, fallback-suppressed provider stream (routes by req.model). */
   stream: PinnedTransportStream;
   /** Escalated HTML-export output cap for the selected model. */
@@ -77,10 +97,13 @@ export function createHtmlExportGenerator(deps: HtmlExportGeneratorDeps): HtmlEx
         instructions: input.instructions,
         maxOutputTokens: deps.maxOutputTokens?.(input.model),
       });
+      // Close over this run's viewport without changing the orchestrator seam.
+      const quarantine: QuarantineMeasureFn = async (args) =>
+        deps.quarantine({ ...args, viewport: input.viewport });
       const orchestrator = new HtmlExportGenerationOrchestrator({
         pipeline: deps.pipeline,
         generate,
-        quarantine: deps.quarantine,
+        quarantine,
       });
 
       try {
