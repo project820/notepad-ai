@@ -99,10 +99,16 @@ function isCounts(value: unknown): value is HtmlExportCounts {
 function isSanitizedPayload(value: unknown): value is HtmlExportSanitizedPayload {
   if (typeof value !== 'object' || value === null) return false;
   const payload = value as Partial<HtmlExportSanitizedPayload>;
+  // contentRootClass/Id are optional shape fields only — the sanitizer remains
+  // the reserved-value gate. Reject non-string when present (fail-closed).
+  const optionalRootString = (field: unknown): boolean =>
+    field === undefined || typeof field === 'string';
   return typeof payload.bodyHtml === 'string'
     && typeof payload.documentHtml === 'string'
     && typeof payload.contentCss === 'string'
-    && isCounts(payload.counts);
+    && isCounts(payload.counts)
+    && optionalRootString(payload.contentRootClass)
+    && optionalRootString(payload.contentRootId);
 }
 
 /**

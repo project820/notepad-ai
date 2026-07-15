@@ -5,7 +5,7 @@ import { guardVerdict } from './humanize-guards';
 import { styleDirective, detectLanguage, type Naturalness } from './humanize-engine';
 import { t } from './i18n';
 import { modelContextWindowTokens } from '../main/ai/output-budget';
-import { isAiProviderId, type AiProviderId } from '../main/ai/types';
+import { isAiProviderId, type AiProviderId, type ProviderAuthStatus } from '../main/ai/types';
 import {
   filterHtmlExportModels,
   htmlCapableProviderIds,
@@ -27,6 +27,26 @@ import type { AppContext } from './app-context';
 import type { AuthSnapshot } from '../shared/auth-protocol';
 import type { Quality } from './quality';
 import type { RendererModel } from './model-cache';
+
+/** Last successful HTML-capable provider set for this renderer session. */
+let lastHtmlCapableProviderIds: Set<AiProviderId> | null = null;
+
+/**
+ * Resolve the effective HTML-capable provider set with last-known-safe continuity.
+ * - Successful status fetch → use (and cache) the live set.
+ * - Failed fetch + non-null cache → reuse the cached set (fail-closed continuity).
+ * - Failed fetch + null cache → null (pre-gate fallback: entry opens, picker allowlist-only).
+ */
+export function resolveHtmlCapableProviderIds(
+  statuses: ProviderAuthStatus[] | null,
+  cache: Set<AiProviderId> | null,
+): { capable: Set<AiProviderId> | null; nextCache: Set<AiProviderId> | null } {
+  if (statuses) {
+    const capable = htmlCapableProviderIds(statuses);
+    return { capable, nextCache: capable };
+  }
+  return { capable: cache, nextCache: cache };
+}
 
 export type UnifiedChatWiring = {
   unifiedChat: UnifiedChatHandle;
@@ -251,10 +271,14 @@ export function initUnifiedChatWiring(ctx: AppContext, deps: UnifiedChatWiringDe
     }
     // §5.3 honesty: generic auth is not enough — only open the wizard when at
     // least one provider can actually pin an HTML transport (Claude needs CLI).
-    // Status-fetch failure keeps the existing hasAuth gate (do not hard-break entry).
+    // Status-fetch failure reuses the last successful capable set (fail-closed
+    // continuity). Cold failure (no cache yet) keeps the hasAuth gate so a
+    // transient probe does not hard-break entry.
     const statuses = await window.api.aiProvidersStatus().catch(() => null);
     if (!guard.isCurrent()) return;
-    if (statuses && htmlCapableProviderIds(statuses).size === 0) {
+    const entryCapable = resolveHtmlCapableProviderIds(statuses, lastHtmlCapableProviderIds);
+    lastHtmlCapableProviderIds = entryCapable.nextCache;
+    if (entryCapable.capable && entryCapable.capable.size === 0) {
       setUnifiedChatOpen(true);
       unifiedChat.addMessage('assistant', t('chat.noProvider'));
       ctx.setStatus(t('status.connectProvider'));
@@ -289,11 +313,13 @@ export function initUnifiedChatWiring(ctx: AppContext, deps: UnifiedChatWiringDe
         // picker even if the general chat policy would reinject a current selection.
         const allowlisted = filterHtmlExportModels(mapped);
         // Drop models whose provider cannot run HTML right now (e.g. API-only Claude).
-        // Status-fetch failure keeps the allowlist filter only (do not hard-break the picker).
+        // Status-fetch failure reuses the last successful capable set; only a cold
+        // failure (no cache yet) falls back to allowlist-only.
         const liveStatuses = await window.api.aiProvidersStatus().catch(() => null);
-        if (!liveStatuses) return allowlisted;
-        const capable = htmlCapableProviderIds(liveStatuses);
-        return allowlisted.filter((m) => isAiProviderId(m.provider) && capable.has(m.provider));
+        const pickerCapable = resolveHtmlCapableProviderIds(liveStatuses, lastHtmlCapableProviderIds);
+        lastHtmlCapableProviderIds = pickerCapable.nextCache;
+        if (!pickerCapable.capable) return allowlisted;
+        return allowlisted.filter((m) => isAiProviderId(m.provider) && pickerCapable.capable!.has(m.provider));
       },
       // Never preselect a provider the HTML surface forbids (fail-closed): a
       // persisted OpenRouter htmlModel/main model resolves to no default here.

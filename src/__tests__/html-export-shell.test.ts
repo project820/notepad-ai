@@ -184,6 +184,21 @@ describe('bundleSanitizedHtml — canonical shell contract', () => {
     );
     expect(html).toContain('<div data-he-content id="app" class="dark theme">');
   });
+  it('HTML-escapes content-root class/id attribute values (& " < > \')', () => {
+    const { html } = bundleSanitizedHtml(
+      payload({
+        contentRootId: `a&b"'c<d>e`,
+        contentRootClass: `x&y"'z<w>v`,
+      }),
+    );
+    expect(html).toContain('id="a&amp;b&quot;&#39;c&lt;d&gt;e"');
+    expect(html).toContain('class="x&amp;y&quot;&#39;z&lt;w&gt;v"');
+    // Raw unescaped metacharacters must not remain in the attribute values.
+    expect(html).not.toContain('id="a&b');
+    expect(html).not.toContain('class="x&y');
+    expect(html).not.toContain('<d>');
+    expect(html).not.toContain('<w>');
+  });
 
   it('keeps the bare content-root wrapper when class/id are absent', () => {
     const { html } = bundleSanitizedHtml(payload({ bodyHtml: '<p>x</p>' }));

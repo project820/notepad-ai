@@ -498,4 +498,80 @@ describe('HtmlExportPipelineService', () => {
     expect(exactResult.ok).toBe(true);
     expect(plusOneResult.ok ? '' : plusOneResult.error.kind).toBe('pipeline-oversize');
   });
+  it('rejects sanitized payloads whose optional content-root fields are non-string', async () => {
+    let resolverCalls = 0;
+    const { service, registry } = serviceFor(undefined, undefined, async () => {
+      resolverCalls += 1;
+      return 'resolved';
+    });
+    const attemptId = start(service);
+    // Seed a legitimate sanitized artifact, then overwrite its stored bytes with
+    // a shape-invalid payload (contentRootClass/Id must be string | undefined).
+    const raw = valueOf(service.storeRawModelOutput(1, attemptId, '<p>shape</p>'));
+    const sanitized = valueOf(await service.sanitize(1, attemptId, raw.id)).artifact;
+
+    const basePayload = {
+      bodyHtml: '<p>shape</p>',
+      documentHtml: '<html><body><p>shape</p></body></html>',
+      contentCss: '',
+      counts: { nodeCount: 1, maxDepth: 1, attributeCount: 0 },
+    };
+
+    for (const bad of [
+      { ...basePayload, contentRootClass: 42 },
+      { ...basePayload, contentRootId: null },
+      { ...basePayload, contentRootClass: { x: 1 } },
+      { ...basePayload, contentRootId: true },
+    ]) {
+      const bytes = Buffer.from(JSON.stringify(bad), 'utf8');
+      // Replace the registry artifact bytes under the same id so resolve() parses them.
+      const stored = (registry as unknown as { artifacts: Map<string, { bytes: Buffer }> }).artifacts.get(sanitized.id);
+      expect(stored).toBeDefined();
+      stored!.bytes = bytes;
+      // Keep digest metadata aligned so the shape guard (not digest) is the reject reason.
+      const artifact = (registry as unknown as {
+        artifacts: Map<string, { ref: { sha256: string; byteLength: number }; bytes: Buffer }>;
+      }).artifacts.get(sanitized.id)!;
+      artifact.ref.sha256 = digest(bytes);
+      artifact.ref.byteLength = bytes.byteLength;
+
+      const result = await service.resolve(1, attemptId, sanitized.id);
+      expect(result.ok ? '' : result.error.kind).toBe('pipeline-reject');
+    }
+
+    expect(resolverCalls).toBe(0);
+  });
+
+  it('accepts sanitized payloads with string or omitted content-root identity fields', async () => {
+    const seen: HtmlExportSanitizedPayload[] = [];
+    const { service, registry } = serviceFor(undefined, undefined, async (payload) => {
+      seen.push(payload);
+      return `ok:${payload.bodyHtml}`;
+    });
+    const attemptId = start(service);
+    const raw = valueOf(service.storeRawModelOutput(1, attemptId, '<p>ok</p>'));
+    const sanitized = valueOf(await service.sanitize(1, attemptId, raw.id)).artifact;
+
+    const withStrings = {
+      bodyHtml: '<p>ok</p>',
+      documentHtml: '<html><body><p>ok</p></body></html>',
+      contentCss: '',
+      counts: { nodeCount: 1, maxDepth: 1, attributeCount: 0 },
+      contentRootClass: 'dark',
+      contentRootId: 'app',
+    };
+    const bytes = Buffer.from(JSON.stringify(withStrings), 'utf8');
+    const artifact = (registry as unknown as {
+      artifacts: Map<string, { ref: { sha256: string; byteLength: number }; bytes: Buffer }>;
+    }).artifacts.get(sanitized.id)!;
+    artifact.bytes = bytes;
+    artifact.ref.sha256 = digest(bytes);
+    artifact.ref.byteLength = bytes.byteLength;
+
+    const result = await service.resolve(1, attemptId, sanitized.id);
+    expect(result.ok).toBe(true);
+    expect(seen).toHaveLength(1);
+    expect(seen[0].contentRootClass).toBe('dark');
+    expect(seen[0].contentRootId).toBe('app');
+  });
 });
