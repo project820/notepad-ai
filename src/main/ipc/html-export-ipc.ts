@@ -23,6 +23,9 @@ import {
   createHtmlExportQuarantineError,
 } from '../../shared/html-export-pipeline';
 import { atomicWrite, nodeAtomicBackend, type AtomicWriteBackend } from '../atomic-write';
+import type { GenerationAttemptResult } from '../html-export-generation-orchestrator';
+import { isAiProviderId, type AiProviderId } from '../ai/types';
+import { isHtmlExportModelProviderAllowed } from '../ai/html-export-model-allowlist';
 import {
   designListContentsUrl,
   isAllowedDesignFetchUrl,
@@ -63,6 +66,12 @@ type HtmlExportIpcDeps = {
   quarantine?: HtmlExportQuarantineLifecycle;
   /** Injectable atomic-write backend for the finalized save path (tests only). */
   saveBackend?: AtomicWriteBackend;
+  /** Main-owned generation: streams the model, drives the pipeline, finalizes. */
+  generateHtml?: (
+    webContentsId: number,
+    input: { prompt: string; model: { provider: AiProviderId; id: string }; instructions?: string },
+  ) => Promise<GenerationAttemptResult>;
+  cancelGenerateHtml?: (webContentsId: number) => void;
 };
 
 
@@ -204,6 +213,29 @@ function isSaveFinalizedRequest(input: unknown): input is SaveFinalizedRequest {
   return true;
 }
 
+const HTML_GENERATE_PROMPT_MAX = 4 * 1024 * 1024;
+
+function isGenerateRequest(
+  input: unknown,
+): input is { prompt: string; model: { provider: AiProviderId; id: string }; instructions?: string } {
+  if (!isExactPlainObject(input) || Object.getOwnPropertySymbols(input).length !== 0) return false;
+  const keys = Object.keys(input);
+  if (!keys.every((key) => key === 'prompt' || key === 'model' || key === 'instructions')) return false;
+  if (!Object.hasOwn(input, 'prompt') || typeof input.prompt !== 'string') return false;
+  if (input.prompt.length === 0 || input.prompt.length > HTML_GENERATE_PROMPT_MAX) return false;
+  if (!Object.hasOwn(input, 'model') || !isExactPlainObject(input.model)) return false;
+  const model = input.model as Record<string, unknown>;
+  // Fail-closed HTML-export provider allowlist (§5.3 / AC-M1c-d): the HTML surface
+  // pins ONE no-fallback transport, so OpenRouter (opaque multi-vendor routing) and
+  // any non-allowlisted provider are rejected here even if the renderer offers them.
+  if (!isAiProviderId(model.provider) || !isHtmlExportModelProviderAllowed(model.provider)) return false;
+  if (typeof model.id !== 'string' || model.id.length === 0 || model.id.length > 256) return false;
+  if ('instructions' in input && input.instructions !== undefined) {
+    if (typeof input.instructions !== 'string' || input.instructions.length > 65_536) return false;
+  }
+  return true;
+}
+
 function quarantineReject(kind: Parameters<typeof createHtmlExportQuarantineError>[0]): QuarantineMeasureResult {
   return { ok: false, error: createHtmlExportQuarantineError(kind) };
 }
@@ -214,6 +246,8 @@ export function registerHtmlExportIpc({
   assetLifecycle,
   quarantine,
   saveBackend,
+  generateHtml,
+  cancelGenerateHtml,
 }: HtmlExportIpcDeps): void {
 
   type SenderBinding = {
@@ -364,6 +398,31 @@ export function registerHtmlExportIpc({
     );
   });
 
+  // PR-R1 cutover: main-owned one-call generation. The renderer submits only the
+  // prompt + model; main streams the model, drives the pipeline, and finalizes.
+  handleTrusted('html:generate', async (event, input: unknown): Promise<GenerationAttemptResult> => {
+    const binding = await bindSenderInvalidation(event.sender);
+    if (!binding || !generateHtml) return { state: 'failed', stage: 'begin', kind: 'pipeline-reject' };
+    if (!isGenerateRequest(input)) return { state: 'failed', stage: 'begin', kind: 'pipeline-reject' };
+    try {
+      return await generateHtml(binding.webContentsId, {
+        prompt: input.prompt,
+        model: input.model,
+        ...(input.instructions !== undefined ? { instructions: input.instructions } : {}),
+      });
+    } catch {
+      return { state: 'failed', stage: 'generate', kind: 'pipeline-reject' };
+    }
+  });
+
+  handleTrusted('html:generate:cancel', async (event) => {
+    try {
+      cancelGenerateHtml?.(event.sender.id);
+    } catch {
+      // best effort
+    }
+    return { ok: true as const };
+  });
   handleTrusted('html:pipeline:sanitize', async (event, input: unknown): Promise<SanitizeResult> => {
     const binding = await bindSenderInvalidation(event.sender);
     if (!binding) return pipelineReject();
@@ -481,29 +540,10 @@ export function registerHtmlExportIpc({
     }
   });
 
-  handleTrusted('html:save', async (event, args: { html?: string; defaultName?: string }) => {
-    const win = windowForWebContents(event.sender.id);
-    if (!win || typeof args?.html !== 'string') return { saved: false as const };
-    const result = await dialog.showSaveDialog(win, {
-      filters: [{ name: 'HTML', extensions: ['html'] }],
-      defaultPath: htmlSaveFileName(args.defaultName),
-    });
-    if (result.canceled || !result.filePath) return { saved: false as const };
-    let target = result.filePath;
-    if (!/\.html?$/i.test(target)) target += '.html';
-    try {
-      await fs.writeFile(target, args.html, 'utf-8');
-    } catch (e) {
-      return { saved: false as const, error: e instanceof Error ? e.message : 'write-failed' };
-    }
-    return { saved: true as const, filePath: target };
-  });
-
   // AC-M1d: save the main-held FinalizedArtifactId bytes to a single HTML file
   // via an atomic write. The renderer submits only opaque IDs — never bytes — and
-  // the previous `html:save` path stays live until the single cutover. No partial
-  // file is ever left on failure; the returned sha256 lets a caller assert
-  // preview == save-finalized digest.
+  // no partial file is ever left on failure; the returned sha256 lets a caller
+  // assert preview == save-finalized digest.
   handleTrusted('html:save-finalized', async (event, input: unknown): Promise<SaveFinalizedResult> => {
     const binding = await bindSenderInvalidation(event.sender);
     if (!binding) return { saved: false as const };

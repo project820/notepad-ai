@@ -203,6 +203,12 @@ export class ComposedGrokProvider implements AiProvider {
 
   async streamChat(req: AiChatRequest, onEvent: (event: AiChatEvent) => void): Promise<void> {
     const apiStatus = await this.api.getAuthStatus();
+    if (req.surfaceMode === 'html') {
+      // §5.3: the HTML export surface pins ONE transport — no API↔CLI fallback.
+      if (apiStatus.connected) await this.api.streamChat(req, onEvent);
+      else await this.streamCli(req, onEvent);
+      return;
+    }
     if (!apiStatus.connected) {
       await this.streamCli(req, onEvent);
       return;
