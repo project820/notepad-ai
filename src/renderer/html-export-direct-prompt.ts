@@ -165,6 +165,7 @@ const HTML_EXPORT_DIRECT_DESIGN_KNOWLEDGE = [
   '2. Preserve the source reading order and distinguish titles, prose, lists, tables, quotations, code, and data with real semantic HTML; keep evidence adjacent to its claim.',
   '3. Name the layout problem (flow, repetition, comparison, or primary/supporting context) and choose HTML structure + CSS that solves it: restrained flow for explanation, parallel items for repeated facts, tables for comparison.',
   '4. Author complete, self-contained HTML with inline CSS. Use only inline data: images (never remote URLs), no scripts, no external fonts/assets. Every visual choice — layout, spacing, color, type scale — is yours to encode in CSS, honoring the design authority above.',
+  '5. Use only LITERAL CSS values. CSS custom properties (`--name`) and `var()` are NOT supported and will be rejected — write concrete values inline. Global element selectors (html/body/:root/*) are allowed (scoped to the export content root) but prefer authoring styles against document content.',
 ].join('\n');
 
 function designKnowledgeBlock(): string[] {

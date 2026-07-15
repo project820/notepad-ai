@@ -1,4 +1,4 @@
-import { generate, lexer, parse, walk } from 'css-tree';
+import { generate, lexer, List, parse, walk } from 'css-tree';
 
 /** Frozen resource limits for model-authored export CSS. */
 export const CSS_MAX_STYLESHEET_BYTES = 128 * 1024;
@@ -187,6 +187,97 @@ function hasReservedName(name: string): boolean {
   return RESERVED_NAME.test(name) || name.toLowerCase() === 'data-he-content';
 }
 
+const CONTENT_ROOT_ATTR = 'data-he-content';
+const CONTENT_ROOT_SELECTOR = `[${CONTENT_ROOT_ATTR}]`;
+
+function isGlobalRootAtom(node: any): boolean {
+  if (node?.type === 'TypeSelector') {
+    const name = String(node.name).toLowerCase();
+    return name === 'html' || name === 'body';
+  }
+  if (node?.type === 'PseudoClassSelector') {
+    return String(node.name).toLowerCase() === 'root';
+  }
+  return false;
+}
+
+function isUniversalAtom(node: any): boolean {
+  if (node?.type === 'UniversalSelector') return true;
+  return node?.type === 'TypeSelector' && String(node.name) === '*';
+}
+
+function contentRootAttributeSelector(): any {
+  return {
+    type: 'AttributeSelector',
+    name: { type: 'Identifier', name: CONTENT_ROOT_ATTR },
+    matcher: null,
+    value: null,
+    flags: null,
+  };
+}
+
+/** Deep-clone a css-tree node / List so rewrite does not mutate the validated original. */
+function cloneCssNode(node: any): any {
+  if (node == null || typeof node !== 'object') return node;
+  if (node instanceof List || (typeof node.forEach === 'function' && typeof node.appendData === 'function' && typeof node.toArray === 'function')) {
+    const list = new List();
+    node.forEach((child: any) => {
+      list.appendData(cloneCssNode(child));
+    });
+    return list;
+  }
+  if (Array.isArray(node)) return node.map(cloneCssNode);
+  const out: any = {};
+  for (const key of Object.keys(node)) {
+    if (key === 'loc') continue;
+    out[key] = cloneCssNode(node[key]);
+  }
+  return out;
+}
+
+/** Replace model-authored html/body/:root atoms with the sanitizer content-root attribute. */
+function rewriteGlobalRootAtoms(node: any): void {
+  if (!node || typeof node !== 'object') return;
+  if (isGlobalRootAtom(node)) {
+    for (const key of Object.keys(node)) delete node[key];
+    Object.assign(node, contentRootAttributeSelector());
+    return;
+  }
+  if (node.children && typeof node.children.forEach === 'function') {
+    node.children.forEach((child: any) => rewriteGlobalRootAtoms(child));
+  }
+}
+
+function isExactGlobalRootSelector(selector: any): boolean {
+  const nodes = children(selector);
+  return nodes.length === 1 && isGlobalRootAtom(nodes[0]);
+}
+
+function isExactUniversalSelector(selector: any): boolean {
+  const nodes = children(selector);
+  return nodes.length === 1 && isUniversalAtom(nodes[0]);
+}
+
+function selectorBeginsWithGlobalRoot(selector: any): boolean {
+  const nodes = children(selector);
+  return nodes.length > 0 && isGlobalRootAtom(nodes[0]);
+}
+
+/**
+ * Scope one validated selector to the export content root.
+ * Global root atoms rewrite in-place; exact `*` becomes a descendant universal.
+ * Never rewrites model-authored `[data-he-content]` — those fail reserved validation first.
+ */
+function scopeSelector(selector: any): string {
+  if (isExactGlobalRootSelector(selector)) return CONTENT_ROOT_SELECTOR;
+  if (isExactUniversalSelector(selector)) return `${CONTENT_ROOT_SELECTOR} *`;
+  const beginsAtRoot = selectorBeginsWithGlobalRoot(selector);
+  const rewritten = cloneCssNode(selector);
+  rewriteGlobalRootAtoms(rewritten);
+  const text = generated(rewritten);
+  return beginsAtRoot ? text : `${CONTENT_ROOT_SELECTOR} ${text}`;
+}
+
 function violationResult(failure: Failure): CssSanitizeResult {
   return { ok: false, violations: [failure.violation] };
 }
@@ -272,10 +363,15 @@ function validateSelectorAtom(node: any): Failure | null {
   const type = node?.type;
   if (type === 'TypeSelector') {
     const name = String(node.name).toLowerCase();
-    if (['html', 'body', 'head', 'style'].includes(name)) return fail(CSS_VIOLATION_CODES.reservedSelector, `reserved type selector ${name}`);
+    // html/body/* are rewrite targets (scoped to [data-he-content]); head/style stay reserved.
+    if (name === 'html' || name === 'body' || name === '*') return null;
+    if (name === 'head' || name === 'style') return fail(CSS_VIOLATION_CODES.reservedSelector, `reserved type selector ${name}`);
     if (!TYPE_SELECTORS.has(name)) return fail(CSS_VIOLATION_CODES.disallowedSelector, `type selector ${name}`);
-  } else if (type === 'UniversalSelector' || type === 'NestingSelector') {
-    return fail(CSS_VIOLATION_CODES.disallowedSelector, type === 'UniversalSelector' ? 'universal selector' : 'nesting selector');
+  } else if (type === 'UniversalSelector') {
+    // Rewrite/scope target — accepted and rewritten in scopeSelector.
+    return null;
+  } else if (type === 'NestingSelector') {
+    return fail(CSS_VIOLATION_CODES.disallowedSelector, 'nesting selector');
   } else if (type === 'ClassSelector' || type === 'IdSelector') {
     const name = String(node.name);
     if (hasReservedName(name) || (type === 'IdSelector' && name.toLowerCase().startsWith('he-'))) {
@@ -293,7 +389,8 @@ function validateSelectorAtom(node: any): Failure | null {
     }
   } else if (type === 'PseudoClassSelector') {
     const name = String(node.name).toLowerCase();
-    if (name === 'root') return fail(CSS_VIOLATION_CODES.reservedSelector, 'reserved pseudo-class :root');
+    // :root is a rewrite target (scoped to [data-he-content]).
+    if (name === 'root') return null;
     if (!PSEUDO_CLASSES.has(name)) return fail(CSS_VIOLATION_CODES.disallowedSelector, `pseudo-class :${name}`);
   } else if (type === 'PseudoElementSelector') {
     const name = String(node.name).toLowerCase();
@@ -565,7 +662,7 @@ function sanitizeRule(rule: any, context: CssSanitizeContext, counts: Counts): s
   for (const selector of selectors) {
     const selectorFailure = validateSelector(selector);
     if (selectorFailure) return selectorFailure;
-    outputSelectors.push(`[data-he-content] ${generated(selector)}`);
+    outputSelectors.push(scopeSelector(selector));
   }
   const declarations = sanitizeDeclarations(rule.block, context, counts);
   if (isFailure(declarations)) return declarations;
