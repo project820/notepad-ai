@@ -159,6 +159,26 @@ export type QuarantineMeasureResult =
   | { ok: true; value: HtmlExportQuarantineVerdict }
   | { ok: false; error: HtmlExportQuarantineError };
 
+/**
+ * Renderer → main request to save the finalized artifact (PR-M1d / AC-M1d). The
+ * renderer submits only opaque IDs; the finalized bytes are read from the main
+ * registry and never supplied over IPC. `defaultName` seeds the save dialog only.
+ */
+export type SaveFinalizedRequest = {
+  attemptId: HtmlExportAttemptId;
+  finalizedArtifactId: FinalizedArtifactId;
+  defaultName?: string;
+};
+
+/**
+ * Result of an atomic single-file save. `sha256` is the finalized digest so a
+ * caller can assert preview == save-finalized equality. No partial file is ever
+ * left on failure (atomic write).
+ */
+export type SaveFinalizedResult =
+  | { saved: true; filePath: string; sha256: string }
+  | { saved: false; error?: string };
+
 export type HtmlExportPipelineApi = {
   beginHtmlExportAttempt: (request: BeginAttemptRequest) => Promise<BeginAttemptResult>;
   sanitizeHtmlExport: (request: SanitizeRequest) => Promise<SanitizeResult>;

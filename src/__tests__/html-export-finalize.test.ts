@@ -11,6 +11,7 @@ import {
   type HtmlExportPipelineResult,
   type HtmlExportStage,
   type ResolvedArtifactId,
+  type FinalizedArtifactId,
 } from '../shared/html-export-pipeline';
 import {
   HTML_EXPORT_PIPELINE_STAGE_MAX_BYTES,
@@ -278,5 +279,54 @@ describe('HtmlExportPipelineService.finalize', () => {
     const result = service.finalize(1, attemptId, resolved.id);
     expect(result.ok ? '' : result.error.kind).toBe('pipeline-oversize');
     expect(registry.transitions.filter((t) => t.stage === 'finalized')).toHaveLength(0);
+  });
+});
+
+
+describe('HtmlExportPipelineService.readFinalizedArtifact', () => {
+  async function driveToFinalized(service: HtmlExportPipelineService, registry: FakeRegistry) {
+    const { attemptId, resolvedId, resolvedBytes } = await driveToResolved(service, registry);
+    const finalized = valueOf(service.finalize(1, attemptId, resolvedId));
+    return { attemptId, finalizedId: finalized.artifact.id, resolvedBytes };
+  }
+
+  it('returns the exact main-held finalized bytes with a matching digest', async () => {
+    const { service, registry } = serviceFor();
+    const { attemptId, finalizedId, resolvedBytes } = await driveToFinalized(service, registry);
+
+    const read = service.readFinalizedArtifact(1, attemptId, finalizedId);
+
+    expect(read.ok).toBe(true);
+    if (!read.ok) return;
+    expect(read.value.bytes.equals(resolvedBytes)).toBe(true);
+    expect(read.value.sha256).toBe(digest(resolvedBytes));
+    expect(read.value.byteLength).toBe(resolvedBytes.byteLength);
+  });
+
+  it('returns typed errors for unknown, wrong-sender, and stale finalized ids', async () => {
+    const { service, registry } = serviceFor();
+    const { attemptId, finalizedId } = await driveToFinalized(service, registry);
+
+    const unknown = service.readFinalizedArtifact(1, attemptId, 'artifact-missing' as FinalizedArtifactId);
+    expect(unknown.ok ? '' : unknown.error.kind).toBe('unknown-artifact');
+
+    const wrongSender = service.readFinalizedArtifact(99, attemptId, finalizedId);
+    expect(wrongSender.ok ? '' : wrongSender.error.kind).toBe('wrong-sender');
+
+    registry.invalidateSender(1);
+    const stale = service.readFinalizedArtifact(1, attemptId, finalizedId);
+    expect(stale.ok ? '' : stale.error.kind).toBe('stale-artifact');
+  });
+
+  it('refuses to read a non-finalized artifact id (only finalized bytes are durable)', async () => {
+    const { service, registry } = serviceFor();
+    const { attemptId, resolvedId } = await driveToResolved(service, registry);
+
+    const read = service.readFinalizedArtifact(
+      1,
+      attemptId,
+      resolvedId as unknown as FinalizedArtifactId,
+    );
+    expect(read.ok ? '' : read.error.kind).toBe('pipeline-reject');
   });
 });

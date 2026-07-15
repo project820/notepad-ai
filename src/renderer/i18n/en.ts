@@ -252,6 +252,7 @@ export const en: Dict = {
     'he.error.containment': 'The content could not be laid out within the chosen layout. Try a lighter summary level or the scroll layout.',
     'he.error.notSelfContained': 'The generated document was not fully self-contained and was not saved. Please try again.',
     'he.assets.select': 'Choose images with the system file picker.',
+    'he.picker.openRouterExcluded': 'OpenRouter models are not available for HTML export.',
     'he.assets.hintsTitle': 'Images referenced by this Markdown document',
     'he.assets.assign': 'Explicitly assign selected file',
     'he.assets.ambiguous': 'Multiple files with the same name require an explicit choice.',

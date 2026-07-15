@@ -18,8 +18,11 @@ import {
   type QuarantineMeasureRequest,
   type QuarantineMeasureResult,
   type ResolvedArtifactId,
+  type SaveFinalizedRequest,
+  type SaveFinalizedResult,
   createHtmlExportQuarantineError,
 } from '../../shared/html-export-pipeline';
+import { atomicWrite, nodeAtomicBackend, type AtomicWriteBackend } from '../atomic-write';
 import {
   designListContentsUrl,
   isAllowedDesignFetchUrl,
@@ -54,10 +57,12 @@ type HtmlExportIpcDeps = {
   windowForWebContents: (webContentsId: number) => BrowserWindow | null;
   pipelineService: Pick<
     HtmlExportPipelineService,
-    'beginAttempt' | 'sanitize' | 'resolve' | 'finalize' | 'invalidateAttempt' | 'invalidateSender'
+    'beginAttempt' | 'sanitize' | 'resolve' | 'finalize' | 'readFinalizedArtifact' | 'invalidateAttempt' | 'invalidateSender'
   >;
   assetLifecycle: HtmlExportAssetLifecycle;
   quarantine?: HtmlExportQuarantineLifecycle;
+  /** Injectable atomic-write backend for the finalized save path (tests only). */
+  saveBackend?: AtomicWriteBackend;
 };
 
 
@@ -184,6 +189,21 @@ function isQuarantineMeasureRequest(input: unknown): input is QuarantineMeasureR
     && isOpaqueHtmlExportId(input.resolvedArtifactId);
 }
 
+function isSaveFinalizedRequest(input: unknown): input is SaveFinalizedRequest {
+  if (!isExactPlainObject(input) || Object.getOwnPropertySymbols(input).length !== 0) return false;
+  const keys = Object.keys(input);
+  if (!keys.every((key) => key === 'attemptId' || key === 'finalizedArtifactId' || key === 'defaultName')) {
+    return false;
+  }
+  // Required IDs must be own enumerable string keys (never prototype-inherited).
+  if (!Object.hasOwn(input, 'attemptId') || !Object.hasOwn(input, 'finalizedArtifactId')) return false;
+  if (!isOpaqueHtmlExportId(input.attemptId) || !isOpaqueHtmlExportId(input.finalizedArtifactId)) return false;
+  if ('defaultName' in input && input.defaultName !== undefined && typeof input.defaultName !== 'string') {
+    return false;
+  }
+  return true;
+}
+
 function quarantineReject(kind: Parameters<typeof createHtmlExportQuarantineError>[0]): QuarantineMeasureResult {
   return { ok: false, error: createHtmlExportQuarantineError(kind) };
 }
@@ -193,6 +213,7 @@ export function registerHtmlExportIpc({
   pipelineService,
   assetLifecycle,
   quarantine,
+  saveBackend,
 }: HtmlExportIpcDeps): void {
 
   type SenderBinding = {
@@ -476,6 +497,61 @@ export function registerHtmlExportIpc({
       return { saved: false as const, error: e instanceof Error ? e.message : 'write-failed' };
     }
     return { saved: true as const, filePath: target };
+  });
+
+  // AC-M1d: save the main-held FinalizedArtifactId bytes to a single HTML file
+  // via an atomic write. The renderer submits only opaque IDs — never bytes — and
+  // the previous `html:save` path stays live until the single cutover. No partial
+  // file is ever left on failure; the returned sha256 lets a caller assert
+  // preview == save-finalized digest.
+  handleTrusted('html:save-finalized', async (event, input: unknown): Promise<SaveFinalizedResult> => {
+    const binding = await bindSenderInvalidation(event.sender);
+    if (!binding) return { saved: false as const };
+    if (!isSaveFinalizedRequest(input)) return { saved: false as const };
+    const win = windowForWebContents(binding.webContentsId);
+    if (!win) return { saved: false as const };
+
+    // Fail-fast UX read: if the artifact cannot be resolved, do not even open a
+    // dialog. The authoritative bytes are re-read AFTER the dialog below.
+    const preflight = pipelineService.readFinalizedArtifact(
+      binding.webContentsId,
+      input.attemptId,
+      input.finalizedArtifactId,
+    );
+    if (!preflight.ok || !isCurrentSender(binding)) return { saved: false as const };
+
+    const result = await dialog.showSaveDialog(win, {
+      filters: [{ name: 'HTML', extensions: ['html'] }],
+      defaultPath: htmlSaveFileName(input.defaultName),
+    });
+    if (result.canceled || !result.filePath) return { saved: false as const };
+    if (!isCurrentSender(binding)) return { saved: false as const };
+
+    // Re-read after the async dialog: the attempt may have been superseded,
+    // cancelled, or the sender destroyed while the dialog was open. Only the
+    // re-read main-held bytes are durable — never a pre-dialog snapshot.
+    const finalized = pipelineService.readFinalizedArtifact(
+      binding.webContentsId,
+      input.attemptId,
+      input.finalizedArtifactId,
+    );
+    if (!finalized.ok) return { saved: false as const };
+
+    let target = result.filePath;
+    if (!/\.html?$/i.test(target)) target += '.html';
+    try {
+      // Exported HTML is user-shareable: use 0o644, not atomicWrite's 0o600
+      // secret-store default. No partial file is left on failure.
+      await atomicWrite(target, finalized.value.bytes, {
+        backend: saveBackend ?? nodeAtomicBackend(),
+        mode: 0o644,
+      });
+    } catch {
+      // Never forward the raw error: its message can carry absolute filesystem
+      // paths. The atomic write leaves no partial file on failure.
+      return { saved: false as const, error: 'write-failed' };
+    }
+    return { saved: true as const, filePath: target, sha256: finalized.value.sha256 };
   });
 
   handleTrusted('html:open-saved', async (_e, filePath: unknown) => {

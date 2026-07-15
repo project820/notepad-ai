@@ -112,6 +112,7 @@ export const zhHans: Dict = {
     'he.summary.title': '摘要与图表', 'he.summary.A': 'A · 视觉摘要', 'he.summary.B': 'B · 平衡摘要', 'he.summary.C': 'C · 详细摘要', 'he.summary.D': 'D · 接近原文', 'he.freeReq.title': '你的需求', 'he.freeReq.placeholder': '描述任何具体要求 — 受众、重点、保留或删减的内容…', 'he.advanced.title': '高级选项', 'he.design.useDefault': '使用默认设计', 'he.result.modelReady': '内容已就绪',
     'he.saving': '正在保存…', 'he.result.readyToSave': '内容已就绪。保存为单一自包含的 HTML 文件。', 'he.result.save': '保存 HTML', 'he.result.open': '在浏览器中打开', 'he.result.saved': '已保存。可在浏览器中打开。', 'he.error.containment': '无法在所选布局中容纳内容。请尝试更轻的摘要级别或滚动布局。', 'he.error.notSelfContained': '生成的文档不是完全自包含，未保存。请重试。',
     'he.assets.select': '通过系统文件选择器选择图片',
+    'he.picker.openRouterExcluded': 'HTML 导出不支持 OpenRouter 模型。',
     'he.assets.hintsTitle': '此 Markdown 文档引用的图片',
     'he.assets.assign': '明确将所选文件分配给引用',
     'he.assets.ambiguous': '多个同名文件需要明确选择。',

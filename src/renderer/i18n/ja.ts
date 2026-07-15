@@ -112,6 +112,7 @@ export const ja: Dict = {
     'he.summary.title': '要約・チャート', 'he.summary.A': 'A · ビジュアル要約', 'he.summary.B': 'B · バランス要約', 'he.summary.C': 'C · 詳細要約', 'he.summary.D': 'D · 原文準拠', 'he.freeReq.title': '要望', 'he.freeReq.placeholder': '対象読者・強調点・残す/省く内容など、希望を自由に記入…', 'he.advanced.title': '詳細オプション', 'he.design.useDefault': '既定のデザインを使用', 'he.result.modelReady': 'コンテンツの準備完了',
     'he.saving': '保存中…', 'he.result.readyToSave': 'コンテンツの準備ができました。単一の自己完結型 HTML ファイルとして保存します。', 'he.result.save': 'HTML を保存', 'he.result.open': 'ブラウザで開く', 'he.result.saved': '保存しました。ブラウザで開けます。', 'he.error.containment': '選択したレイアウト内にコンテンツを収められませんでした。要約レベルを下げるか、スクロールレイアウトをお試しください。', 'he.error.notSelfContained': '生成された文書が完全な自己完結型ではなかったため保存しませんでした。もう一度お試しください。',
     'he.assets.select': 'システムのファイル選択画面で画像を選ぶ',
+    'he.picker.openRouterExcluded': 'OpenRouter モデルは HTML エクスポートでは利用できません。',
     'he.assets.hintsTitle': 'この Markdown 文書で参照されている画像',
     'he.assets.assign': '選択したファイルを参照先に明示的に割り当てる',
     'he.assets.ambiguous': '同名のファイルが複数あるため、明示的に選択する必要があります。',
