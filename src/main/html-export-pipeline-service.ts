@@ -12,6 +12,7 @@ import {
   type SanitizedArtifactId,
   type ResolveResult,
   type SanitizeResult,
+  type ResolvedArtifactId,
 } from '../shared/html-export-pipeline';
 import { HtmlExportAttemptRegistry } from './html-export-attempt-registry';
 import { HtmlExportParseHost, type HtmlExportParseValue } from './html-export-parse-host';
@@ -247,6 +248,43 @@ export class HtmlExportPipelineService {
     return checked.ok ? { ok: true, value: { artifact: checked.value } } : checked;
   }
 
+  /**
+   * Quarantine-PASS finalization: store the exact resolved bytes as a
+   * FinalizedArtifactId. Measure-only pool never finalizes; only this service
+   * (invoked from IPC after PASS) may transition resolved -> finalized.
+   */
+  finalize(
+    webContentsId: number,
+    attemptId: HtmlExportAttemptId,
+    resolvedArtifactId: ResolvedArtifactId,
+  ): HtmlExportPipelineResult<{ artifact: HtmlExportArtifactRef<'finalized'> }> {
+    const resolved = this.registry.read(webContentsId, attemptId, resolvedArtifactId, 'resolved');
+    if (!resolved.ok) return resolved;
+    if (!this.hasExpectedDigest(resolved.value.ref, resolved.value.bytes)) {
+      return reject('Resolved artifact digest or byte length does not match its registry metadata');
+    }
+    if (resolved.value.bytes.byteLength > HTML_EXPORT_PIPELINE_STAGE_MAX_BYTES) {
+      return oversize(`Resolved payload exceeds ${HTML_EXPORT_PIPELINE_STAGE_MAX_BYTES} bytes`);
+    }
+
+    const verified = this.verifyCandidate(
+      Buffer.from(resolved.value.bytes),
+      HTML_EXPORT_PIPELINE_STAGE_MAX_BYTES,
+    );
+    if (!verified.ok) return verified;
+
+    const transitioned = this.registry.transition(
+      webContentsId,
+      attemptId,
+      resolvedArtifactId,
+      'finalized',
+      verified.value.bytes,
+    );
+    if (!transitioned.ok) return transitioned;
+    const checked = this.verifyTransition(transitioned.value, verified.value);
+    return checked.ok ? { ok: true, value: { artifact: checked.value } } : checked;
+  }
+
   invalidateAttempt(
     webContentsId: number,
     attemptId: HtmlExportAttemptId,
@@ -292,7 +330,7 @@ export class HtmlExportPipelineService {
     return { ok: true, value: { bytes, sha256: sha256(bytes) } };
   }
 
-  private verifyTransition<Stage extends 'sanitized' | 'resolved'>(
+  private verifyTransition<Stage extends 'sanitized' | 'resolved' | 'finalized'>(
     ref: HtmlExportArtifactRef<Stage>,
     candidate: { bytes: Buffer; sha256: string },
   ): HtmlExportPipelineResult<HtmlExportArtifactRef<Stage>> {

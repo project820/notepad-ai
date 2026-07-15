@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 
-import { sha256Base64 } from '../sha256';
+import { sha256Base64 } from '../../shared/sha256';
 
 // Verified against `crypto.createHash('sha256').update(s,'utf8').digest('base64')`.
 describe('sha256Base64 — NIST / known vectors', () => {
