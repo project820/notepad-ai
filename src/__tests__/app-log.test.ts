@@ -8,6 +8,7 @@ import {
   parseAppLogDayFromFileName,
   appLog,
   todayAppLogPath,
+  logError,
 } from '../main/app-log';
 
 describe('app-log', () => {
@@ -63,6 +64,43 @@ describe('app-log', () => {
     expect(field).not.toContain(fileUrl);
     expect(field).not.toContain(spacedPath);
     expect(field).not.toContain('Application Support');
+  });
+  it('redacts complete home-relative paths with spaces', () => {
+    const homePath = ['~', 'Library', 'Application Support', 'private'].join('/');
+    const field = formatAppLogField(`failed at ${homePath}`);
+
+    expect(field).toContain('[REDACTED_PATH]');
+    expect(field).not.toContain(homePath);
+    expect(field).not.toContain('Application Support');
+    expect(field).not.toContain('Support/private');
+  });
+
+  it('logs generate exceptions with fixed fields, not exception text', async () => {
+    const writes: string[] = [];
+    const error = new Error('token=abc authorization: Bearer sensitive-value');
+    configureAppLog({
+      logDir: () => 'logs',
+      now: () => Date.parse('2026-07-16T12:00:00.000Z'),
+      appendFile: async (_filePath, data) => {
+        writes.push(data);
+      },
+      readdir: async () => [],
+      unlink: async () => undefined,
+      mkdir: async () => undefined,
+    });
+
+    await logError('html-export', 'generate threw', {
+      webContentsId: 1,
+      stage: 'generate',
+      kind: 'exception',
+      code: 'unknown_error',
+    });
+
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toContain('stage=generate kind=exception code=unknown_error');
+    expect(writes[0]).not.toContain(error.message);
+    expect(writes[0]).not.toContain('token=abc');
+    expect(writes[0]).not.toContain('Bearer sensitive-value');
   });
 
   it('formats a single-line structured record', () => {

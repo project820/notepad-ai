@@ -252,10 +252,9 @@ registerHtmlExportIpc({
     } catch (error) {
       void logError('html-export', 'generate threw', {
         webContentsId,
-        provider: input.model.provider,
-        model: input.model.id,
-        errorName: error instanceof Error ? error.name : typeof error,
-        errorMessage: error instanceof Error ? error.message.slice(0, 200) : undefined,
+        stage: 'generate',
+        kind: 'exception',
+        code: 'unknown_error',
       });
       throw error;
     }
