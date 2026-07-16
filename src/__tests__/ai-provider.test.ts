@@ -831,6 +831,41 @@ describe('ProviderRegistry local discovery is non-blocking', () => {
       vi.useRealTimers();
     }
   });
+  it('single-flights hanging cloud listModels across concurrent HTML inventory calls', async () => {
+    vi.useFakeTimers();
+    try {
+      const cache = new LocalModelCache();
+      const listModels = vi.fn(() => new Promise<ModelRef[]>(() => {}));
+      const chatgpt = {
+        ...fakeProvider('chatgpt', true, () => {}),
+        listModels,
+      } as AiProvider & { listModels: ReturnType<typeof vi.fn> };
+      const lmstudio = cacheFakeProvider('lmstudio', async () => [
+        localModelRef('lmstudio', 'shared-local'),
+      ]);
+      const reg = new ProviderRegistry(
+        fakeKeyStore(),
+        {
+          chatgpt,
+          claude: fakeProvider('claude', true, () => {}),
+          openrouter: fakeProvider('openrouter', true, () => {}),
+          lmstudio,
+        },
+        cache,
+      );
+
+      const first = reg.getAvailableModelsForHtmlExport(true);
+      await vi.advanceTimersByTimeAsync(1_500);
+      await first;
+      // Second open while the first cloud hang is still unsettled must join, not re-call.
+      const second = reg.getAvailableModelsForHtmlExport(true);
+      await vi.advanceTimersByTimeAsync(1_500);
+      await second;
+      expect(listModels).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it('local providers report static connected auth without a network probe', async () => {
     const fetchSpy = vi.fn(() => Promise.reject(new Error('ECONNREFUSED')));

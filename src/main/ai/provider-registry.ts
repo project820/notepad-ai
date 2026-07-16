@@ -68,6 +68,12 @@ export class ProviderRegistry {
   ) {}
   private reasoningSnapshotGeneration = 0;
   private reasoningAccountFingerprint = '';
+  /**
+   * Single-flight guard for live cloud listModels on the HTML path. Held until
+   * the cloud promise settles (not merely until the caller-facing race returns)
+   * so repeated wizard opens cannot stack unbounded cloud catalog calls.
+   */
+  private htmlCloudInventoryInFlight: Promise<ModelRef[]> | null = null;
 
   private bumpReasoningSnapshot(): void {
     this.reasoningSnapshotGeneration++;
@@ -192,8 +198,9 @@ export class ProviderRegistry {
    * Discovery stays hard-bounded by LocalModelCache (500ms timeout per provider).
    *
    * Local refresh is started before cloud inventory and awaited first. Cloud
-   * listModels is also bounded: a hanging ChatGPT/live catalog must not block
-   * HTML entry after local discovery has finished (curated cloud IDs remain).
+   * listModels is bounded for the caller and single-flighted until settlement so
+   * a hanging ChatGPT/live catalog cannot block HTML entry or be re-spawned on
+   * every wizard open (curated cloud IDs remain available either way).
    */
   async getAvailableModelsForHtmlExport(force = false): Promise<ModelRef[]> {
     if (force) this.bumpReasoningSnapshot();
@@ -207,15 +214,24 @@ export class ProviderRegistry {
       locals.length > 0 && (force || this.localCache.isStale())
         ? this.localCache.refreshInBackground(locals)
         : Promise.resolve();
-    const livePromise = Promise.all(
-      cloudProviders.map(async (provider) => {
-        try {
-          return applyModelDisplayPolicy(await provider.listModels());
-        } catch {
-          return [] as ModelRef[];
-        }
-      }),
-    ).then((batches) => batches.flat());
+    // Single-flight cloud inventory for the lifetime of the live promise.
+    let livePromise = this.htmlCloudInventoryInFlight;
+    if (!livePromise) {
+      livePromise = Promise.all(
+        cloudProviders.map(async (provider) => {
+          try {
+            return applyModelDisplayPolicy(await provider.listModels());
+          } catch {
+            return [] as ModelRef[];
+          }
+        }),
+      )
+        .then((batches) => batches.flat())
+        .finally(() => {
+          this.htmlCloudInventoryInFlight = null;
+        });
+      this.htmlCloudInventoryInFlight = livePromise;
+    }
     await localRefresh;
     // Bound cloud wait so local-only entry is not starved by a slow live catalog.
     const live = await Promise.race([
