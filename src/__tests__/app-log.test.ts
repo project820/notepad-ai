@@ -71,8 +71,9 @@ describe('app-log', () => {
     expect(field).not.toContain('xyz');
   });
   it('pre-caps large fields before redaction', () => {
-    const preCap = 'x'.repeat(8 * 512);
-    expect(formatAppLogField(`${preCap} password=hunter2`)).toBe(formatAppLogField(preCap));
+    const field = formatAppLogField(`password=${'a'.repeat(5000)} TAIL`);
+    expect(field).toContain('[REDACTED_SECRET]');
+    expect(field).not.toContain('TAIL');
   });
   it('redacts absolute paths and secret-like values from fields and messages', () => {
     const absolutePath = ['', 'Users', 'example', 'private'].join('/');
