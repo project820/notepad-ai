@@ -321,7 +321,13 @@ export function initUnifiedChatWiring(ctx: AppContext, deps: UnifiedChatWiringDe
       getMarkdown: () => ctx.editor.getDoc(),
       maxSourceCharsForModel: (m) => htmlExportSourceCharBudget(m ?? currentModelArg()),
       listHtmlModels: async () => {
-        const ms = await window.api.aiModelsHtml(true);
+        // Reuse the entry-time inventory first. A second forced refresh can race a
+        // 500ms local timeout and overwrite a just-proven Ollama/LM Studio discovery
+        // with [], emptying the picker after the wizard already admitted the user.
+        let ms = htmlModels;
+        if (ms.length === 0) {
+          ms = await window.api.aiModelsHtml(true).catch(() => []);
+        }
         const mapped = ms.map((m) => {
           const provider = m.provider ?? 'chatgpt';
           return {
