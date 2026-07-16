@@ -356,6 +356,38 @@ describe('mountHtmlExportWizard — HTML-only model picker', () => {
     expect(values).toContain('chatgpt:gpt-5.4-mini');
   });
 });
+describe('mountHtmlExportWizard — sticky model selection survives re-renders', () => {
+  it('keeps the chosen model after A/B/C/D and Auto/Detail toggles', async () => {
+    const chosen: string[] = [];
+    const { host, deps } = setup({
+      listHtmlModels: async () => [
+        { provider: 'chatgpt', id: 'gpt-5.4-mini', label: 'GPT-5.4 mini', contextWindow: 400_000 },
+        { provider: 'chatgpt', id: 'gpt-5.6', label: 'GPT-5.6', contextWindow: 1_000_000 },
+        { provider: 'grok', id: 'grok-4.5', label: 'Grok 4.5', contextWindow: 256_000 },
+      ],
+      getDefaultModel: () => ({ provider: 'chatgpt', id: 'gpt-5.4-mini' }),
+      onModelChosen: (m) => chosen.push(`${m.provider}:${m.id}`),
+    });
+    click(host, 'orient-vertical');
+    click(host, 'layout-scroll');
+    click(host, 'design-default');
+    await flush();
+    const select = host.querySelector<HTMLSelectElement>('[data-he-field="model"]')!;
+    select.value = 'chatgpt:gpt-5.6';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(chosen).toContain('chatgpt:gpt-5.6');
+
+    // Re-renders that previously wiped the picker back to the default.
+    click(host, 'summary-A');
+    click(host, 'mode-detail');
+    click(host, 'mode-auto');
+    expect(host.querySelector<HTMLSelectElement>('[data-he-field="model"]')!.value).toBe('chatgpt:gpt-5.6');
+
+    click(host, 'generate-submit');
+    await flush();
+    expect(lastRequest(deps).model).toEqual({ provider: 'chatgpt', id: 'gpt-5.6' });
+  });
+});
 
 describe('mountHtmlExportWizard — viewport + abandon invalidation', () => {
   it('sends an orientation-derived viewport with generateHtmlExport (portrait 720×1280)', async () => {
@@ -490,6 +522,67 @@ describe('mountHtmlExportWizard — a non-final generation result surfaces an er
     expect(deps.cancelHtmlGeneration).toHaveBeenCalledTimes(1);
   });
 });
+describe('mountHtmlExportWizard — failure recovery (back + retry)', () => {
+  it('BACK from error returns to summary-requirement with sticky settings', async () => {
+    const { host, handle } = setup({
+      generateHtmlExport: vi.fn(async () => SANITIZE_FAILED_RESULT),
+      listHtmlModels: async () => [
+        { provider: 'chatgpt', id: 'gpt-5.4-mini', label: 'GPT-5.4 mini', contextWindow: 400_000 },
+        { provider: 'chatgpt', id: 'gpt-5.6', label: 'GPT-5.6', contextWindow: 1_000_000 },
+      ],
+      getDefaultModel: () => ({ provider: 'chatgpt', id: 'gpt-5.4-mini' }),
+    });
+    click(host, 'orient-vertical');
+    click(host, 'layout-scroll');
+    click(host, 'design-default');
+    await flush();
+    const select = host.querySelector<HTMLSelectElement>('[data-he-field="model"]')!;
+    select.value = 'chatgpt:gpt-5.6';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    setField(host, 'free-requirement', 'keep charts');
+    host.querySelector<HTMLTextAreaElement>('[data-he-field="free-requirement"]')!
+      .dispatchEvent(new Event('input', { bubbles: true }));
+    click(host, 'summary-C');
+    click(host, 'generate-submit');
+    await settle(() => handle.getState().step === 'error');
+    expect(host.querySelector('[data-he="back"]')).toBeTruthy();
+    expect(host.querySelector('[data-he="retry"]')).toBeTruthy();
+
+    click(host, 'back');
+    expect(handle.getState().step).toBe('summary-requirement');
+    expect(handle.getState().summaryChartMode).toBe('C');
+    expect(handle.getState().freeRequirement).toBe('keep charts');
+    expect(host.querySelector<HTMLSelectElement>('[data-he-field="model"]')!.value).toBe('chatgpt:gpt-5.6');
+  });
+
+  it('Retry from error re-runs generation with the same sticky model', async () => {
+    const gen = vi.fn(async () => SANITIZE_FAILED_RESULT);
+    const { host, handle, deps } = setup({
+      generateHtmlExport: gen,
+      listHtmlModels: async () => [
+        { provider: 'chatgpt', id: 'gpt-5.4-mini', label: 'GPT-5.4 mini', contextWindow: 400_000 },
+        { provider: 'chatgpt', id: 'gpt-5.6', label: 'GPT-5.6', contextWindow: 1_000_000 },
+      ],
+      getDefaultModel: () => ({ provider: 'chatgpt', id: 'gpt-5.4-mini' }),
+    });
+    click(host, 'orient-vertical');
+    click(host, 'layout-scroll');
+    click(host, 'design-default');
+    await flush();
+    const select = host.querySelector<HTMLSelectElement>('[data-he-field="model"]')!;
+    select.value = 'chatgpt:gpt-5.6';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    click(host, 'generate-submit');
+    await settle(() => handle.getState().step === 'error');
+    expect(gen).toHaveBeenCalledTimes(1);
+
+    click(host, 'retry');
+    await settle(() => gen.mock.calls.length >= 2);
+    expect(gen).toHaveBeenCalledTimes(2);
+    expect(lastRequest(deps).model).toEqual({ provider: 'chatgpt', id: 'gpt-5.6' });
+    expect(handle.getState().step).toBe('error');
+  });
+});
 
 describe('mountHtmlExportWizard — local model context badge + small-model notice (G003)', () => {
   it('lists a local model with a context badge and warns when its context window is small', async () => {
@@ -539,28 +632,29 @@ describe('mountHtmlExportWizard — local model context badge + small-model noti
   });
 });
 
-describe('mountHtmlExportWizard — purpose/density/etc are demoted to an optional advanced panel', () => {
+describe('mountHtmlExportWizard — flat Auto/Detail flow (no nested advanced panel)', () => {
   const toSummary = (host: HTMLElement) => {
     click(host, 'orient-vertical');
     click(host, 'layout-scroll');
     click(host, 'design-default');
   };
 
-  it('shows the core controls and keeps the advanced knobs collapsed/optional', () => {
+  it('shows Auto|Detail, summary, purpose, free-req, and model without a nested advanced panel', () => {
     const { host } = setup();
     toSummary(host);
+    expect(host.querySelector('[data-he="mode-auto"]')).toBeTruthy();
+    expect(host.querySelector('[data-he="mode-detail"]')).toBeTruthy();
     expect(host.querySelector('[data-he-field="free-requirement"]')).toBeTruthy();
     expect(host.querySelector('[data-he="summary-A"]')).toBeTruthy();
     expect(host.querySelector('[data-he="summary-D"]')).toBeTruthy();
-    const adv = host.querySelector('details.he-advanced');
-    expect(adv).toBeTruthy();
-    expect((adv as HTMLDetailsElement).open).toBe(false);
+    expect(host.querySelector('details.he-advanced')).toBeNull();
     expect(host.querySelector('[data-he-field="purpose"]')).toBeTruthy();
+    // Density/width knobs only appear in Detail mode.
     expect(host.querySelector('[data-he-field="density"]')).toBeNull();
     expect(host.querySelector('[data-he-field="interactive"]')).toBeNull();
   });
 
-  it('switching to detail reveals density/width/interactive knobs', () => {
+  it('switching to detail reveals density/width/interactive knobs on one row', () => {
     const { host, handle } = setup();
     toSummary(host);
     click(host, 'mode-detail');
@@ -568,6 +662,7 @@ describe('mountHtmlExportWizard — purpose/density/etc are demoted to an option
     expect(host.querySelector('[data-he-field="density"]')).toBeTruthy();
     expect(host.querySelector('[data-he-field="readable-width"]')).toBeTruthy();
     expect(host.querySelector('[data-he-field="interactive"]')).toBeTruthy();
+    expect(host.querySelector('.he-detail-row')).toBeTruthy();
   });
 
   it('maps roomy density to the sparse direct prompt directive', async () => {
