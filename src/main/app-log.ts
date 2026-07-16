@@ -22,6 +22,8 @@ function redactAppLogText(value: string): string {
     .replace(/\bBearer\s+[A-Za-z0-9._~+/\-=]+/gi, `Bearer ${REDACTED_SECRET}`)
     .replace(/\bsk-[A-Za-z0-9_-]{4,}\b/g, REDACTED_SECRET)
     .replace(/\bapi[_-]?key\s*([=:])\s*(?:"[^"]*"|'[^']*'|[^\s,;]+)/gi, (_match, separator: string) => `api_key${separator}${REDACTED_SECRET}`)
+    .replace(/\b(access[_-]?token|refresh[_-]?token|token)\s*([=:])\s*(?:"[^"]*"|'[^']*'|[^\s,;]+)/gi, (_match, key: string, separator: string) => `${key}${separator}${REDACTED_SECRET}`)
+    .replace(/\bauthorization\s*:\s*(?:(?:[A-Za-z]+\s+)?(?:"[^"]*"|'[^']*'|[^\s,;]+))/gi, `authorization: ${REDACTED_SECRET}`)
     .replace(/(^|[\s"'(=])(?:file:\/\/)?(?:~(?:\/[^\s"'`,;:()[\]{}\/]+(?: [^\s"'`,;:()[\]{}\/]+)*)+|(?:\/[^\s"'`,;:()[\]{}\/]+(?: [^\s"'`,;:()[\]{}\/]+)*(?=\/))*\/[^\s"'`,;:()[\]{}\/]+)/g, `$1${REDACTED_PATH}`);
 }
 

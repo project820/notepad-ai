@@ -55,6 +55,34 @@ describe('app-log', () => {
     expect(field).not.toContain(homePath);
     expect(line).not.toContain(absolutePath);
   });
+  it('redacts token assignments and authorization values from persisted fields', async () => {
+    const writes: string[] = [];
+    const modelId = 'caller-model?token=secret-model-token';
+    configureAppLog({
+      logDir: () => 'logs',
+      now: () => Date.parse('2026-07-16T12:00:00.000Z'),
+      appendFile: async (_filePath, data) => {
+        writes.push(data);
+      },
+      readdir: async () => [],
+      unlink: async () => undefined,
+      mkdir: async () => undefined,
+    });
+
+    await appLog('info', 'html-export', 'generate start', {
+      model: modelId,
+      detail: 'access_token=secret-access refresh_token=secret-refresh authorization: Basic secret-auth',
+    });
+
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).not.toContain('token=secret');
+    expect(writes[0]).not.toContain('secret-model-token');
+    expect(writes[0]).not.toContain('secret-access');
+    expect(writes[0]).not.toContain('secret-refresh');
+    expect(writes[0]).not.toContain('secret-auth');
+    expect(writes[0]).toContain('token=[REDACTED_SECRET]');
+    expect(writes[0]).toContain('authorization: [REDACTED_SECRET]');
+  });
   it('redacts file URLs and absolute paths with spaces', () => {
     const fileUrl = ['file:', '', '', 'Users', 'example', 'private'].join('/');
     const spacedPath = ['', 'Users', 'example', 'Library', 'Application Support', 'private'].join('/');

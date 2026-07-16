@@ -209,7 +209,6 @@ registerHtmlExportIpc({
     void logInfo('html-export', 'generate start', {
       webContentsId,
       provider: input.model.provider,
-      model: input.model.id,
       promptChars: input.prompt.length,
       viewport: input.viewport ? `${input.viewport.width}x${input.viewport.height}` : undefined,
     });
@@ -221,14 +220,12 @@ registerHtmlExportIpc({
           webContentsId,
           ms,
           provider: input.model.provider,
-          model: input.model.id,
         });
       } else if (result.state === 'partial') {
         void logWarn('html-export', 'generate partial', {
           webContentsId,
           ms,
           provider: input.model.provider,
-          model: input.model.id,
           quarantineKind: result.quarantineKind,
         });
       } else if (result.state === 'failed') {
@@ -236,7 +233,6 @@ registerHtmlExportIpc({
           webContentsId,
           ms,
           provider: input.model.provider,
-          model: input.model.id,
           stage: result.stage,
           kind: result.kind,
         });
@@ -245,7 +241,6 @@ registerHtmlExportIpc({
           webContentsId,
           ms,
           provider: input.model.provider,
-          model: input.model.id,
         });
       }
       return result;
