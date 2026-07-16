@@ -22,7 +22,7 @@ function redactAppLogText(value: string): string {
     .replace(/\bBearer\s+[A-Za-z0-9._~+/\-=]+/gi, `Bearer ${REDACTED_SECRET}`)
     .replace(/\bsk-[A-Za-z0-9_-]{4,}\b/g, REDACTED_SECRET)
     .replace(/\bapi[_-]?key\s*([=:])\s*(?:"[^"]*"|'[^']*'|[^\s,;]+)/gi, (_match, separator: string) => `api_key${separator}${REDACTED_SECRET}`)
-    .replace(/(^|[\s"'(=])(?:~|\/[A-Za-z0-9._-]+)(?:\/[^\s"'`,;:()[\]{}]+)+/g, `$1${REDACTED_PATH}`);
+    .replace(/(^|[\s"'(=])(?:file:\/\/)?(?:~(?:\/[^\s"'`,;:()[\]{}]+)+|(?:\/[^\s"'`,;:()[\]{}\/]+(?: [^\s"'`,;:()[\]{}\/]+)*(?=\/))*\/[^\s"'`,;:()[\]{}\/]+)/g, `$1${REDACTED_PATH}`);
 }
 
 export type AppLogLevel = 'info' | 'warn' | 'error';
@@ -47,6 +47,7 @@ type AppLogDeps = {
 let deps: AppLogDeps | null = null;
 let pruneInFlight: Promise<void> | null = null;
 let lastPruneDay = '';
+let pruneRetryRequested = false;
 
 function clock(): number {
   return deps?.now?.() ?? Date.now();
@@ -114,6 +115,7 @@ export function parseAppLogDayFromFileName(name: string): string | null {
 export function configureAppLog(next: AppLogDeps): void {
   deps = next;
   lastPruneDay = '';
+  pruneRetryRequested = false;
 }
 
 async function ensureDir(): Promise<string | null> {
@@ -128,17 +130,17 @@ async function ensureDir(): Promise<string | null> {
   }
 }
 
-async function pruneExpired(dir: string): Promise<void> {
-  if (!deps) return;
+async function pruneExpired(dir: string): Promise<boolean> {
+  if (!deps) return true;
   const today = utcDay(clock());
-  if (lastPruneDay === today) return;
+  if (lastPruneDay === today) return true;
   const readdir = deps.readdir ?? ((d: string) => fs.readdir(d));
   const unlink = deps.unlink ?? ((p: string) => fs.unlink(p).then(() => undefined));
   let names: string[];
   try {
     names = await readdir(dir);
   } catch {
-    return;
+    return false;
   }
   const pruneSucceeded = await Promise.all(
     names.map(async (name) => {
@@ -152,14 +154,25 @@ async function pruneExpired(dir: string): Promise<void> {
       return true;
     }),
   );
-  if (pruneSucceeded.every(Boolean)) lastPruneDay = today;
+  if (pruneSucceeded.every(Boolean)) {
+    lastPruneDay = today;
+    return true;
+  }
+  return false;
 }
 
-function schedulePrune(dir: string): void {
-  if (pruneInFlight) return;
-  pruneInFlight = pruneExpired(dir).finally(() => {
+function schedulePrune(dir: string, retryAfterFailure = true): void {
+  if (pruneInFlight) {
+    pruneRetryRequested = true;
+    return;
+  }
+  const finish = (pruneSucceeded: boolean) => {
     pruneInFlight = null;
-  });
+    const retry = pruneRetryRequested || (!pruneSucceeded && retryAfterFailure);
+    pruneRetryRequested = false;
+    if (retry) schedulePrune(dir, false);
+  };
+  pruneInFlight = pruneExpired(dir).then(finish, () => finish(false));
 }
 
 /**

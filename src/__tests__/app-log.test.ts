@@ -54,6 +54,16 @@ describe('app-log', () => {
     expect(field).not.toContain(homePath);
     expect(line).not.toContain(absolutePath);
   });
+  it('redacts file URLs and absolute paths with spaces', () => {
+    const fileUrl = ['file:', '', '', 'Users', 'example', 'private'].join('/');
+    const spacedPath = ['', 'Users', 'example', 'Library', 'Application Support', 'private'].join('/');
+    const field = formatAppLogField(`failed at ${fileUrl} or ${spacedPath}`);
+
+    expect(field).toContain('[REDACTED_PATH]');
+    expect(field).not.toContain(fileUrl);
+    expect(field).not.toContain(spacedPath);
+    expect(field).not.toContain('Application Support');
+  });
 
   it('formats a single-line structured record', () => {
     const line = formatAppLogLine(
@@ -110,10 +120,14 @@ describe('app-log', () => {
     expect(unlinked.some((p) => p.endsWith('app-2026-07-13.log'))).toBe(false);
     expect(unlinked.some((p) => p.endsWith('keep.txt'))).toBe(false);
   });
-  it('retries pruning after a transient directory listing failure', async () => {
+  it('retries a failed prune after an overlapping write', async () => {
+    let rejectFirstReaddir: (reason?: unknown) => void = () => undefined;
+    const firstReaddir = new Promise<string[]>((_, reject) => {
+      rejectFirstReaddir = reject;
+    });
     const readdir = vi
       .fn()
-      .mockRejectedValueOnce(new Error('temporary failure'))
+      .mockReturnValueOnce(firstReaddir)
       .mockResolvedValueOnce(['app-2026-07-10.log']);
     const unlink = vi.fn(async () => undefined);
     configureAppLog({
@@ -126,8 +140,8 @@ describe('app-log', () => {
     });
 
     await appLog('info', 'boot', 'first write');
-    await new Promise((r) => setTimeout(r, 0));
-    await appLog('info', 'boot', 'second write');
+    await appLog('info', 'boot', 'overlapping write');
+    rejectFirstReaddir(new Error('temporary failure'));
     await new Promise((r) => setTimeout(r, 0));
     await new Promise((r) => setTimeout(r, 0));
 
