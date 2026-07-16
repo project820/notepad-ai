@@ -421,9 +421,13 @@ export function registerCssKeyframes(css: string, context: CssSanitizeContext): 
   try {
     const definitions: any[] = [];
     walk(ast, { enter(node: any) { if (node.type === 'Atrule' && String(node.name).toLowerCase() === 'keyframes') definitions.push(node); } });
+    const validationContext = createCssSanitizeContext();
+    const counts: Counts = { ruleCount: 0, declarationCount: 0 };
     for (const definition of definitions) {
       const name = keyframeName(definition);
       if (isFailure(name)) return { ok: false, violations: [name.violation] };
+      const frames = sanitizeKeyframeFrames(definition, validationContext, counts);
+      if (isFailure(frames) || !frames) continue;
       const scoped = allocateKeyframe(name, context, false);
       if (isFailure(scoped)) return { ok: false, violations: [scoped.violation] };
     }
@@ -781,11 +785,7 @@ function validateAtRulePrelude(atRule: any): Failure | null {
   return null;
 }
 
-function sanitizeKeyframes(atRule: any, context: CssSanitizeContext, counts: Counts): string | Failure {
-  const name = keyframeName(atRule);
-  if (isFailure(name)) return name;
-  const scopedName = allocateKeyframe(name, context, true);
-  if (isFailure(scopedName)) return scopedName;
+function sanitizeKeyframeFrames(atRule: any, context: CssSanitizeContext, counts: Counts): string | Failure {
   const frames = children(atRule.block);
   let effectiveFrameCount = 0;
   const output: string[] = [];
@@ -805,7 +805,18 @@ function sanitizeKeyframes(atRule: any, context: CssSanitizeContext, counts: Cou
       output.push(`${selectors.map(generated).join(',')}{${declarations}}`);
     }
   }
-  return output.length ? `@keyframes ${scopedName}{${output.join('')}}` : '';
+  return output.join('');
+}
+
+function sanitizeKeyframes(atRule: any, context: CssSanitizeContext, counts: Counts): string | Failure {
+  const name = keyframeName(atRule);
+  if (isFailure(name)) return name;
+  const frames = sanitizeKeyframeFrames(atRule, context, counts);
+  if (isFailure(frames)) return frames;
+  if (!frames) return '';
+  const scopedName = allocateKeyframe(name, context, true);
+  if (isFailure(scopedName)) return scopedName;
+  return `@keyframes ${scopedName}{${frames}}`;
 }
 
 function sanitizeNodes(nodes: any[], context: CssSanitizeContext, counts: Counts, depth: number): string | Failure {
@@ -862,13 +873,14 @@ function sanitize(input: unknown, kind: 'stylesheet' | 'declarationList', contex
     if (typeof input !== 'string') return violationResult(fail(CSS_VIOLATION_CODES.parseError, 'CSS must be a string'));
     const strippedStart = context.stripped.length;
     let source = input;
+    const sourceBytes = Buffer.byteLength(source, 'utf8');
     const remaining = CSS_MAX_STYLESHEET_BYTES - context.rawBytes;
-    if (Buffer.byteLength(source, 'utf8') > remaining) {
+    if (sourceBytes > remaining) {
       const prefix = Buffer.from(source, 'utf8').subarray(0, Math.max(0, remaining)).toString('utf8');
       source = kind === 'stylesheet' ? prefix.slice(0, prefix.lastIndexOf('}') + 1) : prefix.slice(0, prefix.lastIndexOf(';') + 1);
       strip(context, fail(CSS_VIOLATION_CODES.tooLarge, `document CSS exceeds ${CSS_MAX_STYLESHEET_BYTES} bytes`));
     }
-    context.rawBytes += Buffer.byteLength(source, 'utf8');
+    context.rawBytes += Math.min(sourceBytes, Math.max(0, remaining));
     let ast: any;
     try {
       ast = parse(source, { context: kind, positions: false });

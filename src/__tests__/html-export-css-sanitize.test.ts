@@ -161,6 +161,23 @@ describe('html export CSS sanitizer', () => {
     expect(sanitizeDeclarationList('animation:none 100ms', context)).toMatchObject({ ok: true, css: 'animation:none 100ms' });
     expect(sanitizeDeclarationList('animation:100ms linear fade', context)).toMatchObject({ ok: true, css: 'animation:100ms linear he-k0' });
   });
+  it('only registers keyframes with surviving frames', () => {
+    const rejected = '.x{animation:fade 100ms}@keyframes fade{from{background:url(https://example.test/x)}}';
+    const rejectedContext = createCssSanitizeContext();
+    expect(registerCssKeyframes(rejected, rejectedContext)).toEqual({ ok: true });
+    const rejectedResult = sanitizeStylesheet(rejected, rejectedContext);
+    expect(rejectedResult).toMatchObject({ ok: true, css: '' });
+    expect(rejectedResult.ok && rejectedResult.stripped.map((violation) => violation.code)).toContain('css_unresolved_animation');
+    expect(JSON.stringify(rejectedResult)).not.toContain('he-k0');
+
+    const accepted = '.x{animation:fade 100ms}@keyframes fade{from{opacity:0}to{opacity:1}}';
+    const acceptedContext = createCssSanitizeContext();
+    expect(registerCssKeyframes(accepted, acceptedContext)).toEqual({ ok: true });
+    expect(sanitizeStylesheet(accepted, acceptedContext)).toMatchObject({
+      ok: true,
+      css: '[data-he-content] .x{animation:he-k0 100ms}@keyframes he-k0{from{opacity:0}to{opacity:1}}',
+    });
+  });
 
   it('rejects unresolved, duplicate, reserved, and ambiguous keyframe names', () => {
     expect(failureCode(sanitizeDeclarationList('animation:missing 50ms'))).toBe('css_unresolved_animation');
@@ -183,6 +200,20 @@ describe('html export CSS sanitizer', () => {
     const context = createCssSanitizeContext();
     expect(sanitizeDeclarationList(' '.repeat(CSS_MAX_STYLESHEET_BYTES), context).ok).toBe(true);
     expect(failureCode(sanitizeDeclarationList(' ', context))).toBe('css_too_large');
+  });
+  it('charges the aggregate byte budget for truncated surfaces', () => {
+    const context = createCssSanitizeContext();
+    const junk = '@'.repeat(CSS_MAX_STYLESHEET_BYTES + 1);
+    const safeRule = 'p{color:red}';
+    const safeSurface = `${' '.repeat(CSS_MAX_STYLESHEET_BYTES - Buffer.byteLength(safeRule, 'utf8'))}${safeRule}`;
+    const truncated = sanitizeStylesheet(junk, context);
+    const following = sanitizeStylesheet(safeSurface, context);
+
+    expect(failureCode(truncated)).toBe('css_too_large');
+    expect(failureCode(following)).toBe('css_too_large');
+    expect(context.rawBytes).toBe(CSS_MAX_STYLESHEET_BYTES);
+    expect(truncated.ok && following.ok ? Buffer.byteLength(`${truncated.css}${following.css}`, 'utf8') : 0)
+      .toBeLessThanOrEqual(CSS_MAX_STYLESHEET_BYTES);
   });
 
   it('enforces a separate aggregate registration byte budget', () => {
