@@ -82,7 +82,7 @@ describe('SVG preflight and reconstruction', () => {
     if (!capped.ok) expect(capped.violation.detail).toContain(`exceeds ${SVG_ATTRIBUTE_MAX_BYTES} bytes`);
     expect(preflight('<svg><path d="M0 0" data-ignored="u/**/rl(https://e.test/x)"/></svg>')).toMatchObject({
       ok: false,
-      violation: { code: 'css_rejected' },
+      violation: { code: 'css_rejected.svg_attribute' },
     });
   });
   it.each([
@@ -107,7 +107,7 @@ describe('SVG preflight and reconstruction', () => {
   ])('scans CSS tokens without rejecting ordinary accessibility text: %s', (_name, value, rejected) => {
     const result = preflight(`<svg aria-label="${value}"><path d="M0 0"/></svg>`);
     expect(result.ok).toBe(!rejected);
-    if (rejected) expect(result).toMatchObject({ violation: { code: 'css_rejected' } });
+    if (rejected) expect(result).toMatchObject({ violation: { code: 'css_rejected.svg_attribute' } });
   });
 
   it.each([

@@ -32,8 +32,8 @@ import type { GenerateFn, GenerationOutput, GenerationRoute } from './html-expor
 export const HTML_TRANSPORT_LIMITS = {
   /** Max assembled model bytes (UTF-8) before the stream is force-closed as capped. */
   outputCapBytes: 8 * 1024 * 1024,
-  /** Time to first delta before the run is aborted as a zero-byte unresponsive stream. */
-  firstByteMs: 60_000,
+  /** Thinking models can exceed 60s to first HTML byte on ~18k-char prompts (#53). */
+  firstByteMs: 240_000,
 } as const;
 
 /**

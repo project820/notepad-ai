@@ -254,11 +254,19 @@ describe('createHtmlExportTransport — 8 MiB cap', () => {
 
   it('defaults the cap to the frozen 8 MiB value', () => {
     expect(HTML_TRANSPORT_LIMITS.outputCapBytes).toBe(8 * 1024 * 1024);
-    expect(HTML_TRANSPORT_LIMITS.firstByteMs).toBe(60_000);
+    expect(HTML_TRANSPORT_LIMITS.firstByteMs).toBe(240_000);
   });
 });
 
 describe('createHtmlExportTransport — deadlines + cancellation', () => {
+  it('starts the first-byte timer at the 240s HTML cap', async () => {
+    const start = vi.fn<StartTimer>(() => vi.fn());
+    const stream = scriptedStream([{ kind: 'delta', text: 'hello' }, { kind: 'done', text: '' }]);
+
+    await run(transport({ stream, startTimer: start }));
+
+    expect(start).toHaveBeenCalledWith(240_000, expect.any(Function));
+  });
   it('first-byte deadline aborts the stream as a zero-byte failure', async () => {
     const stream = silentUntilAbortStream();
     const timer = manualTimer();

@@ -9,7 +9,7 @@ export type SvgViolationCode =
   | 'html_event_handler'
   | 'html_url'
   | 'html_svg_rejected'
-  | 'css_rejected';
+  | 'css_rejected.svg_attribute';
 
 type Node = DefaultTreeAdapterTypes.Node;
 type Element = DefaultTreeAdapterTypes.Element;
@@ -572,7 +572,7 @@ function validateRoot(
     }
     for (const attribute of sourceAttrs) {
       if (hasCssUrlOrImport(attribute.value) || attribute.name.toLowerCase() === 'style') {
-        return fail('css_rejected', `CSS surface in SVG attribute ${attribute.name}`);
+        return fail('css_rejected.svg_attribute', `CSS surface in SVG attribute ${attribute.name}`);
       }
     }
     const allowed = allowedAttributes(tag);

@@ -10,7 +10,14 @@
 import os from 'node:os';
 
 import type { AiChatEvent, AiChatRequest } from './types';
-import { runCliCompletion, probeCliAvailability, buildMinimalEnv, type CliSpawn, type CliLineMapper } from './cli-runner';
+import {
+  HTML_CLI_NO_OUTPUT_MS,
+  runCliCompletion,
+  probeCliAvailability,
+  buildMinimalEnv,
+  type CliSpawn,
+  type CliLineMapper,
+} from './cli-runner';
 import { resolveTrustedCliCommand, type TrustedCliResult } from './cli-trust';
 import { buildCliPrompt } from './cli-prompt';
 import type { StreamSource } from './fallback-provider';
@@ -99,6 +106,7 @@ export class ClaudeCliProvider implements StreamSource {
       cwd: os.tmpdir(),
       signal: req.signal,
       onEvent,
+      limits: req.surfaceMode === 'html' ? { noOutputMs: HTML_CLI_NO_OUTPUT_MS } : undefined,
     });
   }
 }

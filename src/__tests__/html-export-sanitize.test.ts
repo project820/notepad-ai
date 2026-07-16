@@ -220,20 +220,24 @@ describe('sanitizeHtmlExport', () => {
     expect(result.contentCss).toContain('@keyframes he-k0{from{opacity:0}to{opacity:1}}');
   });
 
-  it('propagates CSS sanitizer failures without serializing source style surfaces', () => {
+  it('surfaces CSS rejection subcodes without putting violation details in the code', () => {
     const stylesheet = sanitize('<style>.x{background:url(https://example.test/x)}</style><p>safe</p>');
     expect(stylesheet.ok).toBe(false);
-    if (!stylesheet.ok) expect(stylesheet.violations[0].code).toBe('css_rejected');
+    if (!stylesheet.ok) expect(stylesheet.violations[0].code).toBe('css_rejected.css_network_function_not_allowed');
 
-    const inline = sanitize('<p style="color:var(--unsafe)">safe</p>');
+    const inline = sanitize('<p style="color:red!important">safe</p>');
     expect(inline.ok).toBe(false);
-    if (!inline.ok) expect(inline.violations[0].code).toBe('css_rejected');
+    if (!inline.ok) {
+      expect(inline.violations[0].code).toBe('css_rejected.css_important_not_allowed');
+      expect(inline.violations[0].code).not.toContain('color');
+      expect(inline.violations[0].code).not.toContain('!important on color');
+    }
   });
   it('preflights oversized malformed CSS before stylesheet registration can parse it', () => {
     const result = sanitize(`<style>${'@'.repeat(CSS_MAX_STYLESHEET_BYTES + 1)}</style>`);
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.violations[0].code).toBe('css_rejected');
+      expect(result.violations[0].code).toBe('css_rejected.css_too_large');
       expect(result.violations[0].detail).toContain('css_too_large');
     }
   });
@@ -280,7 +284,7 @@ describe('sanitizeHtmlExport', () => {
     );
     expect(past.ok).toBe(false);
     if (!past.ok) {
-      expect(past.violations[0].code).toBe('css_rejected');
+      expect(past.violations[0].code).toBe('css_rejected.css_too_large');
       expect(past.violations[0].detail).toContain('css_too_large');
     }
   });
@@ -289,11 +293,11 @@ describe('sanitizeHtmlExport', () => {
     const withinRuleCap = Array.from({ length: CSS_MAX_RULES }, (_, index) => `<style>.r${index}{color:red}</style>`).join('') + '<p>x</p>';
     expect(sanitize(withinRuleCap).ok).toBe(true);
     const pastRuleCap = `${withinRuleCap}<style>.overflow{color:red}</style>`;
-    expect(failureCode(pastRuleCap)).toBe('css_rejected');
+    expect(failureCode(pastRuleCap)).toBe('css_rejected.css_too_many_rules');
 
     const keyframe = (index: number) => `<style>@keyframes k${index}{from{opacity:0}to{opacity:1}}</style>`;
     expect(sanitize(Array.from({ length: CSS_MAX_KEYFRAMES }, (_, index) => keyframe(index)).join('') + '<p>x</p>').ok).toBe(true);
-    expect(failureCode(Array.from({ length: CSS_MAX_KEYFRAMES + 1 }, (_, index) => keyframe(index)).join('') + '<p>x</p>')).toBe('css_rejected');
+    expect(failureCode(Array.from({ length: CSS_MAX_KEYFRAMES + 1 }, (_, index) => keyframe(index)).join('') + '<p>x</p>')).toBe('css_rejected.css_too_many_keyframes');
   });
 
   it('is deterministic for malformed HTML', () => {
@@ -380,9 +384,9 @@ describe('sanitizeHtmlExport', () => {
     expect(result.bodyHtml).not.toContain('xmlns=');
   });
   it.each([
-    ['mixed-case url function', 'UrL (https://e.test/x)', 'css_rejected'],
-    ['comment-obfuscated url function', 'u/**/r/**/l/**/(https://e.test/x)', 'css_rejected'],
-    ['escaped import at-keyword', '@\\69mport x', 'css_rejected'],
+    ['mixed-case url function', 'UrL (https://e.test/x)', 'css_rejected.svg_attribute'],
+    ['comment-obfuscated url function', 'u/**/r/**/l/**/(https://e.test/x)', 'css_rejected.svg_attribute'],
+    ['escaped import at-keyword', '@\\69mport x', 'css_rejected.svg_attribute'],
     ['ordinary curl text', 'curl(', null],
     ['ordinary important text', '@important', null],
   ])('applies SVG CSS token boundaries through the HTML sanitizer: %s', (_name, label, code) => {
@@ -409,15 +413,15 @@ describe('sanitizeHtmlExport', () => {
     ['network image', '<svg><image href="https://e.test/x"/></svg>', 'html_active_tag'],
     ['asset image', '<svg><image href="asset:abcdefghijklmnop"/></svg>', 'html_active_tag'],
     ['style element', '<svg><style>path{fill:red}</style></svg>', 'html_active_tag'],
-    ['style attribute', '<svg><path d="M0 0" style="fill:red"/></svg>', 'css_rejected'],
+    ['style attribute', '<svg><path d="M0 0" style="fill:red"/></svg>', 'css_rejected.svg_attribute'],
     ['animate', '<svg><animate attributeName="x" values="0;1"/></svg>', 'html_active_tag'],
     ['set', '<svg><set attributeName="fill" to="red"/></svg>', 'html_active_tag'],
     ['foreign namespace element', '<svg><math><mi>x</mi></math></svg>', 'html_reserved_namespace'],
-    ['CSS url', '<svg><path d="M0 0" fill="url(https://e.test/x)"/></svg>', 'css_rejected'],
-    ['obfuscated CSS url', '<svg><path d="M0 0" fill="u/**/rl (https://e.test/x)"/></svg>', 'css_rejected'],
-    ['line-continuation CSS url', '<svg><path d="M0 0" fill="u\\\nrl(https://e.test/x)"/></svg>', 'css_rejected'],
-    ['CSS import', '<svg><path d="M0 0" style="@import url(https://e.test/x)"/></svg>', 'css_rejected'],
-    ['escaped CSS import', '<svg><path d="M0 0" style="@\\69mport url(https://e.test/x)"/></svg>', 'css_rejected'],
+    ['CSS url', '<svg><path d="M0 0" fill="url(https://e.test/x)"/></svg>', 'css_rejected.svg_attribute'],
+    ['obfuscated CSS url', '<svg><path d="M0 0" fill="u/**/rl (https://e.test/x)"/></svg>', 'css_rejected.svg_attribute'],
+    ['line-continuation CSS url', '<svg><path d="M0 0" fill="u\\\nrl(https://e.test/x)"/></svg>', 'css_rejected.svg_attribute'],
+    ['CSS import', '<svg><path d="M0 0" style="@import url(https://e.test/x)"/></svg>', 'css_rejected.svg_attribute'],
+    ['escaped CSS import', '<svg><path d="M0 0" style="@\\69mport url(https://e.test/x)"/></svg>', 'css_rejected.svg_attribute'],
   ])('rejects frozen SVG vector: %s', (_name, html, code) => {
     expect(failureCode(html)).toBe(code);
   });
@@ -591,11 +595,11 @@ describe('sanitizeHtmlExport — fail-closed structural gate (issue #27)', () =>
   it('rejects unsafe root inline styles via the shared declaration sanitizer', () => {
     // Network function in a body style is hard-failed by sanitizeDeclarationList.
     expect(failureCode('<body style="background:url(https://evil.test/x.png)"><p>x</p></body>')).toBe(
-      HTML_VIOLATION_CODES.cssRejected,
+      'css_rejected.css_network_function_not_allowed',
     );
     // Custom properties are also rejected on root styles (same path as element styles).
     expect(failureCode('<html style="color:var(--accent)"><body><p>x</p></body></html>')).toBe(
-      HTML_VIOLATION_CODES.cssRejected,
+      'css_rejected.css_custom_property_not_allowed',
     );
   });
 

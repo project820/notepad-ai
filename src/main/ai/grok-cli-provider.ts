@@ -14,7 +14,14 @@ import { promises as fs } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 
 import type { AiChatEvent, AiChatRequest, AiProvider, ModelRef, ProviderAuthStatus } from './types';
-import { runCliCompletion, probeCliAvailability, buildMinimalEnv, type CliSpawn, type CliLineMapper } from './cli-runner';
+import {
+  HTML_CLI_NO_OUTPUT_MS,
+  runCliCompletion,
+  probeCliAvailability,
+  buildMinimalEnv,
+  type CliSpawn,
+  type CliLineMapper,
+} from './cli-runner';
 import { resolveTrustedCliCommand, type TrustedCliResult } from './cli-trust';
 import { buildCliPrompt } from './cli-prompt';
 import { getCuratedModels } from './model-catalog';
@@ -121,6 +128,7 @@ export class GrokCliProvider implements AiProvider {
         cwd: os.tmpdir(),
         signal: req.signal,
         onEvent,
+        limits: req.surfaceMode === 'html' ? { noOutputMs: HTML_CLI_NO_OUTPUT_MS } : undefined,
       });
     } finally {
       await file.cleanup();
