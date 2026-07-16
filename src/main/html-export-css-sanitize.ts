@@ -107,7 +107,8 @@ export type CssContextRegistrationResult = { ok: true } | { ok: false; violation
 
 /**
  * Document-scoped accounting for multiple model <style> nodes and style attributes.
- * Callers that need forward animation references must pre-register every stylesheet first.
+ * Callers that need forward animation references must pre-register every surviving
+ * stylesheet first.
  */
 export interface CssSanitizeContext {
   registrationBytes: number;
@@ -747,7 +748,7 @@ function validateAtRulePrelude(atRule: any): Failure | null {
   const nodes = valueNodes(atRule.prelude);
   if (name === 'media') {
     for (const node of nodes) {
-      if (node?.type === 'MediaQuery' && node.mediaType && String(node.mediaType).toLowerCase() !== 'print') return fail(CSS_VIOLATION_CODES.disallowedAtRule, `media type ${node.mediaType}`);
+      if (node?.type === 'MediaQuery' && node.mediaType && !['print', 'screen'].includes(String(node.mediaType).toLowerCase())) return fail(CSS_VIOLATION_CODES.disallowedAtRule, `media type ${node.mediaType}`);
       if (node?.type === 'Feature' && !MEDIA_FEATURES.has(String(node.name).toLowerCase())) return fail(CSS_VIOLATION_CODES.disallowedAtRule, `media feature ${node.name}`);
     }
   }

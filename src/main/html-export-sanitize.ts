@@ -503,7 +503,7 @@ function registerDocumentKeyframes(
   context: CssSanitizeContext,
   svgPlans: Map<Node, SvgRootPlan>,
 ): Failure | null {
-  if (svgPlans.has(node)) return null;
+  if (svgPlans.has(node) || tagName(node) === 'template') return null;
   if (tagName(node) === 'style') {
     const registration = registerCssKeyframes(styleText(node), context);
     if (!registration.ok) return cssFailure(registration.violations[0]);
@@ -512,14 +512,22 @@ function registerDocumentKeyframes(
     const childFailure = registerDocumentKeyframes(child, context, svgPlans);
     if (childFailure) return childFailure;
   }
-  const templateContent = (node as { content?: Node }).content;
-  return templateContent ? registerDocumentKeyframes(templateContent, context, svgPlans) : null;
+  return null;
 }
 
-function sanitizeNode(node: Node, context: Context, parentNode: DefaultTreeAdapterTypes.ParentNode | null): SanitizedNode[] | Failure {
+function sanitizeNode(
+  node: Node,
+  context: Context,
+  parentNode: DefaultTreeAdapterTypes.ParentNode | null,
+  discardStyles = false,
+): SanitizedNode[] | Failure {
   const svgPlan = context.svgPlans.get(node);
   if (svgPlan) return [reconstructSvgRoot(svgPlan, parentNode)];
   const name = tagName(node);
+  if (discardStyles && name === 'style') {
+    stripStyleAttributes(node, context);
+    return [];
+  }
   if (name === 'svg') {
     const text = collectDescendantText(node);
     return text ? [makeText(text, parentNode)] : [];
@@ -533,7 +541,7 @@ function sanitizeNode(node: Node, context: Context, parentNode: DefaultTreeAdapt
     if (!ACTIVE_CONTENT_CONTAINERS.has(name)) return [];
     const unwrapped: SanitizedNode[] = [];
     for (const child of authoredChildren(node)) {
-      const sanitized = sanitizeNode(child, context, parentNode);
+      const sanitized = sanitizeNode(child, context, parentNode, discardStyles || name === 'template');
       if (isFailure(sanitized)) return sanitized;
       unwrapped.push(...sanitized);
     }
@@ -562,7 +570,7 @@ function sanitizeNode(node: Node, context: Context, parentNode: DefaultTreeAdapt
   if (!survives) {
     const unwrapped: SanitizedNode[] = [];
     for (const child of childNodes(node)) {
-      const sanitized = sanitizeNode(child, context, parentNode);
+      const sanitized = sanitizeNode(child, context, parentNode, discardStyles);
       if (isFailure(sanitized)) return sanitized;
       unwrapped.push(...sanitized);
     }
@@ -572,7 +580,7 @@ function sanitizeNode(node: Node, context: Context, parentNode: DefaultTreeAdapt
   const placeholder = makeElement(node as Element, attributes.attrs, [], parentNode);
   const children: SanitizedNode[] = [];
   for (const child of childNodes(node)) {
-    const sanitized = sanitizeNode(child, context, placeholder);
+    const sanitized = sanitizeNode(child, context, placeholder, discardStyles);
     if (isFailure(sanitized)) return sanitized;
     children.push(...sanitized);
   }

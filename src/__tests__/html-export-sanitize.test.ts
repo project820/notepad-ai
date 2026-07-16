@@ -247,6 +247,24 @@ describe('sanitizeHtmlExport', () => {
     expect(result.contentCss).toContain('[data-he-content] .note{color:red}');
     expect(result.stripped).toContain('html_attribute');
   });
+  it('preserves a safe sibling rule after an allowed screen media rule', () => {
+    const result = sanitize('<style>@media screen {.screen-only{color:red}} .safe{color:blue}</style>');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.contentCss).toContain('@media screen{[data-he-content] .screen-only{color:red}}');
+    expect(result.contentCss).toContain('[data-he-content] .safe{color:blue}');
+  });
+  it('does not register keyframes from discarded template styles', () => {
+    const result = sanitize(
+      '<template><style>@keyframes k {from{opacity:0}}</style></template>' +
+      '<div style="animation:k 100ms">x</div>',
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.contentCss).not.toContain('@keyframes he-k');
+    expect(result.contentCss).not.toContain('animation:he-k');
+    expect(result.stripped).toContain('css_rejected.css_unresolved_animation');
+  });
 
   it('pre-registers keyframes across style blocks before sanitizing forward animation references', () => {
     const result = sanitize(
