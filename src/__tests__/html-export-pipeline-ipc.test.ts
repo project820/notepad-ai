@@ -1095,13 +1095,38 @@ describe('HTML export pipeline IPC', () => {
       });
       expect(rejected).toStrictEqual({ state: 'failed', stage: 'begin', kind: 'pipeline-reject' });
       expect(generateHtml).not.toHaveBeenCalled();
+      const invalidViewports = [
+        { width: 'x'.repeat(1_000_000), height: [] },
+        { width: -1, height: 720 },
+        { width: Number.NaN, height: 720 },
+        { width: Number.POSITIVE_INFINITY, height: 720 },
+        { width: 1280.5, height: 720 },
+        { width: 10_001, height: 720 },
+      ];
+
+      for (const viewport of invalidViewports) {
+        const result = await ipc.handler('html:generate')!(eventFor(sender), {
+          prompt: 'make it',
+          model: { provider: 'chatgpt', id: 'gpt-5.4-mini' },
+          viewport,
+        });
+        expect(result).toStrictEqual({ state: 'failed', stage: 'begin', kind: 'pipeline-reject' });
+      }
+
+      expect(generateHtml).not.toHaveBeenCalled();
 
       // An allowlisted provider is forwarded to the main-owned generator.
       const ok = await ipc.handler('html:generate')!(eventFor(sender), {
         prompt: 'make it',
         model: { provider: 'chatgpt', id: 'gpt-5.4-mini' },
+        viewport: { width: 1280, height: 720 },
       });
       expect(generateHtml).toHaveBeenCalledTimes(1);
+      expect(generateHtml).toHaveBeenCalledWith(91, {
+        prompt: 'make it',
+        model: { provider: 'chatgpt', id: 'gpt-5.4-mini' },
+        viewport: { width: 1280, height: 720 },
+      });
       expect(ok).toMatchObject({ state: 'final', finalizedArtifactId: 'finalized-1' });
     });
   });
