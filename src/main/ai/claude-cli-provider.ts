@@ -59,7 +59,11 @@ const CLAUDE_DISALLOWED_TOOLS =
   'Bash Read Write Edit MultiEdit NotebookEdit WebSearch WebFetch Glob Grep Task TodoWrite';
 
 export class ClaudeCliProvider implements StreamSource {
-  constructor(private deps: { spawn: CliSpawn; resolveCommand?: () => Promise<TrustedCliResult> }) {}
+  constructor(private deps: {
+    spawn: CliSpawn;
+    resolveCommand?: () => Promise<TrustedCliResult>;
+    runCompletion?: typeof runCliCompletion;
+  }) {}
 
   private resolveCommand(): Promise<TrustedCliResult> {
     return this.deps.resolveCommand?.() ?? resolveTrustedCliCommand('claude');
@@ -96,7 +100,7 @@ export class ClaudeCliProvider implements StreamSource {
       onEvent({ kind: 'error', message: command.error, errorKind: 'provider' });
       return;
     }
-    await runCliCompletion({
+    await (this.deps.runCompletion ?? runCliCompletion)({
       spawn: this.deps.spawn,
       command: command.command,
       args,

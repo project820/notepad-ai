@@ -284,6 +284,9 @@ describe('createJsonlParser (bursty/partial chunk tolerance)', () => {
 });
 
 describe('runCliCompletion (stdin-only, streaming, lifecycle)', () => {
+  it('keeps the chat first-byte watchdog at the frozen 60-second default', () => {
+    expect(CLI_LIMITS.noOutputMs).toBe(60_000);
+  });
   it('delivers the prompt via stdin only — never in argv', async () => {
     const h = harness();
     const child = h.getChild();

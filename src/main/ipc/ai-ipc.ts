@@ -72,7 +72,6 @@ export function registerAiIpc({ getRegistry }: AiIpcDeps): void {
           surfaceMode:
             payload.surfaceMode === 'write' ||
             payload.surfaceMode === 'advise' ||
-            payload.surfaceMode === 'html' ||
             payload.surfaceMode === 'block'
               ? payload.surfaceMode
               : undefined,

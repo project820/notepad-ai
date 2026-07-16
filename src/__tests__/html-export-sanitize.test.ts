@@ -4,6 +4,7 @@ import {
   CSS_MAX_KEYFRAMES,
   CSS_MAX_RULES,
   CSS_MAX_STYLESHEET_BYTES,
+  cssRejectedCode,
 } from '../main/html-export-css-sanitize';
 import {
   HTML_SANITIZER_LIMITS,
@@ -84,7 +85,7 @@ function cssComment(bytes: number): string {
 describe('sanitizeHtmlExport', () => {
   it('exports stable violation codes for downstream pipeline errors', () => {
     expect(HTML_VIOLATION_CODES.parse).toBe('html_parse');
-    expect(HTML_VIOLATION_CODES.cssRejected).toBe('css_rejected');
+    expect(cssRejectedCode('css_too_large')).toBe('css_rejected.css_too_large');
     expect(HTML_VIOLATION_CODES.internal).toBe('html_internal');
   });
   it('preserves the frozen inert content, table, code, and image tags', () => {
@@ -238,7 +239,7 @@ describe('sanitizeHtmlExport', () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.violations[0].code).toBe('css_rejected.css_too_large');
-      expect(result.violations[0].detail).toContain('css_too_large');
+      expect(result.violations[0].detail).toBe(`document CSS exceeds ${CSS_MAX_STYLESHEET_BYTES} bytes`);
     }
   });
 
@@ -285,7 +286,7 @@ describe('sanitizeHtmlExport', () => {
     expect(past.ok).toBe(false);
     if (!past.ok) {
       expect(past.violations[0].code).toBe('css_rejected.css_too_large');
-      expect(past.violations[0].detail).toContain('css_too_large');
+      expect(past.violations[0].detail).toBe(`document CSS exceeds ${CSS_MAX_STYLESHEET_BYTES} bytes`);
     }
   });
 

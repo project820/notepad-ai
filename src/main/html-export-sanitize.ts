@@ -7,6 +7,7 @@ import {
   sanitizeStylesheet,
   type CssSanitizeContext,
   type CssViolation,
+  cssRejectedCode,
 } from './html-export-css-sanitize';
 import {
   preflightSvgSubtrees,
@@ -44,7 +45,6 @@ export const HTML_VIOLATION_CODES = {
   attribute: 'html_attribute',
   svgRejected: 'html_svg_rejected',
   cap: 'html_cap',
-  cssRejected: 'css_rejected',
   internal: 'html_internal',
   noStructure: 'html_no_structure',
 } as const;
@@ -52,7 +52,7 @@ export const HTML_VIOLATION_CODES = {
 type HtmlSanitizerViolationCode =
   | (typeof HTML_VIOLATION_CODES)[keyof typeof HTML_VIOLATION_CODES]
   | SvgViolationCode
-  | `css_rejected.${CssViolation['code']}`;
+  | ReturnType<typeof cssRejectedCode>;
 type HtmlSanitizerViolation = { code: HtmlSanitizerViolationCode; detail: string };
 type HtmlSanitizerCounts = { nodeCount: number; maxDepth: number; attributeCount: number };
 export type HtmlExportParse = (html: string) => DefaultTreeAdapterTypes.Document;
@@ -447,7 +447,7 @@ function preflightHtmlBoundary(root: Node, isAllowedAssetId: (src: string) => bo
 }
 
 function cssFailure(violation: CssViolation): Failure {
-  return fail(`css_rejected.${violation.code}`, violation.detail);
+  return fail(cssRejectedCode(violation.code), violation.detail);
 }
 
 function sanitizeAttributes(node: Node, tag: string, context: Context, survives: boolean): SanitizedAttributes | Failure {
@@ -559,7 +559,7 @@ function preflightCssSurfaces(
   const addBytes = (css: string): Failure | null => {
     cssBytes += Buffer.byteLength(css, 'utf8');
     return cssBytes > CSS_MAX_STYLESHEET_BYTES
-      ? fail('css_rejected.css_too_large', `css_too_large: document CSS exceeds ${CSS_MAX_STYLESHEET_BYTES} bytes`)
+      ? fail(cssRejectedCode('css_too_large'), `document CSS exceeds ${CSS_MAX_STYLESHEET_BYTES} bytes`)
       : null;
   };
   const visit = (node: Node): Failure | null => {

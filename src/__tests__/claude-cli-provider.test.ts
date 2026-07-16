@@ -1,9 +1,16 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 import { ClaudeCliProvider, mapClaudeStreamJson } from '../main/ai/claude-cli-provider';
 import { FallbackProvider, type StreamSource } from '../main/ai/fallback-provider';
 import { buildCliPrompt } from '../main/ai/cli-prompt';
-import { __setShellExecForTests, __setCliProbeForTests, __resetCliSpawnPathForTests, type CliProcess } from '../main/ai/cli-runner';
+import {
+  __setShellExecForTests,
+  __setCliProbeForTests,
+  __resetCliSpawnPathForTests,
+  runCliCompletion,
+  HTML_CLI_NO_OUTPUT_MS,
+  type CliProcess,
+} from '../main/ai/cli-runner';
 import type { AiChatEvent, AiChatRequest } from '../main/ai/types';
 
 class FakeChild implements CliProcess {
@@ -91,6 +98,29 @@ describe('ClaudeCliProvider', () => {
     expect(h.getArgs()).toContain('claude-sonnet-4-5'); // model id allowed in argv
     expect(h.getArgs().join(' ')).not.toContain('SENTINEL-USER-TEXT'); // prompt NEVER in argv
     expect(child.stdinChunks.join('')).toContain('SENTINEL-USER-TEXT'); // prompt via stdin
+  });
+  it.each([
+    ['html', 'html'],
+    ['write', 'write'],
+    ['advise', 'advise'],
+    ['block', 'block'],
+    ['absent', undefined],
+  ] as const)('passes the first-byte override only for the %s surface', async (_name, surfaceMode) => {
+    const calls: Array<Parameters<typeof runCliCompletion>[0]> = [];
+    const provider = new ClaudeCliProvider({
+      spawn: () => new FakeChild(),
+      resolveCommand: async () => ({ command: '/trusted/claude' }),
+      runCompletion: async (options) => {
+        calls.push(options);
+        return { ok: true, sawOutput: false };
+      },
+    });
+
+    await provider.streamChat({ ...req, ...(surfaceMode ? { surfaceMode } : {}) }, vi.fn());
+
+    expect(calls).toHaveLength(1);
+    if (surfaceMode === 'html') expect(calls[0].limits?.noOutputMs).toBe(HTML_CLI_NO_OUTPUT_MS);
+    else expect(calls[0].limits).toBeUndefined();
   });
 });
 

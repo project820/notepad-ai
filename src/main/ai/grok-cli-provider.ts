@@ -64,7 +64,12 @@ export class GrokCliProvider implements AiProvider {
   readonly id = 'grok' as const;
   readonly authKind = 'cli' as const;
 
-  constructor(private deps: { spawn: CliSpawn; resolveCommand?: () => Promise<TrustedCliResult>; writePromptFile?: PromptFileWriter }) {}
+  constructor(private deps: {
+    spawn: CliSpawn;
+    resolveCommand?: () => Promise<TrustedCliResult>;
+    writePromptFile?: PromptFileWriter;
+    runCompletion?: typeof runCliCompletion;
+  }) {}
 
   private resolveCommand(): Promise<TrustedCliResult> {
     return this.deps.resolveCommand?.() ?? resolveTrustedCliCommand('grok');
@@ -107,7 +112,7 @@ export class GrokCliProvider implements AiProvider {
     const writer = this.deps.writePromptFile ?? defaultWritePromptFile;
     const file = await writer(buildCliPrompt(req));
     try {
-      await runCliCompletion({
+      await (this.deps.runCompletion ?? runCliCompletion)({
         spawn: this.deps.spawn,
         command: command.command,
         // Static argv only: the prompt lives in the temp file, not the command line.
