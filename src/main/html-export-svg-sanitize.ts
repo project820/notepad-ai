@@ -56,6 +56,22 @@ const ATTRIBUTE_CANONICAL = new Map([
   ['role', 'role'], ['aria-label', 'aria-label'], ['aria-hidden', 'aria-hidden'],
 ]);
 
+const XMLNS_NAMESPACE = 'http://www.w3.org/2000/xmlns/';
+const SVG_XMLNS_VALUE = 'http://www.w3.org/2000/svg';
+
+/**
+ * parse5 marks a bare `xmlns="http://www.w3.org/2000/svg"` with
+ * namespace=xmlns/. Models routinely emit that default declaration on <svg>.
+ * It is not a foreign/xlink attribute; drop it during planning (SVG namespace is
+ * already implied by the element) instead of hard-failing the whole document.
+ */
+function isIgnorableSvgXmlnsDeclaration(attribute: Attribute): boolean {
+  if (attribute.name.toLowerCase() !== 'xmlns') return false;
+  if ((attribute.prefix ?? '') !== '') return false;
+  if (attribute.namespace != null && attribute.namespace !== XMLNS_NAMESPACE) return false;
+  return attribute.value === SVG_XMLNS_VALUE;
+}
+
 function fail(code: SvgViolationCode, detail: string): SvgFailure {
   return { violation: { code, detail } };
 }
@@ -531,12 +547,17 @@ function validateRoot(
 
     const outputAttrs: Attribute[] = [];
     const seen = new Set<string>();
-    const sourceAttrs = attrs(node);
+    // Drop the routine default SVG xmlns declaration parse5 marks as namespaced.
+    const sourceAttrs = attrs(node).filter((attribute) => !isIgnorableSvgXmlnsDeclaration(attribute));
     for (const attribute of sourceAttrs) {
       if (attribute.name.toLowerCase().startsWith('on')) return fail('html_event_handler', `event handler attribute ${attribute.name}`);
     }
     for (const attribute of sourceAttrs) {
-      if (attribute.namespace != null || attribute.prefix != null) return fail('html_reserved_namespace', `namespaced SVG attribute ${attribute.name}`);
+      // Reject real foreign prefixes/namespaces (xlink:, xml:, custom). Empty-string
+      // prefix alone is not enough evidence of a foreign attr after xmlns filtering.
+      if ((attribute.namespace != null && attribute.namespace !== '') || (attribute.prefix != null && attribute.prefix !== '')) {
+        return fail('html_reserved_namespace', `namespaced SVG attribute ${attribute.name}`);
+      }
     }
     for (const attribute of sourceAttrs) {
       if (Buffer.byteLength(attribute.value, 'utf8') > SVG_ATTRIBUTE_MAX_BYTES) {

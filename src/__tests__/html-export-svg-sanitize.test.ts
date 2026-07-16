@@ -130,7 +130,7 @@ describe('SVG preflight and reconstruction', () => {
     ['fe primitive', '<svg><feGaussianBlur/></svg>', false],
     ['tabindex', '<svg tabindex="0"><path d="M0 0"/></svg>', false],
     ['focusable', '<svg focusable="true"><path d="M0 0"/></svg>', false],
-    ['xmlns', '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0"/></svg>', false],
+    ['xmlns', '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0"/></svg>', true],
     ['xml attribute', '<svg xml:lang="en"><path d="M0 0"/></svg>', false],
     ['missing use href', '<svg><use/></svg>', false],
     ['use as target', '<svg><path id="p" d="M0 0"/><use id="u" href="#p"/><use href="#u"/></svg>', false],
