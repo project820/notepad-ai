@@ -166,7 +166,7 @@ class FakeRegistry {
 class FakeParseHost {
   async parse(html: string): Promise<HtmlExportPipelineResult<HtmlExportParseValue>> {
     const document = parse(html);
-    const sanitized = sanitizeHtmlExport({ html: '', parse: () => document });
+    const sanitized = sanitizeHtmlExport({ html: '', parse: () => document, isAllowedAssetId: () => false });
     if (!sanitized.ok) {
       return success({
         document,

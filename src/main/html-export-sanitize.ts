@@ -80,7 +80,7 @@ export type HtmlExportSanitizeResult = HtmlExportSanitizeSuccess | HtmlExportSan
 export type HtmlExportSanitizeOptions = {
   html: string;
   parse?: HtmlExportParse;
-  isAllowedAssetId?: (src: string) => boolean;
+  isAllowedAssetId: (src: string) => boolean;
   /**
    * When true, require the sanitized body to be a structural HTML document (at
    * least `HTML_MIN_BODY_ELEMENT_NODES` element nodes, and no non-whitespace
@@ -202,14 +202,14 @@ function readSafeClassAndId(node: Element | null): { className?: string; id?: st
  * same rejectDangerousAttribute + isAllowedAttribute path sanitizeAttributes uses.
  * Non-allowlisted / dangerous / empty values are dropped (not transferred).
  */
-function readSafeRootAttrs(node: Element | null): Record<string, string> {
+function readSafeRootAttrs(node: Element | null, isAllowedAssetId: (src: string) => boolean): Record<string, string> {
   if (!node) return {};
   const out: Record<string, string> = {};
   for (const attribute of attrs(node)) {
     const name = attribute.name.toLowerCase();
     if (!SAFE_ROOT_ATTRIBUTE_NAME_SET.has(name)) continue;
     // Same gates as sanitizeAttributes for a surviving global-attr element.
-    if (rejectDangerousAttribute(attribute)) continue;
+    if (rejectDangerousAttribute(attribute, isAllowedAssetId)) continue;
     if (!isAllowedAttribute('div', name)) continue;
     if (!attribute.value) continue;
     out[name] = attribute.value;
@@ -218,7 +218,10 @@ function readSafeRootAttrs(node: Element | null): Record<string, string> {
 }
 
 /** Merge html+body class tokens (order-preserving, de-duped). Body id wins over html id. */
-function contentRootIdentity(document: DefaultTreeAdapterTypes.Document): {
+function contentRootIdentity(
+  document: DefaultTreeAdapterTypes.Document,
+  isAllowedAssetId: (src: string) => boolean,
+): {
   contentRootClass?: string;
   contentRootId?: string;
   contentRootAttrs?: Record<string, string>;
@@ -242,8 +245,8 @@ function contentRootIdentity(document: DefaultTreeAdapterTypes.Document): {
 
   // Body attrs override html attrs (mirrors body-id-wins). Deterministic key order.
   const mergedAttrs: Record<string, string> = {
-    ...readSafeRootAttrs(findElement(document, 'html')),
-    ...readSafeRootAttrs(findElement(document, 'body')),
+    ...readSafeRootAttrs(findElement(document, 'html'), isAllowedAssetId),
+    ...readSafeRootAttrs(findElement(document, 'body'), isAllowedAssetId),
   };
   const contentRootAttrs: Record<string, string> = {};
   for (const name of SAFE_ROOT_ATTRIBUTE_NAMES) {
@@ -375,7 +378,7 @@ function isInternalFragment(value: string): boolean {
 
 function rejectDangerousAttribute(
   attribute: Attribute,
-  isAllowedAssetId: (src: string) => boolean = () => true,
+  isAllowedAssetId: (src: string) => boolean,
 ): Failure | null {
   const name = attribute.name.toLowerCase();
   if (name.startsWith('on')) return fail(HTML_VIOLATION_CODES.eventHandler, `event handler attribute ${name}`);
@@ -494,9 +497,9 @@ function makeElement(
 function styleText(node: Node): string {
   return childNodes(node).map((child) => textValue(child)).join('');
 }
-function validateStyleAttributes(node: Node): Failure | null {
+function validateStyleAttributes(node: Node, isAllowedAssetId: (src: string) => boolean): Failure | null {
   for (const attribute of attrs(node)) {
-    const dangerous = rejectDangerousAttribute(attribute);
+    const dangerous = rejectDangerousAttribute(attribute, isAllowedAssetId);
     if (dangerous) return dangerous;
     return fail(HTML_VIOLATION_CODES.attribute, `attribute ${attribute.name} is not allowed on style`);
   }
@@ -511,7 +514,7 @@ function scanDiscardedNode(node: Node, context: Context): Failure | null {
     return fail(HTML_VIOLATION_CODES.activeTag, `active tag ${name}`);
   }
   if (name === 'style') {
-    const attributeFailure = validateStyleAttributes(node);
+    const attributeFailure = validateStyleAttributes(node, context.isAllowedAssetId);
     if (attributeFailure) return attributeFailure;
     const result = sanitizeStylesheet(styleText(node), context.cssContext);
     if (!result.ok) return cssFailure(result.violations[0]);
@@ -567,7 +570,7 @@ function preflightCssSurfaces(
       if (attributeFailure) return attributeFailure;
     }
     if (name === 'style') {
-      const attributeFailure = validateStyleAttributes(node);
+      const attributeFailure = validateStyleAttributes(node, isAllowedAssetId);
       if (attributeFailure) return attributeFailure;
       return addBytes(styleText(node));
     }
@@ -599,7 +602,7 @@ function sanitizeNode(node: Node, context: Context, parentNode: DefaultTreeAdapt
     return fail(HTML_VIOLATION_CODES.activeTag, `active tag ${name}`);
   }
   if (name === 'style') {
-    const attributeFailure = validateStyleAttributes(node);
+    const attributeFailure = validateStyleAttributes(node, context.isAllowedAssetId);
     if (attributeFailure) return attributeFailure;
     const sourceCss = styleText(node);
     const result = sanitizeStylesheet(sourceCss, context.cssContext);
@@ -666,7 +669,7 @@ export function sanitizeHtmlExport(options: HtmlExportSanitizeOptions): HtmlExpo
     }
     const counts = countParsedTree(document);
     if (isFailure(counts)) return { ok: false, violations: [counts.violation] };
-    const isAllowedAssetId = options.isAllowedAssetId ?? (() => true);
+    const isAllowedAssetId = options.isAllowedAssetId;
     const htmlBoundaryFailure = preflightHtmlBoundary(document, isAllowedAssetId);
     if (htmlBoundaryFailure) return { ok: false, violations: [htmlBoundaryFailure.violation] };
     const svgPreflight = preflightSvgSubtrees(document, isReservedValue);
@@ -737,7 +740,7 @@ export function sanitizeHtmlExport(options: HtmlExportSanitizeOptions): HtmlExpo
       }
     }
 
-    const rootIdentity = contentRootIdentity(document);
+    const rootIdentity = contentRootIdentity(document, isAllowedAssetId);
     const rootStyleFailure = transferRootInlineStyles(document, context);
     if (rootStyleFailure) return { ok: false, violations: [rootStyleFailure.violation] };
     return {

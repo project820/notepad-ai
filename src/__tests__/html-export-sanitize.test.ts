@@ -10,10 +10,15 @@ import {
   HTML_VIOLATION_CODES,
   sanitizeHtmlExport,
   type HtmlExportParse,
+  type HtmlExportSanitizeOptions,
 } from '../main/html-export-sanitize';
 
+type Assert<T extends true> = T;
+type RequiresAssetPredicate = Assert<
+  HtmlExportSanitizeOptions extends { isAllowedAssetId: (src: string) => boolean } ? true : false
+>;
 function sanitize(html: string, opts: { requireStructuralDocument?: boolean } = {}) {
-  return sanitizeHtmlExport({ html, ...opts });
+  return sanitizeHtmlExport({ html, isAllowedAssetId: () => true, ...opts });
 }
 
 function failureCode(html: string, opts: { requireStructuralDocument?: boolean } = {}): string {
@@ -27,7 +32,7 @@ function injectedParse(document: unknown): HtmlExportParse {
 }
 
 function failureCodeWithParse(document: unknown): string {
-  const result = sanitizeHtmlExport({ html: '', parse: injectedParse(document) });
+  const result = sanitizeHtmlExport({ html: '', parse: injectedParse(document), isAllowedAssetId: () => false });
   expect(result.ok).toBe(false);
   return result.ok ? '' : result.violations[0].code;
 }
@@ -160,7 +165,7 @@ describe('sanitizeHtmlExport', () => {
     const result = sanitize('<a href="#details">Details</a><picture><source src="asset:abcdefghijklmnop"></picture>');
     expect(result.ok).toBe(true);
   });
-  it('uses the injected validator only for opaque asset membership', () => {
+  it('requires an allowed asset ID predicate and rejects denied syntactically valid asset IDs', () => {
     const allowed = sanitizeHtmlExport({
       html: '<img src="asset:abcdefghijklmnop">',
       isAllowedAssetId: (src) => src === 'asset:abcdefghijklmnop',
@@ -319,25 +324,26 @@ describe('sanitizeHtmlExport', () => {
         },
       ],
     } as DefaultTreeAdapterTypes.Document;
-    expect(sanitizeHtmlExport({ html: '', parse: injectedParse(exactCapDoc) }).ok).toBe(true);
+    expect(sanitizeHtmlExport({ html: '', parse: injectedParse(exactCapDoc), isAllowedAssetId: () => false }).ok).toBe(true);
     expect(failureCodeWithParse(documentWithTextNodes(HTML_SANITIZER_LIMITS.maxNodes))).toBe('html_cap');
   });
 
   it('accepts the exact depth cap and rejects cap plus one', () => {
-    expect(sanitizeHtmlExport({ html: '', parse: injectedParse(documentWithDepth(HTML_SANITIZER_LIMITS.maxDepth)) }).ok).toBe(true);
+    expect(sanitizeHtmlExport({ html: '', parse: injectedParse(documentWithDepth(HTML_SANITIZER_LIMITS.maxDepth)), isAllowedAssetId: () => false }).ok).toBe(true);
     expect(failureCodeWithParse(documentWithDepth(HTML_SANITIZER_LIMITS.maxDepth + 1))).toBe('html_cap');
   });
 
   it('accepts the exact per-element attribute cap and rejects cap plus one', () => {
     expect(sanitizeHtmlExport({
       html: '', parse: injectedParse(documentWithElements([HTML_SANITIZER_LIMITS.maxAttributesPerElement])),
+      isAllowedAssetId: () => false,
     }).ok).toBe(true);
     expect(failureCodeWithParse(documentWithElements([HTML_SANITIZER_LIMITS.maxAttributesPerElement + 1]))).toBe('html_cap');
   });
 
   it('accepts the exact total attribute cap and rejects cap plus one', () => {
     const exact = Array.from({ length: HTML_SANITIZER_LIMITS.maxAttributes / HTML_SANITIZER_LIMITS.maxAttributesPerElement }, () => HTML_SANITIZER_LIMITS.maxAttributesPerElement);
-    expect(sanitizeHtmlExport({ html: '', parse: injectedParse(documentWithElements(exact)) }).ok).toBe(true);
+    expect(sanitizeHtmlExport({ html: '', parse: injectedParse(documentWithElements(exact)), isAllowedAssetId: () => false }).ok).toBe(true);
     expect(failureCodeWithParse(documentWithElements([...exact, 1]))).toBe('html_cap');
   });
   it('reconstructs safe SVG primitives without SVG CSS markers and is idempotent', () => {
