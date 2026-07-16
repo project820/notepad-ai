@@ -210,7 +210,8 @@ registerHtmlExportIpc({
       webContentsId,
       provider: input.model.provider,
       promptChars: input.prompt.length,
-      viewport: input.viewport ? `${input.viewport.width}x${input.viewport.height}` : undefined,
+      viewportWidth: input.viewport?.width,
+      viewportHeight: input.viewport?.height,
     });
     try {
       const result = await htmlExportGenerator.run(webContentsId, input);

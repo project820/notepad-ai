@@ -221,6 +221,26 @@ function isSaveFinalizedRequest(input: unknown): input is SaveFinalizedRequest {
 
 const HTML_GENERATE_PROMPT_MAX = 4 * 1024 * 1024;
 
+const HTML_GENERATE_VIEWPORT_MIN = 1;
+const HTML_GENERATE_VIEWPORT_MAX = 10_000;
+
+function isValidGenerateViewport(input: unknown): input is { width: number; height: number } {
+  if (!isExactPlainObject(input) || Object.getOwnPropertySymbols(input).length !== 0) return false;
+  const keys = Object.keys(input);
+  if (keys.length !== 2 || !keys.every((key) => key === 'width' || key === 'height')) return false;
+  const width = input.width;
+  const height = input.height;
+  return Object.hasOwn(input, 'width')
+    && Object.hasOwn(input, 'height')
+    && typeof width === 'number'
+    && Number.isInteger(width)
+    && width >= HTML_GENERATE_VIEWPORT_MIN
+    && width <= HTML_GENERATE_VIEWPORT_MAX
+    && typeof height === 'number'
+    && Number.isInteger(height)
+    && height >= HTML_GENERATE_VIEWPORT_MIN
+    && height <= HTML_GENERATE_VIEWPORT_MAX;
+}
 function isGenerateRequest(
   input: unknown,
 ): input is {
@@ -246,8 +266,7 @@ function isGenerateRequest(
   if ('instructions' in input && input.instructions !== undefined) {
     if (typeof input.instructions !== 'string' || input.instructions.length > 65_536) return false;
   }
-  // Viewport is optional; shape is validated/clamped later in main (never trust raw dims).
-  if ('viewport' in input && input.viewport !== undefined && !isExactPlainObject(input.viewport)) return false;
+  if ('viewport' in input && input.viewport !== undefined && !isValidGenerateViewport(input.viewport)) return false;
   return true;
 }
 
