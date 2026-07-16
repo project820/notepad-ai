@@ -570,15 +570,28 @@ describe('mountHtmlExportWizard — purpose/density/etc are demoted to an option
     expect(host.querySelector('[data-he-field="interactive"]')).toBeTruthy();
   });
 
-  it('passes the detail density selection through to the direct prompt', async () => {
+  it('maps roomy density to the sparse direct prompt directive', async () => {
     const { host, deps } = setup();
     toSummary(host);
     click(host, 'mode-detail');
     setField(host, 'density', 'roomy');
     click(host, 'generate-submit');
     await flush();
-    // roomy → full density directive in the single direct prompt.
-    expect(lastRequest(deps).prompt).toContain('FULL');
+    expect(lastRequest(deps).prompt).toContain(
+      'density: MINIMAL (sparse, high whitespace, one primary claim per unit)',
+    );
+  });
+
+  it('maps compact density to the dense direct prompt directive', async () => {
+    const { host, deps } = setup();
+    toSummary(host);
+    click(host, 'mode-detail');
+    setField(host, 'density', 'compact');
+    click(host, 'generate-submit');
+    await flush();
+    expect(lastRequest(deps).prompt).toContain(
+      'density: FULL (dense, preserve detail and evidence)',
+    );
   });
 
   it('preserves a non-core purpose preset (blog/portfolio/proposal) as a prompt hint', async () => {

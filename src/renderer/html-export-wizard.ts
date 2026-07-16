@@ -286,9 +286,9 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
   }
   function mapDensity(d?: Density): DirectExportDensity | undefined {
     switch (d) {
-      case 'compact': return 'minimal';
+      case 'compact': return 'full';
       case 'normal': return 'balanced';
-      case 'roomy': return 'full';
+      case 'roomy': return 'minimal';
       default: return undefined;
     }
   }
