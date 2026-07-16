@@ -112,6 +112,22 @@ function errMessage(err: unknown, fallback: string): string {
   if (typeof err === 'string' && err) return err;
   return fallback;
 }
+function errorKeyForGenerationResult(
+  result: Exclude<GenerationAttemptResult, { state: 'final' }>,
+): string {
+  if (result.state === 'partial') {
+    return result.quarantineKind === 'layout-violation'
+      ? 'he.error.containment'
+      : 'he.error.generate';
+  }
+  if (result.state === 'failed') {
+    if (result.stage === 'sanitize') return 'he.error.sanitize';
+    if (result.stage === 'quarantine' && result.kind === 'layout-violation') {
+      return 'he.error.containment';
+    }
+  }
+  return 'he.error.generate';
+}
 
 export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): HtmlExportWizardHandle {
   const t = deps.t;
@@ -416,7 +432,7 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
           // partial / failed / cancelled → drop the non-final attempt so rejected
           // model output cannot linger if the user backs out of the error screen.
           deps.cancelHtmlGeneration?.();
-          dispatch({ type: 'AI_ERROR', error: t('he.error.generate') });
+          dispatch({ type: 'AI_ERROR', error: t(errorKeyForGenerationResult(result)) });
         }
       })
       .catch(() => {

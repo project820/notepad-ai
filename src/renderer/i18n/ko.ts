@@ -216,6 +216,7 @@ export const ko: Dict = {
     'he.regenerate': '다시 생성',
     'he.error.fetch': '디자인을 가져오지 못했습니다. 이름이나 URL을 확인하거나 기본 디자인을 사용하세요.',
     'he.error.generate': '생성에 실패했습니다. 다시 시도해주세요.',
+    'he.error.sanitize': '생성된 HTML/CSS를 사용할 수 없습니다. 다시 시도하고 글꼴 크기는 rem/em 대신 px를 사용하며 외부 링크나 이미지는 넣지 마세요.',
     'he.error.tooLongSinglePass': '문서가 너무 길어 단일 패스 HTML 내보내기를 할 수 없습니다(30,000자 초과). 내용을 줄인 뒤 다시 시도해주세요.',
     'he.back': '뒤로',
     'he.cancel': '취소',
