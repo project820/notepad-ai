@@ -717,6 +717,27 @@ describe('ProviderRegistry local discovery is non-blocking', () => {
     const models = await reg.getAvailableModels();
     expect(models.filter((m) => m.provider === 'ollama').map((m) => m.id)).toEqual(['llama3']);
   });
+  it('keeps LM Studio hidden from chat inventory but includes it for HTML export', async () => {
+    const cache = new LocalModelCache();
+    await cache.refreshInBackground([
+      cacheFakeProvider('lmstudio', async () => [localModelRef('lmstudio', 'local-html-model')]),
+    ]);
+    const reg = new ProviderRegistry(
+      fakeKeyStore(),
+      {
+        chatgpt: fakeProvider('chatgpt', true, () => {}),
+        claude: fakeProvider('claude', true, () => {}),
+        openrouter: fakeProvider('openrouter', true, () => {}),
+        lmstudio: localFakeProvider('lmstudio', async () => []),
+      },
+      cache,
+    );
+
+    expect((await reg.getAvailableModels()).some((model) => model.provider === 'lmstudio')).toBe(false);
+    expect((await reg.getAvailableModelsForHtmlExport())
+      .filter((model) => model.provider === 'lmstudio')
+      .map((model) => model.id)).toEqual(['local-html-model']);
+  });
 
   it('local providers report static connected auth without a network probe', async () => {
     const fetchSpy = vi.fn(() => Promise.reject(new Error('ECONNREFUSED')));

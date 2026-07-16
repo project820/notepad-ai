@@ -179,6 +179,41 @@ export class ProviderRegistry {
     return merged;
   }
 
+  /**
+   * HTML export inventory keeps the cloud display policy while preserving raw
+   * discovered local models. HTML has its own allowlist and must be able to
+   * inspect LM Studio models that chat intentionally hides.
+   */
+  async getAvailableModelsForHtmlExport(force = false): Promise<ModelRef[]> {
+    if (force) this.bumpReasoningSnapshot();
+    const curated = applyModelDisplayPolicy(getCuratedModels());
+    const cloudProviders = Object.values(this.providers).filter(
+      (provider): provider is AiProvider => provider != null && provider.authKind !== 'local',
+    );
+    const live = (
+      await Promise.all(cloudProviders.map(async (provider) => {
+        try {
+          return applyModelDisplayPolicy(await provider.listModels());
+        } catch {
+          return [] as ModelRef[];
+        }
+      }))
+    ).flat();
+    const locals = this.localProviders();
+    if (locals.length > 0 && (force || this.localCache.isStale())) {
+      void this.localCache.refreshInBackground(locals);
+    }
+    const seen = new Set<string>();
+    const merged: ModelRef[] = [];
+    for (const model of [...curated, ...live, ...this.localCache.snapshot()]) {
+      const key = `${model.provider}:${model.id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(model);
+    }
+    return merged;
+  }
+
   async setApiKey(provider: AiProviderId, key: string): Promise<{ persisted: boolean }> {
     if (provider === 'chatgpt') {
       throw new AiProviderError('provider', 'ChatGPT uses sign-in, not an API key.');

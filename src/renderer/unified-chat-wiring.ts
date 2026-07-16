@@ -40,12 +40,21 @@ let lastHtmlCapableProviderIds: Set<AiProviderId> | null = null;
 export function resolveHtmlCapableProviderIds(
   statuses: ProviderAuthStatus[] | null,
   cache: Set<AiProviderId> | null,
+  localProvidersWithModels: ReadonlySet<AiProviderId> = new Set(),
 ): { capable: Set<AiProviderId> | null; nextCache: Set<AiProviderId> | null } {
   if (statuses) {
-    const capable = htmlCapableProviderIds(statuses);
+    const capable = htmlCapableProviderIds(statuses, { localProvidersWithModels });
     return { capable, nextCache: capable };
   }
   return { capable: cache, nextCache: cache };
+}
+
+function htmlLocalProvidersWithModels(models: readonly { provider?: string }[]): Set<AiProviderId> {
+  const providers = new Set<AiProviderId>();
+  for (const model of models) {
+    if (model.provider === 'ollama' || model.provider === 'lmstudio') providers.add(model.provider);
+  }
+  return providers;
 }
 
 export type UnifiedChatWiring = {
@@ -274,9 +283,16 @@ export function initUnifiedChatWiring(ctx: AppContext, deps: UnifiedChatWiringDe
     // Status-fetch failure reuses the last successful capable set (fail-closed
     // continuity). Cold failure (no cache yet) keeps the hasAuth gate so a
     // transient probe does not hard-break entry.
-    const statuses = await window.api.aiProvidersStatus().catch(() => null);
+    const [htmlModels, statuses] = await Promise.all([
+      window.api.aiModelsHtml(true).catch(() => []),
+      window.api.aiProvidersStatus().catch(() => null),
+    ]);
     if (!guard.isCurrent()) return;
-    const entryCapable = resolveHtmlCapableProviderIds(statuses, lastHtmlCapableProviderIds);
+    const entryCapable = resolveHtmlCapableProviderIds(
+      statuses,
+      lastHtmlCapableProviderIds,
+      htmlLocalProvidersWithModels(htmlModels),
+    );
     lastHtmlCapableProviderIds = entryCapable.nextCache;
     if (entryCapable.capable && entryCapable.capable.size === 0) {
       setUnifiedChatOpen(true);
@@ -298,7 +314,7 @@ export function initUnifiedChatWiring(ctx: AppContext, deps: UnifiedChatWiringDe
       getMarkdown: () => ctx.editor.getDoc(),
       maxSourceCharsForModel: (m) => htmlExportSourceCharBudget(m ?? currentModelArg()),
       listHtmlModels: async () => {
-        const ms = await deps.loadModelsCached(true);
+        const ms = await window.api.aiModelsHtml(true);
         const mapped = ms.map((m) => {
           const provider = m.provider ?? 'chatgpt';
           return {
@@ -316,7 +332,11 @@ export function initUnifiedChatWiring(ctx: AppContext, deps: UnifiedChatWiringDe
         // Status-fetch failure reuses the last successful capable set; only a cold
         // failure (no cache yet) falls back to allowlist-only.
         const liveStatuses = await window.api.aiProvidersStatus().catch(() => null);
-        const pickerCapable = resolveHtmlCapableProviderIds(liveStatuses, lastHtmlCapableProviderIds);
+        const pickerCapable = resolveHtmlCapableProviderIds(
+          liveStatuses,
+          lastHtmlCapableProviderIds,
+          htmlLocalProvidersWithModels(ms),
+        );
         lastHtmlCapableProviderIds = pickerCapable.nextCache;
         if (!pickerCapable.capable) return allowlisted;
         return allowlisted.filter((m) => isAiProviderId(m.provider) && pickerCapable.capable!.has(m.provider));
