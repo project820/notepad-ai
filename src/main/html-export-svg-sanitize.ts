@@ -1,4 +1,5 @@
 import { html, type DefaultTreeAdapterTypes } from 'parse5';
+import { cssRejectedCode } from './html-export-css-sanitize';
 
 export const SVG_NAMESPACE = html.NS.SVG;
 export const SVG_ATTRIBUTE_MAX_BYTES = 128 * 1024;
@@ -9,7 +10,7 @@ export type SvgViolationCode =
   | 'html_event_handler'
   | 'html_url'
   | 'html_svg_rejected'
-  | 'css_rejected';
+  | ReturnType<typeof cssRejectedCode<'svg_attribute'>>;
 
 type Node = DefaultTreeAdapterTypes.Node;
 type Element = DefaultTreeAdapterTypes.Element;
@@ -572,7 +573,7 @@ function validateRoot(
     }
     for (const attribute of sourceAttrs) {
       if (hasCssUrlOrImport(attribute.value) || attribute.name.toLowerCase() === 'style') {
-        return fail('css_rejected', `CSS surface in SVG attribute ${attribute.name}`);
+        return fail(cssRejectedCode('svg_attribute'), `CSS surface in SVG attribute ${attribute.name}`);
       }
     }
     const allowed = allowedAttributes(tag);

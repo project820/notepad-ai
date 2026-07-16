@@ -37,6 +37,13 @@ export type CliLineMapper = (record: unknown) => { delta?: string; done?: boolea
 
 export type CliRunResult = { ok: boolean; sawOutput: boolean; error?: string };
 
+export type CliLimits = {
+  outputCap: number;
+  maxLineBytes: number;
+  stderrCap: number;
+  noOutputMs: number;
+};
+
 export const CLI_LIMITS = {
   /** Max bytes of assembled model text before the stream is force-closed. */
   outputCap: 8 * 1024 * 1024,
@@ -47,6 +54,8 @@ export const CLI_LIMITS = {
   /** Time to first byte before the run is aborted as unresponsive. */
   noOutputMs: 60_000,
 } as const;
+/** HTML generation needs the same first-byte allowance as its transport timer (#53). */
+export const HTML_CLI_NO_OUTPUT_MS = 240_000;
 
 /**
  * A GUI-launched macOS app inherits a minimal PATH (e.g. /usr/bin:/bin) that does
@@ -304,7 +313,7 @@ export function runCliCompletion(opts: {
   cwd: string;
   signal?: AbortSignal;
   onEvent: (e: AiChatEvent) => void;
-  limits?: Partial<typeof CLI_LIMITS>;
+  limits?: Partial<CliLimits>;
 }): Promise<CliRunResult> {
   const limits = { ...CLI_LIMITS, ...(opts.limits ?? {}) };
   return new Promise<CliRunResult>((resolve) => {

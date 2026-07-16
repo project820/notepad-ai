@@ -95,6 +95,11 @@ export const CSS_VIOLATION_CODES = {
 
 type CssViolationCode = (typeof CSS_VIOLATION_CODES)[keyof typeof CSS_VIOLATION_CODES];
 export type CssViolation = { code: CssViolationCode; detail: string };
+export type CssRejectedSubcode = CssViolationCode | 'svg_attribute';
+
+export function cssRejectedCode<T extends CssRejectedSubcode>(inner: T): `css_rejected.${T}` {
+  return `css_rejected.${inner}`;
+}
 export type CssSanitizeResult =
   | { ok: true; css: string; ruleCount: number; declarationCount: number }
   | { ok: false; violations: CssViolation[] };

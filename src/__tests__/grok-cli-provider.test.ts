@@ -1,7 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 import { GrokCliProvider, mapGrokStreamingJson, type PromptFileWriter } from '../main/ai/grok-cli-provider';
-import { __setShellExecForTests, __setCliProbeForTests, __resetCliSpawnPathForTests, type CliProcess } from '../main/ai/cli-runner';
+import {
+  __setShellExecForTests,
+  __setCliProbeForTests,
+  __resetCliSpawnPathForTests,
+  runCliCompletion,
+  HTML_CLI_NO_OUTPUT_MS,
+  type CliProcess,
+} from '../main/ai/cli-runner';
 import type { AiChatEvent, AiChatRequest } from '../main/ai/types';
 
 class FakeChild implements CliProcess {
@@ -97,6 +104,30 @@ describe('GrokCliProvider', () => {
     await h.promise;
     expect(h.events.some((e) => e.kind === 'error')).toBe(true);
     expect(h.cleanup).toHaveBeenCalledTimes(1);
+  });
+  it.each([
+    ['html', 'html'],
+    ['write', 'write'],
+    ['advise', 'advise'],
+    ['block', 'block'],
+    ['absent', undefined],
+  ] as const)('passes the first-byte override only for the %s surface', async (_name, surfaceMode) => {
+    const calls: Array<Parameters<typeof runCliCompletion>[0]> = [];
+    const provider = new GrokCliProvider({
+      spawn: () => new FakeChild(),
+      resolveCommand: async () => ({ command: '/trusted/grok' }),
+      writePromptFile: async () => ({ path: '/tmp/fake-grok-prompt.txt', cleanup: async () => {} }),
+      runCompletion: async (options) => {
+        calls.push(options);
+        return { ok: true, sawOutput: false };
+      },
+    });
+
+    await provider.streamChat({ ...req, ...(surfaceMode ? { surfaceMode } : {}) }, vi.fn());
+
+    expect(calls).toHaveLength(1);
+    if (surfaceMode === 'html') expect(calls[0].limits?.noOutputMs).toBe(HTML_CLI_NO_OUTPUT_MS);
+    else expect(calls[0].limits).toBeUndefined();
   });
 });
 
