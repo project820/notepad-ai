@@ -43,7 +43,7 @@ import { removeWindowSnapshot } from './session-schema';
 import { shouldUseMockKeychain } from './lifecycle-flags';
 import { shouldPreventBeforeQuit } from './close-guard';
 import { buildMenu } from './menu';
-import { configureAppLog, logInfo, logWarn, logError, todayAppLogPath } from './app-log';
+import { configureAppLog, logInfo, logWarn, logError } from './app-log';
 
 const registry = createWindowRegistry();
 const nodeIdentityFs: IdentityFs = {
@@ -78,9 +78,6 @@ const documentAtomicBackend = nodeAtomicBackend();
 // directory.
 if (shouldUseMockKeychain(process.env)) app.commandLine.appendSwitch('use-mock-keychain');
 configureAppIdentity();
-configureAppLog({
-  logDir: () => path.join(app.getPath('userData'), 'logs'),
-});
 configureAppLog({
   logDir: () => path.join(app.getPath('userData'), 'logs'),
 });
@@ -299,7 +296,7 @@ app.whenReady().then(async () => {
   void logInfo('boot', 'app ready', {
     version: app.getVersion(),
     packaged: app.isPackaged,
-    logFile: todayAppLogPath() ?? undefined,
+    log: 'ready',
   });
   void prewarmCliSpawnPath();
   // Construct the additive quarantine pool now that Electron is ready. It stays

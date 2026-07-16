@@ -397,9 +397,8 @@ export class HtmlExportPipelineService {
     this.diagnostics.push({ boundary, causeName, causeMessage });
     if (this.diagnostics.length > HTML_EXPORT_PIPELINE_DIAGNOSTIC_CAP) this.diagnostics.shift();
     void logError('html-export-pipeline', 'dependency failure', {
-      boundary,
-      causeName,
-      causeMessage,
+      stage: boundary,
+      kind: 'dependency-failure',
     });
   }
 

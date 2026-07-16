@@ -40,6 +40,20 @@ describe('app-log', () => {
     expect(formatAppLogField('a\nb\tc')).toBe('a b c');
     expect(formatAppLogField('x'.repeat(600)).endsWith('…')).toBe(true);
   });
+  it('redacts absolute paths and secret-like values from fields and messages', () => {
+    const absolutePath = ['', 'Users', 'example', 'private'].join('/');
+    const homePath = ['~', 'Library', 'private'].join('/');
+    const field = formatAppLogField(`failed at ${absolutePath} or ${homePath} with Bearer token-value and api_key=example-secret sk-example-secret`);
+    const line = formatAppLogLine('error', 'export', `failed at ${absolutePath}`, { detail: field });
+
+    expect(field).toContain('[REDACTED_PATH]');
+    expect(field).toContain('Bearer [REDACTED_SECRET]');
+    expect(field).toContain('api_key=[REDACTED_SECRET]');
+    expect(field).toContain('[REDACTED_SECRET]');
+    expect(field).not.toContain(absolutePath);
+    expect(field).not.toContain(homePath);
+    expect(line).not.toContain(absolutePath);
+  });
 
   it('formats a single-line structured record', () => {
     const line = formatAppLogLine(

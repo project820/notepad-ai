@@ -14,6 +14,16 @@ import path from 'node:path';
 export const APP_LOG_RETENTION_DAYS = 3;
 const APP_LOG_LINE_MAX_CHARS = 4_000;
 const APP_LOG_FIELD_MAX_CHARS = 512;
+const REDACTED_PATH = '[REDACTED_PATH]';
+const REDACTED_SECRET = '[REDACTED_SECRET]';
+
+function redactAppLogText(value: string): string {
+  return value
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/\-=]+/gi, `Bearer ${REDACTED_SECRET}`)
+    .replace(/\bsk-[A-Za-z0-9_-]{4,}\b/g, REDACTED_SECRET)
+    .replace(/\bapi[_-]?key\s*([=:])\s*(?:"[^"]*"|'[^']*'|[^\s,;]+)/gi, (_match, separator: string) => `api_key${separator}${REDACTED_SECRET}`)
+    .replace(/(^|[\s"'(=])(?:~|\/[A-Za-z0-9._-]+)(?:\/[^\s"'`,;:()[\]{}]+)+/g, `$1${REDACTED_PATH}`);
+}
 
 export type AppLogLevel = 'info' | 'warn' | 'error';
 
@@ -60,7 +70,7 @@ export function formatAppLogField(value: string | number | boolean | null | unde
   if (value === undefined) return '';
   if (value === null) return 'null';
   if (typeof value === 'boolean' || typeof value === 'number') return String(value);
-  return clampText(value.replace(/[\r\n\t]+/g, ' ').trim(), APP_LOG_FIELD_MAX_CHARS);
+  return clampText(redactAppLogText(value.replace(/[\r\n\t]+/g, ' ').trim()), APP_LOG_FIELD_MAX_CHARS);
 }
 
 export function formatAppLogLine(
@@ -71,7 +81,7 @@ export function formatAppLogLine(
   nowMs: number = clock(),
 ): string {
   const ts = new Date(nowMs).toISOString();
-  const parts = [`${ts} ${level.toUpperCase()} [${clampText(scope, 64)}] ${clampText(message, 512)}`];
+  const parts = [`${ts} ${level.toUpperCase()} [${clampText(scope, 64)}] ${formatAppLogField(message)}`];
   if (fields) {
     for (const [key, raw] of Object.entries(fields)) {
       if (raw === undefined) continue;
