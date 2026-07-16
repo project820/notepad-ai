@@ -231,6 +231,7 @@ export const ko: Dict = {
     'he.continue': '계속',
     'he.generate': '생성',
     'he.fetching': '디자인을 가져오는 중…',
+    'he.entry.loading': 'HTML 내보내기를 준비하는 중…',
     'he.design.galleryLink': 'getdesign.md 열기',
     'he.error.save': '파일을 저장하지 못했습니다. 다시 시도해주세요.',
     'he.summary.title': '표현 스타일',

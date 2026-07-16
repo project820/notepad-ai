@@ -107,7 +107,7 @@ export const zhHans: Dict = {
     'he.model': '模型',
     'he.tokenWarning': '文档较长，可能会被截断。', 'he.generating': '生成中…', 'he.regenerate': '重新生成',
     'he.error.fetch': '无法获取设计。请检查名称或网址，或使用默认设计。', 'he.error.generate': '生成失败。请重试。', 'he.error.sanitize': '生成的 HTML/CSS 无法被接受。请重试，并使用 px 而非 rem/em 作为字体大小，且不要包含外部链接或图片。', 'he.error.tooLongSinglePass': '文档过长，无法进行单次 HTML 导出（超过 30,000 个字符）。请缩短后重试。',
-    'he.back': '返回', 'he.cancel': '取消', 'he.continue': '继续', 'he.generate': '生成', 'he.fetching': '正在获取设计…',
+    'he.back': '返回', 'he.cancel': '取消', 'he.continue': '继续', 'he.generate': '生成', 'he.fetching': '正在获取设计…', 'he.entry.loading': '正在准备 HTML 导出…',
     'he.design.galleryLink': '打开 getdesign.md', 'he.error.save': '无法保存文件。请重试。',
     'he.summary.title': '表现风格', 'he.summary.A': '视觉', 'he.summary.B': '平衡', 'he.summary.C': '详细', 'he.summary.D': '原文', 'he.freeReq.title': '你的需求', 'he.freeReq.placeholder': '描述任何具体要求 — 受众、重点、保留或删减的内容…', 'he.advanced.title': '高级选项', 'he.design.useDefault': '使用默认设计', 'he.result.modelReady': '内容已就绪',
     'he.saving': '正在保存…', 'he.result.readyToSave': '内容已就绪。保存为单一自包含的 HTML 文件。', 'he.result.save': '保存 HTML', 'he.result.open': '在浏览器中打开', 'he.result.saved': '已保存。可在浏览器中打开。', 'he.error.containment': '无法在所选布局中容纳内容。请尝试更轻的摘要级别或滚动布局。', 'he.error.notSelfContained': '生成的文档不是完全自包含，未保存。请重试。',

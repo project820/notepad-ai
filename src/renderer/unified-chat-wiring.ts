@@ -11,6 +11,7 @@ import {
   htmlCapableProviderIds,
   isHtmlExportModelProviderAllowed,
 } from '../main/ai/html-export-model-allowlist';
+import { isProviderAuthAttemptable } from '../shared/provider-auth-status';
 import { openSettingsModal, triggerCliOnboarding } from './settings-modal';
 import { savePrefs, type Prefs } from './prefs';
 import { buildUnifiedChatInstructions } from './unified-chat-prompt-handler';
@@ -269,22 +270,31 @@ export function initUnifiedChatWiring(ctx: AppContext, deps: UnifiedChatWiringDe
   }
 
   async function startHtmlExportWizard(guard: ToolPanelGuard) {
-    // Force HTML local discovery BEFORE the generic auth gate. hasAnyAuth only
-    // reads the existing local snapshot; local-only users who just started
-    // Ollama/LM Studio would otherwise hit chat.noProvider and never reach the
-    // awaited aiModelsHtml path that populates the cache (Codex P2 on #42).
+    if (!guard.isCurrent()) return;
+    setUnifiedChatOpen(true);
+    unifiedChat.showPanel(
+      `<div class="he-host"><div class="he-status"><span class="he-spinner" aria-hidden="true"></span><span>${t('he.entry.loading')}</span></div></div>`,
+      undefined,
+      () => {
+        htmlExportWizard?.destroy();
+        htmlExportWizard = null;
+      },
+    );
+
+    // Force HTML local discovery BEFORE the generic auth gate. This populates the
+    // local snapshot for users who just started Ollama/LM Studio.
     const htmlModels = await window.api.aiModelsHtml(true).catch(() => []);
     if (!guard.isCurrent()) return;
-    const [statuses, hasAuth] = await Promise.all([
-      window.api.aiProvidersStatus().catch(() => null),
-      window.api.aiHasAnyAuth().catch(() => true),
-    ]);
+    const statuses = await window.api.aiProvidersStatus().catch(() => null);
     if (!guard.isCurrent()) return;
     const localDiscovered = htmlLocalProvidersWithModels(htmlModels);
-    // After forced discovery, local models alone are enough to attempt entry even
-    // if a racing hasAnyAuth still saw an empty snapshot (defensive).
-    if (!hasAuth && localDiscovered.size === 0) {
-      setUnifiedChatOpen(true);
+    // Match ProviderRegistry.hasAnyAuth without a second getAuthStatuses round-trip.
+    // A failed status fetch preserves the prior fail-open behavior of aiHasAnyAuth.
+    const hasAuth = statuses
+      ? statuses.some((s) => s.authKind !== 'local' && isProviderAuthAttemptable(s)) || localDiscovered.size > 0
+      : true;
+    if (!hasAuth) {
+      unifiedChat.clearPanel();
       unifiedChat.addMessage('assistant', t('chat.noProvider'));
       ctx.setStatus(t('status.connectProvider'));
       triggerCliOnboarding(openSettings);
@@ -302,18 +312,13 @@ export function initUnifiedChatWiring(ctx: AppContext, deps: UnifiedChatWiringDe
     );
     lastHtmlCapableProviderIds = entryCapable.nextCache;
     if (entryCapable.capable && entryCapable.capable.size === 0) {
-      setUnifiedChatOpen(true);
+      unifiedChat.clearPanel();
       unifiedChat.addMessage('assistant', t('chat.noProvider'));
       ctx.setStatus(t('status.connectProvider'));
       triggerCliOnboarding(openSettings);
       return;
     }
     if (!guard.isCurrent()) return;
-    setUnifiedChatOpen(true);
-    unifiedChat.showPanel('<div class="he-host"></div>', undefined, () => {
-      htmlExportWizard?.destroy();
-      htmlExportWizard = null;
-    });
     const host = unifiedChatHost.querySelector<HTMLElement>('.he-host');
     if (!host) return;
     htmlExportWizard?.destroy();

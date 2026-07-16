@@ -107,7 +107,7 @@ export const zhHant: Dict = {
     'he.model': '模型',
     'he.tokenWarning': '文件較長，可能會被截斷。', 'he.generating': '產生中…', 'he.regenerate': '重新產生',
     'he.error.fetch': '無法取得設計。請檢查名稱或網址，或使用預設設計。', 'he.error.generate': '產生失敗。請重試。', 'he.error.sanitize': '產生的 HTML/CSS 無法被接受。請重試，並以 px 而非 rem/em 設定字型大小，且不要包含外部連結或圖片。', 'he.error.tooLongSinglePass': '文件過長，無法進行單次 HTML 匯出（超過 30,000 個字元）。請縮短後重試。',
-    'he.back': '返回', 'he.cancel': '取消', 'he.continue': '繼續', 'he.generate': '產生', 'he.fetching': '正在取得設計…',
+    'he.back': '返回', 'he.cancel': '取消', 'he.continue': '繼續', 'he.generate': '產生', 'he.fetching': '正在取得設計…', 'he.entry.loading': '正在準備 HTML 匯出…',
     'he.design.galleryLink': '開啟 getdesign.md', 'he.error.save': '無法儲存檔案。請重試。',
     'he.summary.title': '表現風格', 'he.summary.A': '視覺', 'he.summary.B': '平衡', 'he.summary.C': '詳細', 'he.summary.D': '原文', 'he.freeReq.title': '你的需求', 'he.freeReq.placeholder': '描述任何具體要求 — 受眾、重點、保留或刪減的內容…', 'he.advanced.title': '進階選項', 'he.design.useDefault': '使用預設設計', 'he.result.modelReady': '內容已就緒',
     'he.saving': '正在儲存…', 'he.result.readyToSave': '內容已就緒。儲存為單一自包含的 HTML 檔案。', 'he.result.save': '儲存 HTML', 'he.result.open': '在瀏覽器中開啟', 'he.result.saved': '已儲存。可在瀏覽器中開啟。', 'he.error.containment': '無法在所選版面中容納內容。請嘗試較輕的摘要程度或捲動版面。', 'he.error.notSelfContained': '產生的文件並非完全自包含，未儲存。請重試。',
