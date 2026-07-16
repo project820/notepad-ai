@@ -43,6 +43,7 @@ import { removeWindowSnapshot } from './session-schema';
 import { shouldUseMockKeychain } from './lifecycle-flags';
 import { shouldPreventBeforeQuit } from './close-guard';
 import { buildMenu } from './menu';
+import { configureAppLog, logInfo, logWarn, logError, todayAppLogPath } from './app-log';
 
 const registry = createWindowRegistry();
 const nodeIdentityFs: IdentityFs = {
@@ -77,6 +78,12 @@ const documentAtomicBackend = nodeAtomicBackend();
 // directory.
 if (shouldUseMockKeychain(process.env)) app.commandLine.appendSwitch('use-mock-keychain');
 configureAppIdentity();
+configureAppLog({
+  logDir: () => path.join(app.getPath('userData'), 'logs'),
+});
+configureAppLog({
+  logDir: () => path.join(app.getPath('userData'), 'logs'),
+});
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 const converterHost = createConverterHost();
 const htmlExportAttemptRegistry = new HtmlExportAttemptRegistry();
@@ -200,7 +207,62 @@ registerHtmlExportIpc({
     releaseWebContents: (id) => htmlExportAssetRegistry.releaseWebContents(id),
   },
   quarantine: htmlExportQuarantine,
-  generateHtml: (webContentsId, input) => htmlExportGenerator.run(webContentsId, input),
+  generateHtml: async (webContentsId, input) => {
+    const started = Date.now();
+    void logInfo('html-export', 'generate start', {
+      webContentsId,
+      provider: input.model.provider,
+      model: input.model.id,
+      promptChars: input.prompt.length,
+      viewport: input.viewport ? `${input.viewport.width}x${input.viewport.height}` : undefined,
+    });
+    try {
+      const result = await htmlExportGenerator.run(webContentsId, input);
+      const ms = Date.now() - started;
+      if (result.state === 'final') {
+        void logInfo('html-export', 'generate final', {
+          webContentsId,
+          ms,
+          provider: input.model.provider,
+          model: input.model.id,
+        });
+      } else if (result.state === 'partial') {
+        void logWarn('html-export', 'generate partial', {
+          webContentsId,
+          ms,
+          provider: input.model.provider,
+          model: input.model.id,
+          quarantineKind: result.quarantineKind,
+        });
+      } else if (result.state === 'failed') {
+        void logError('html-export', 'generate failed', {
+          webContentsId,
+          ms,
+          provider: input.model.provider,
+          model: input.model.id,
+          stage: result.stage,
+          kind: result.kind,
+        });
+      } else {
+        void logInfo('html-export', `generate ${result.state}`, {
+          webContentsId,
+          ms,
+          provider: input.model.provider,
+          model: input.model.id,
+        });
+      }
+      return result;
+    } catch (error) {
+      void logError('html-export', 'generate threw', {
+        webContentsId,
+        provider: input.model.provider,
+        model: input.model.id,
+        errorName: error instanceof Error ? error.name : typeof error,
+        errorMessage: error instanceof Error ? error.message.slice(0, 200) : undefined,
+      });
+      throw error;
+    }
+  },
   cancelGenerateHtml: (webContentsId) => htmlExportGenerator.cancel(webContentsId),
 });
 registerHtmlExportAssetIpc({
@@ -234,6 +296,11 @@ app.on('before-quit', (event) => {
   });
 });
 app.whenReady().then(async () => {
+  void logInfo('boot', 'app ready', {
+    version: app.getVersion(),
+    packaged: app.isPackaged,
+    logFile: todayAppLogPath() ?? undefined,
+  });
   void prewarmCliSpawnPath();
   // Construct the additive quarantine pool now that Electron is ready. It stays
   // unwired from the live wizard (PR-S3b); only the html:quarantine:measure IPC

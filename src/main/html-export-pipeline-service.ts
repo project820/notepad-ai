@@ -1,3 +1,4 @@
+import { logError, logWarn } from './app-log';
 import { createHash } from 'node:crypto';
 
 import {
@@ -210,7 +211,17 @@ export class HtmlExportPipelineService {
       // wired, pass the issued-ID allowlist instead.
       isAllowedAssetId: () => false,
     });
-    if (!sanitized.ok) return reject('HTML sanitizer rejected model output');
+    if (!sanitized.ok) {
+      const codes = sanitized.violations
+        .map((v) => v.code)
+        .slice(0, 8)
+        .join(',');
+      void logWarn('html-export-pipeline', 'sanitizer rejected model output', {
+        attemptId,
+        violationCodes: codes || 'unknown',
+      });
+      return reject('HTML sanitizer rejected model output');
+    }
     if (!sameCounts(sanitized.counts, parsed.value.counts)) {
       return reject('HTML sanitizer counts do not match parse worker counts');
     }
@@ -385,6 +396,11 @@ export class HtmlExportPipelineService {
     }
     this.diagnostics.push({ boundary, causeName, causeMessage });
     if (this.diagnostics.length > HTML_EXPORT_PIPELINE_DIAGNOSTIC_CAP) this.diagnostics.shift();
+    void logError('html-export-pipeline', 'dependency failure', {
+      boundary,
+      causeName,
+      causeMessage,
+    });
   }
 
   private hasExpectedDigest(ref: HtmlExportArtifactRef, bytes: Uint8Array): boolean {
