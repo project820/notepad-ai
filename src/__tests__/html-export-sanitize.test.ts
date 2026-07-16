@@ -365,6 +365,20 @@ describe('sanitizeHtmlExport', () => {
     expect(second.ok).toBe(true);
     if (second.ok) expect(second.bodyHtml).toBe(first.bodyHtml);
   });
+  it('accepts decorative SVG that only declares the default xmlns namespace', () => {
+    // Models routinely emit xmlns="http://www.w3.org/2000/svg"; parse5 marks that
+    // attribute as namespaced. Hard-failing it made every decorated export reject.
+    const source =
+      '<main><div aria-hidden="true"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">' +
+      '<path d="M8 4h6l4 4v12a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z" stroke="#6366f1" stroke-width="1.5"/>' +
+      '</svg></div><h1>Title</h1></main>';
+    const result = sanitize(source);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bodyHtml).toContain('<svg');
+    expect(result.bodyHtml).toContain('<path');
+    expect(result.bodyHtml).not.toContain('xmlns=');
+  });
   it.each([
     ['mixed-case url function', 'UrL (https://e.test/x)', 'css_rejected'],
     ['comment-obfuscated url function', 'u/**/r/**/l/**/(https://e.test/x)', 'css_rejected'],
