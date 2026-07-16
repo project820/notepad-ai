@@ -17,6 +17,11 @@ const APP_LOG_FIELD_MAX_CHARS = 512;
 const REDACTED_PATH = '[REDACTED_PATH]';
 const REDACTED_SECRET = '[REDACTED_SECRET]';
 
+/**
+ * Redact secrets and path-like values. Single-segment absolute paths (such as
+ * /tmp or /api) are deliberately preserved to avoid over-redacting prose;
+ * macOS home paths (/Users/<name>/...) have at least two segments and redact.
+ */
 function redactAppLogText(value: string): string {
   const redacted = value
     .replace(/\bBearer\s+[A-Za-z0-9._~+/\-=]+/gi, `Bearer ${REDACTED_SECRET}`)
@@ -27,8 +32,8 @@ function redactAppLogText(value: string): string {
     .replace(/\bauthorization\s*:\s*(?:(?:[A-Za-z]+\s+)?(?:"[^"]*"|'[^']*'|[^\s,;]+))/gi, `authorization: ${REDACTED_SECRET}`);
   return redacted
     .split(/(https?:\/\/[^\s"'`<>]+)/gi)
-    .map((part) => part.startsWith('http://') || part.startsWith('https://')
-      ? part
+    .map((part) => /^https?:\/\//i.test(part)
+      ? part.replace(/([?&][^=\s"'`<>&]+)=((?:\/|%2f)[^&\s"'`<>]*)/gi, `$1=${REDACTED_PATH}`)
       : part.replace(
         /(^|[\s"'(=:])(?:file:\/\/)?(?:~(?:[A-Za-z0-9._-]+)?\/(?:[^\s~"',;:[\]{}\/]+(?: {1,2}[^\s~"',;:[\]{}\/]+)*\/)*[^\s~"',;:[\]{}\/]+|\/(?:[^\s~"',;:[\]{}\/]+(?: {1,2}[^\s~"',;:[\]{}\/]+)*\/)+[^\s~"',;:[\]{}\/]+)/g,
         `$1${REDACTED_PATH}`,
@@ -60,6 +65,7 @@ let deps: AppLogDeps | null = null;
 let pruneInFlight: Promise<void> | null = null;
 let lastPruneDay = '';
 let pruneRetryRequested = false;
+let pruneGeneration = 0;
 
 function clock(): number {
   return deps?.now?.() ?? Date.now();
@@ -126,6 +132,7 @@ export function parseAppLogDayFromFileName(name: string): string | null {
  * userData path is set. Subsequent calls replace deps (tests).
  */
 export function configureAppLog(next: AppLogDeps): void {
+  pruneGeneration += 1;
   deps = next;
   pruneInFlight = null;
   lastPruneDay = '';
@@ -176,11 +183,13 @@ async function pruneExpired(dir: string): Promise<boolean> {
 }
 
 function schedulePrune(dir: string, retryAfterFailure = true): void {
+  const generation = pruneGeneration;
   if (pruneInFlight) {
     pruneRetryRequested = true;
     return;
   }
   const finish = (pruneSucceeded: boolean) => {
+    if (generation !== pruneGeneration) return;
     pruneInFlight = null;
     const retry = pruneRetryRequested || (!pruneSucceeded && retryAfterFailure);
     pruneRetryRequested = false;

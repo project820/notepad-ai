@@ -41,7 +41,7 @@ describe('app-log', () => {
     expect(formatAppLogField('a\nb\tc')).toBe('a b c');
     expect(formatAppLogField('x'.repeat(600)).endsWith('…')).toBe(true);
   });
-  it('redacts path edge forms without redacting HTTPS URLs', () => {
+  it('redacts path edge forms without redacting ordinary HTTPS URLs', () => {
     const field = formatAppLogField('Error:/Users/x/private ~alice/Documents/private /Users/x/App  Support/y /Users/x/private) /Users/x/private` https://example.com/path');
     expect(field).toContain('Error:[REDACTED_PATH]');
     expect(field).toContain('[REDACTED_PATH]');
@@ -51,6 +51,13 @@ describe('app-log', () => {
     expect(field).not.toContain('private)');
     expect(field).not.toContain('private`');
     expect(field).toContain('https://example.com/path');
+
+    const normalUrl = 'HTTPS://EXAMPLE.COM/x?mode=preview';
+    expect(formatAppLogField(normalUrl)).toBe(normalUrl);
+    expect(formatAppLogField('https://host/upload?file=/Users/john/doc.md&mode=preview'))
+      .toBe('https://host/upload?file=[REDACTED_PATH]&mode=preview');
+    expect(formatAppLogField('https://host/upload?file=%2FUsers%2Fjohn%2Fdoc.md'))
+      .toBe('https://host/upload?file=[REDACTED_PATH]');
   });
   it('redacts bare password-like assignments but preserves unrelated keys', () => {
     const field = formatAppLogField('password=hunter2 secret: abc credentials=xyz monkey=banana key=harmless');
@@ -64,7 +71,8 @@ describe('app-log', () => {
     expect(field).not.toContain('xyz');
   });
   it('pre-caps large fields before redaction', () => {
-    expect(formatAppLogField('x'.repeat(4 * 1024 * 1024))).toHaveLength(512);
+    const preCap = 'x'.repeat(8 * 512);
+    expect(formatAppLogField(`${preCap} password=hunter2`)).toBe(formatAppLogField(preCap));
   });
   it('redacts absolute paths and secret-like values from fields and messages', () => {
     const absolutePath = ['', 'Users', 'example', 'private'].join('/');
@@ -265,31 +273,38 @@ describe('app-log', () => {
 
     expect(readdir).toHaveBeenCalledTimes(1);
   });
-  it('clears an in-flight prune when reconfigured', async () => {
-    const pendingReaddir = new Promise<string[]>(() => undefined);
+  it('does not let a settled old prune clobber a new in-flight prune after reconfiguration', async () => {
+    let resolveOldReaddir: (names: string[]) => void = () => undefined;
+    const oldReaddir = vi.fn(() => new Promise<string[]>((resolve) => {
+      resolveOldReaddir = resolve;
+    }));
     configureAppLog({
       logDir: () => 'old-logs',
       now: () => Date.parse('2026-07-16T12:00:00.000Z'),
       appendFile: async () => undefined,
-      readdir: async () => pendingReaddir,
+      readdir: oldReaddir,
       unlink: async () => undefined,
       mkdir: async () => undefined,
     });
     await appLog('info', 'boot', 'first write');
 
-    const readdir = vi.fn(async () => []);
+    const newReaddir = vi.fn(() => new Promise<string[]>(() => undefined));
     configureAppLog({
       logDir: () => 'new-logs',
       now: () => Date.parse('2026-07-16T12:00:00.000Z'),
       appendFile: async () => undefined,
-      readdir,
+      readdir: newReaddir,
       unlink: async () => undefined,
       mkdir: async () => undefined,
     });
     await appLog('info', 'boot', 'second write');
-    await new Promise((r) => setTimeout(r, 0));
 
-    expect(readdir).toHaveBeenCalledTimes(1);
+    resolveOldReaddir([]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await appLog('info', 'boot', 'overlapping write');
+
+    expect(oldReaddir).toHaveBeenCalledTimes(1);
+    expect(newReaddir).toHaveBeenCalledTimes(1);
   });
   it('retries a failed prune after an overlapping write', async () => {
     let rejectFirstReaddir: (reason?: unknown) => void = () => undefined;
