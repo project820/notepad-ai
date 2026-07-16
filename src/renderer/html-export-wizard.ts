@@ -8,8 +8,10 @@
  * model, drives the sanitize→resolve→quarantine→finalize pipeline, and returns an
  * opaque FinalizedArtifactId. The model authors the HTML/CSS directly; the renderer
  * never touches bytes. "Save" submits only the opaque IDs to the main atomic writer.
- * Purpose/density/width/interactive are demoted to an optional, collapsed
- * "advanced options" panel.
+ *
+ * Flow on the requirement step (flat, no nested advanced panel):
+ * Auto|Detail → Visual/Balanced/Detailed/Source → purpose (+ density/width in Detail)
+ * → free requirement → sticky model picker.
  */
 
 import {
@@ -187,10 +189,19 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
     if (!d) return undefined;
     return typeof d === 'string' ? `chatgpt:${d}` : modelKey(d);
   }
-  /** The model the user picked (or the default when no picker is shown). */
+  /** Preferred model key: sticky picker selection, else the default. */
+  function preferredModelKey(): string | undefined {
+    if (pendingModel) return modelKey(pendingModel);
+    return defaultModelKey();
+  }
+  /** The model the user picked (or the sticky/default when no picker is shown). */
   function readSelectedModel(): HtmlModelChoice | undefined {
     const v = field<HTMLSelectElement>('model')?.value;
-    if (v) return parseModelKey(v);
+    if (v) {
+      const parsed = parseModelKey(v);
+      if (parsed) return parsed;
+    }
+    if (pendingModel) return pendingModel;
     const d = deps.getDefaultModel?.();
     if (!d) return undefined;
     return typeof d === 'string' ? { provider: 'chatgpt', id: d } : d;
@@ -204,7 +215,11 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
   }
   function modelPickerHtml(): string {
     if (!htmlModels.length) return '';
-    const sel = defaultModelKey();
+    const preferred = preferredModelKey();
+    // Sticky selection wins over the default whenever it is still in the list.
+    const sel = htmlModels.some((m) => modelKey(m) === preferred)
+      ? preferred
+      : modelKey(htmlModels[0]);
     const opts = htmlModels
       .map((m) => {
         const k = modelKey(m);
@@ -213,36 +228,54 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
         return `<option value="${esc(k)}"${k === sel ? ' selected' : ''}>${esc(text)}</option>`;
       })
       .join('');
-    // The note reflects the option the browser shows selected: the default when
-    // it matches a listed model, otherwise the first option.
-    const effectiveSel = htmlModels.some((m) => modelKey(m) === sel) ? sel : modelKey(htmlModels[0]);
     return `<label class="he-model-label" for="he-model">${esc(t('he.model'))}</label>
           <select class="he-select" id="he-model" data-he-field="model">${opts}</select>
-          ${modelNoteHtml(effectiveSel)}`;
+          ${modelNoteHtml(sel)}`;
   }
-  /** Toggle the small-context advisory when the model selection changes. */
+  /** Persist model / purpose / detail knobs on change so re-renders keep them. */
   function onModelChange(event: Event) {
     const el = event.target as HTMLElement | null;
     if (!el || !host.contains(el)) return;
-    // Purpose select toggles the free-text custom-purpose input inline (no re-render).
-    if (el.dataset?.heField === 'purpose') {
+    const fieldName = el.dataset?.heField;
+    if (fieldName === 'purpose') {
+      const value = (el as HTMLSelectElement).value as HtmlPurpose;
+      state = { ...state, purpose: value };
       const custom = host.querySelector<HTMLInputElement>('[data-he-field="custom-purpose"]');
-      if (custom) custom.hidden = (el as HTMLSelectElement).value !== 'custom';
+      if (custom) custom.hidden = value !== 'custom';
       return;
     }
-    if (el.dataset?.heField !== 'model') return;
+    if (fieldName === 'density') {
+      state = { ...state, density: (el as HTMLSelectElement).value as Density };
+      return;
+    }
+    if (fieldName === 'readable-width') {
+      state = { ...state, readableWidth: (el as HTMLSelectElement).value as ReadableWidth };
+      return;
+    }
+    if (fieldName === 'interactive') {
+      state = { ...state, interactive: (el as HTMLInputElement).checked };
+      return;
+    }
+    if (fieldName !== 'model') return;
+    const selected = parseModelKey((el as HTMLSelectElement).value);
+    if (selected) {
+      pendingModel = selected;
+      deps.onModelChosen?.(selected);
+    }
     const note = host.querySelector<HTMLElement>('[data-he-note="model"]');
     if (!note) return;
     const small = isSmallContext(htmlModels.find((m) => modelKey(m) === (el as HTMLSelectElement).value));
     note.hidden = !small;
     note.textContent = small ? t('he.smallContext') : '';
   }
-  /** Keep the free-requirement text in state so re-renders (A/B/C/D, mode toggle) don't wipe it. */
+  /** Keep free-text fields in state so re-renders (A/B/C/D, mode toggle) don't wipe them. */
   function onInput(event: Event) {
     const el = event.target as HTMLElement | null;
     if (!el || !host.contains(el)) return;
     if (el.dataset?.heField === 'free-requirement') {
       state = { ...state, freeRequirement: (el as HTMLTextAreaElement).value };
+    } else if (el.dataset?.heField === 'custom-purpose') {
+      state = { ...state, customPurpose: (el as HTMLInputElement).value };
     }
   }
 
@@ -400,6 +433,35 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
     pendingPrompt = built.prompt;
     maybeStartGeneration();
   }
+  /** Retry after a generation failure without forcing the user to re-walk the form. */
+  function retryGeneration() {
+    if (state.step !== 'error') return;
+    if (!state.orientation || !state.layout) return;
+    const summaryChartMode = state.summaryChartMode ?? DEFAULT_SUMMARY_MODE;
+    const freeRequirement = state.freeRequirement ?? '';
+    // pendingModel is sticky; fall back to default if the picker was never shown.
+    if (!pendingModel) pendingModel = readSelectedModel();
+    if (pendingModel) deps.onModelChosen?.(pendingModel);
+    dispatch({
+      type: 'SUBMIT_REQUIREMENT',
+      freeRequirement,
+      summaryChartMode,
+      tokenWarning: false,
+      purpose: state.purpose,
+      customPurpose: state.customPurpose,
+      density: state.density,
+      readableWidth: state.readableWidth,
+      interactive: state.interactive,
+    });
+    const built = buildDirectPrompt();
+    if (!built.withinSinglePass) {
+      pendingPrompt = '';
+      dispatch({ type: 'AI_ERROR', error: t('he.error.tooLongSinglePass') });
+      return;
+    }
+    pendingPrompt = built.prompt;
+    maybeStartGeneration();
+  }
 
   /** Kick off one main-owned generation attempt: main streams the model, drives the
    *  pipeline (sanitize→resolve→quarantine→finalize), and returns opaque IDs. */
@@ -526,6 +588,8 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
         return confirmTokenWarning();
       case 'regenerate':
         return regenerate();
+      case 'retry':
+        return retryGeneration();
       case 'save-html':
         return void saveHtmlDocument();
       case 'open-saved':
@@ -623,34 +687,46 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
           `<select class="he-select" data-he-field="${fieldName}">` +
           opts.map(([v, label]) => `<option value="${v}"${v === cur ? ' selected' : ''}>${esc(label)}</option>`).join('') +
           `</select>`;
-        const detail =
-          mode === 'detail'
-            ? `
-          <label class="he-row"><span>${esc(t('he.detail.density'))}</span>${sel('density', [['compact', 'compact'], ['normal', 'normal'], ['roomy', 'roomy']], state.density)}</label>
-          <label class="he-row"><span>${esc(t('he.detail.width'))}</span>${sel('readable-width', [['narrow', 'narrow'], ['normal', 'normal'], ['wide', 'wide']], state.readableWidth)}</label>
-          <label class="he-row he-check"><input type="checkbox" data-he-field="interactive"${state.interactive ? ' checked' : ''}/> <span>${esc(t('he.detail.interactive'))}</span></label>`
-            : '';
-        // Core selection: A/B/C/D summary/chart strength.
+        // 1) Auto | Detail — top-level, not nested under advanced options.
+        const modeRow = `
+          <div class="he-q">${esc(t('he.mode.title'))}</div>
+          <div class="he-modes" role="group">
+            <button class="he-mode${mode === 'auto' ? ' he-mode-on' : ''}" data-he="mode-auto" type="button">${esc(t('he.mode.auto'))}</button>
+            <button class="he-mode${mode === 'detail' ? ' he-mode-on' : ''}" data-he="mode-detail" type="button">${esc(t('he.mode.detail'))}</button>
+          </div>`;
+        // 2) Visual / Balanced / Detailed / Source summary strength.
         const summaryButtons = SUMMARY_CHART_MODES.map(
           (m) =>
             `<button class="he-mode${m === chartMode ? ' he-mode-on' : ''}" data-he="summary-${m}" type="button" title="${esc(resolveSummaryChartPolicy(m).label)}">${esc(t(`he.summary.${m}`))}</button>`,
         ).join('');
+        // 3) Purpose always visible; density + width share one row in Detail.
+        const detailKnobs =
+          mode === 'detail'
+            ? `
+          <div class="he-detail-row">
+            <label class="he-row he-row-inline"><span>${esc(t('he.detail.density'))}</span>${sel('density', [
+              ['compact', t('he.detail.density.compact')],
+              ['normal', t('he.detail.density.normal')],
+              ['roomy', t('he.detail.density.roomy')],
+            ], state.density ?? 'normal')}</label>
+            <label class="he-row he-row-inline"><span>${esc(t('he.detail.width'))}</span>${sel('readable-width', [
+              ['narrow', t('he.detail.width.narrow')],
+              ['normal', t('he.detail.width.normal')],
+              ['wide', t('he.detail.width.wide')],
+            ], state.readableWidth ?? 'normal')}</label>
+          </div>
+          <label class="he-row he-check"><input type="checkbox" data-he-field="interactive"${state.interactive ? ' checked' : ''}/> <span>${esc(t('he.detail.interactive'))}</span></label>`
+            : '';
         return `
+          ${modeRow}
           <div class="he-q">${esc(t('he.summary.title'))}</div>
           <div class="he-modes he-summary-modes" role="group">${summaryButtons}</div>
+          <div class="he-q">${esc(t('he.purpose.title'))}</div>
+          <select class="he-select" data-he-field="purpose">${purposeOpts}</select>
+          <input class="he-input he-custom-purpose" data-he-field="custom-purpose" type="text" value="${esc(state.customPurpose ?? '')}" placeholder="${esc(t('he.purpose.custom'))}"${curPurpose === 'custom' ? '' : ' hidden'}/>
+          ${detailKnobs}
           <div class="he-q">${esc(t('he.freeReq.title'))}</div>
           <textarea class="he-textarea" data-he-field="free-requirement" rows="3" placeholder="${esc(t('he.freeReq.placeholder'))}">${esc(state.freeRequirement ?? '')}</textarea>
-          <details class="he-advanced">
-            <summary>${esc(t('he.advanced.title'))}</summary>
-            <div class="he-modes">
-              <button class="he-mode${mode === 'auto' ? ' he-mode-on' : ''}" data-he="mode-auto" type="button">${esc(t('he.mode.auto'))}</button>
-              <button class="he-mode${mode === 'detail' ? ' he-mode-on' : ''}" data-he="mode-detail" type="button">${esc(t('he.mode.detail'))}</button>
-            </div>
-            <div class="he-q">${esc(t('he.purpose.title'))}</div>
-            <select class="he-select" data-he-field="purpose">${purposeOpts}</select>
-            <input class="he-input he-custom-purpose" data-he-field="custom-purpose" type="text" value="${esc(state.customPurpose ?? '')}" placeholder="${esc(t('he.purpose.custom'))}"${curPurpose === 'custom' ? '' : ' hidden'}/>
-            ${detail}
-          </details>
           ${modelPickerHtml()}
           ${footer(
             backBtn() + `<button class="he-btn he-primary" data-he="generate-submit" type="button">${esc(t('he.generate'))}</button>`,
@@ -665,7 +741,9 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
           )}`;
 
       case 'generating':
-        return spinner(t('he.generating'));
+        return `
+          ${spinner(t('he.generating'))}
+          ${footer(cancelBtn())}`;
 
       case 'generated': {
         if (saving) return spinner(t('he.saving'));
@@ -689,9 +767,15 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
       }
 
       case 'error':
+        // Failure recovery: go back to the requirement step (settings preserved)
+        // or retry generation with the same sticky model/settings.
         return `
           <div class="he-error">${esc(state.error || t('he.error.generate'))}</div>
-          ${footer(cancelBtn() + `<button class="he-btn he-primary" data-he="back" type="button">${esc(t('he.back'))}</button>`)}`;
+          ${footer(
+            cancelBtn() +
+              `<button class="he-btn he-ghost" data-he="back" type="button">${esc(t('he.back'))}</button>` +
+              `<button class="he-btn he-primary" data-he="retry" type="button">${esc(t('he.retry'))}</button>`,
+          )}`;
 
       default:
         return '';

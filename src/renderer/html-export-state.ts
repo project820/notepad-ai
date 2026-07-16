@@ -192,8 +192,9 @@ export function htmlExportReducer(state: HtmlExportState, event: HtmlExportEvent
       return { ...state, summaryChartMode: event.mode };
 
     case 'SUBMIT_REQUIREMENT': {
-      // Valid from summary-requirement (first run) or generated (regenerate).
-      if (state.step !== 'summary-requirement' && state.step !== 'generated') return state;
+      // Valid from summary-requirement (first run), generated (regenerate), or
+      // error (retry after a generation failure — settings stay sticky).
+      if (state.step !== 'summary-requirement' && state.step !== 'generated' && state.step !== 'error') return state;
       const cfg = {
         summaryChartMode: event.summaryChartMode,
         purpose: event.purpose ?? state.purpose,
@@ -220,6 +221,7 @@ export function htmlExportReducer(state: HtmlExportState, event: HtmlExportEvent
         // A new generation invalidates any prior finalized artifact so a
         // non-generated step can never retain a saveable descriptor.
         finalized: undefined,
+        error: undefined,
       };
     }
 

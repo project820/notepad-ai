@@ -218,6 +218,24 @@ describe('htmlExportReducer — generate holds the validated content model', () 
     expect(again.step).toBe('generating');
     expect(again.summaryChartMode).toBe('C');
   });
+  it('retry path: SUBMIT_REQUIREMENT is valid from error and clears the error', () => {
+    const errored = htmlExportReducer(generating, { type: 'AI_ERROR', error: 'invalid model' });
+    const again = htmlExportReducer(errored, {
+      type: 'SUBMIT_REQUIREMENT',
+      freeRequirement: 'retry me',
+      summaryChartMode: 'B',
+    });
+    expect(again.step).toBe('generating');
+    expect(again.error).toBeUndefined();
+    expect(again.freeRequirement).toBe('retry me');
+  });
+
+  it('BACK from error returns to summary-requirement and clears the error', () => {
+    const errored = htmlExportReducer(generating, { type: 'AI_ERROR', error: 'invalid model' });
+    const back = htmlExportReducer(errored, { type: 'BACK' });
+    expect(back.step).toBe('summary-requirement');
+    expect(back.error).toBeUndefined();
+  });
 
   it('CANCEL resets to idle from anywhere', () => {
     const generated = htmlExportReducer(generating, { type: 'AI_DONE', finalized: FINALIZED });
