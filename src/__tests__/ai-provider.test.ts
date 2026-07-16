@@ -798,6 +798,40 @@ describe('ProviderRegistry local discovery is non-blocking', () => {
       .toEqual(['local-before-cloud']);
   });
 
+  it('returns HTML inventory when cloud listModels hangs past the cloud bound', async () => {
+    vi.useFakeTimers();
+    try {
+      const cache = new LocalModelCache();
+      const chatgpt = {
+        ...fakeProvider('chatgpt', true, () => {}),
+        listModels: vi.fn(() => new Promise<ModelRef[]>(() => {})),
+      } as AiProvider & { listModels: ReturnType<typeof vi.fn> };
+      const lmstudio = cacheFakeProvider('lmstudio', async () => [
+        localModelRef('lmstudio', 'local-despite-cloud-hang'),
+      ]);
+      const reg = new ProviderRegistry(
+        fakeKeyStore(),
+        {
+          chatgpt,
+          claude: fakeProvider('claude', true, () => {}),
+          openrouter: fakeProvider('openrouter', true, () => {}),
+          lmstudio,
+        },
+        cache,
+      );
+
+      const pending = reg.getAvailableModelsForHtmlExport(true);
+      await vi.advanceTimersByTimeAsync(1_500);
+      const models = await pending;
+      expect(models.filter((model) => model.provider === 'lmstudio').map((model) => model.id))
+        .toEqual(['local-despite-cloud-hang']);
+      // Curated cloud ids still present even when live cloud hang times out.
+      expect(models.some((model) => model.provider === 'chatgpt')).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('local providers report static connected auth without a network probe', async () => {
     const fetchSpy = vi.fn(() => Promise.reject(new Error('ECONNREFUSED')));
     vi.stubGlobal('fetch', fetchSpy);

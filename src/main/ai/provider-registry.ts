@@ -50,6 +50,8 @@ import {
 
 import { isProviderAuthAttemptable } from '../../shared/provider-auth-status';
 
+/** Bound cloud live-catalog wait on the HTML inventory path (local entry must not stall). */
+const HTML_CLOUD_INVENTORY_TIMEOUT_MS = 1_500;
 export type ProviderMap = Partial<Record<AiProviderId, AiProvider>>;
 
 
@@ -189,9 +191,9 @@ export class ProviderRegistry {
    * empty snapshot would falsely route the wizard to "no usable local model".
    * Discovery stays hard-bounded by LocalModelCache (500ms timeout per provider).
    *
-   * Local refresh is started (and completed) without waiting on cloud listModels:
-   * a slow/hanging cloud inventory must not starve Ollama/LM Studio discovery,
-   * because startHtmlExportWizard now awaits this method before the auth gate.
+   * Local refresh is started before cloud inventory and awaited first. Cloud
+   * listModels is also bounded: a hanging ChatGPT/live catalog must not block
+   * HTML entry after local discovery has finished (curated cloud IDs remain).
    */
   async getAvailableModelsForHtmlExport(force = false): Promise<ModelRef[]> {
     if (force) this.bumpReasoningSnapshot();
@@ -200,7 +202,7 @@ export class ProviderRegistry {
       (provider): provider is AiProvider => provider != null && provider.authKind !== 'local',
     );
     const locals = this.localProviders();
-    // Start bounded local discovery BEFORE awaiting cloud inventory.
+    // Start bounded local discovery BEFORE cloud inventory work.
     const localRefresh =
       locals.length > 0 && (force || this.localCache.isStale())
         ? this.localCache.refreshInBackground(locals)
@@ -213,10 +215,15 @@ export class ProviderRegistry {
           return [] as ModelRef[];
         }
       }),
-    );
-    // Await local first so discovery evidence is ready even if cloud is slow.
+    ).then((batches) => batches.flat());
     await localRefresh;
-    const live = (await livePromise).flat();
+    // Bound cloud wait so local-only entry is not starved by a slow live catalog.
+    const live = await Promise.race([
+      livePromise,
+      new Promise<ModelRef[]>((resolve) => {
+        setTimeout(() => resolve([]), HTML_CLOUD_INVENTORY_TIMEOUT_MS);
+      }),
+    ]);
     const seen = new Set<string>();
     const merged: ModelRef[] = [];
     for (const model of [...curated, ...live, ...this.localCache.snapshot()]) {
