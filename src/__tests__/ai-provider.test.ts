@@ -761,6 +761,42 @@ describe('ProviderRegistry local discovery is non-blocking', () => {
       .toEqual(['fresh-local']);
     expect(lmstudio.listModels).toHaveBeenCalled();
   });
+  it('starts HTML local discovery without waiting for cloud listModels', async () => {
+    const cache = new LocalModelCache();
+    let releaseCloud!: (models: ModelRef[]) => void;
+    const cloudHang = new Promise<ModelRef[]>((resolve) => {
+      releaseCloud = resolve;
+    });
+    const chatgpt = {
+      ...fakeProvider('chatgpt', true, () => {}),
+      listModels: vi.fn(() => cloudHang),
+    } as AiProvider & { listModels: ReturnType<typeof vi.fn> };
+    const lmstudio = cacheFakeProvider('lmstudio', async () => [
+      localModelRef('lmstudio', 'local-before-cloud'),
+    ]);
+    const reg = new ProviderRegistry(
+      fakeKeyStore(),
+      {
+        chatgpt,
+        claude: fakeProvider('claude', true, () => {}),
+        openrouter: fakeProvider('openrouter', true, () => {}),
+        lmstudio,
+      },
+      cache,
+    );
+
+    const pending = reg.getAvailableModelsForHtmlExport(true);
+    // Local discovery is bounded and must finish while cloud is still hanging.
+    await vi.waitFor(() => {
+      expect(cache.snapshot().map((model) => model.id)).toEqual(['local-before-cloud']);
+    });
+    expect(chatgpt.listModels).toHaveBeenCalled();
+
+    releaseCloud([]);
+    const models = await pending;
+    expect(models.filter((model) => model.provider === 'lmstudio').map((model) => model.id))
+      .toEqual(['local-before-cloud']);
+  });
 
   it('local providers report static connected auth without a network probe', async () => {
     const fetchSpy = vi.fn(() => Promise.reject(new Error('ECONNREFUSED')));

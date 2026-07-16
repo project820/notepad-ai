@@ -188,6 +188,10 @@ export class ProviderRegistry {
    * uses the returned local providers as capability evidence, so a fire-and-forget
    * empty snapshot would falsely route the wizard to "no usable local model".
    * Discovery stays hard-bounded by LocalModelCache (500ms timeout per provider).
+   *
+   * Local refresh is started (and completed) without waiting on cloud listModels:
+   * a slow/hanging cloud inventory must not starve Ollama/LM Studio discovery,
+   * because startHtmlExportWizard now awaits this method before the auth gate.
    */
   async getAvailableModelsForHtmlExport(force = false): Promise<ModelRef[]> {
     if (force) this.bumpReasoningSnapshot();
@@ -195,20 +199,24 @@ export class ProviderRegistry {
     const cloudProviders = Object.values(this.providers).filter(
       (provider): provider is AiProvider => provider != null && provider.authKind !== 'local',
     );
-    const live = (
-      await Promise.all(cloudProviders.map(async (provider) => {
+    const locals = this.localProviders();
+    // Start bounded local discovery BEFORE awaiting cloud inventory.
+    const localRefresh =
+      locals.length > 0 && (force || this.localCache.isStale())
+        ? this.localCache.refreshInBackground(locals)
+        : Promise.resolve();
+    const livePromise = Promise.all(
+      cloudProviders.map(async (provider) => {
         try {
           return applyModelDisplayPolicy(await provider.listModels());
         } catch {
           return [] as ModelRef[];
         }
-      }))
-    ).flat();
-    const locals = this.localProviders();
-    if (locals.length > 0 && (force || this.localCache.isStale())) {
-      // Await on HTML only: capability gate needs discovery evidence, not a stale snapshot.
-      await this.localCache.refreshInBackground(locals);
-    }
+      }),
+    );
+    // Await local first so discovery evidence is ready even if cloud is slow.
+    await localRefresh;
+    const live = (await livePromise).flat();
     const seen = new Set<string>();
     const merged: ModelRef[] = [];
     for (const model of [...curated, ...live, ...this.localCache.snapshot()]) {
