@@ -222,6 +222,13 @@ export class HtmlExportPipelineService {
       });
       return reject('HTML sanitizer rejected model output');
     }
+    if (sanitized.stripped.length > 0) {
+      void logWarn('html-export-pipeline', 'sanitizer stripped model output', {
+        attemptId,
+        strippedCount: sanitized.stripped.length,
+        violationCodes: sanitized.stripped.slice(0, 8).join(','),
+      });
+    }
     if (!sameCounts(sanitized.counts, parsed.value.counts)) {
       return reject('HTML sanitizer counts do not match parse worker counts');
     }

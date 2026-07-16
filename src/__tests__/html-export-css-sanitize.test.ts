@@ -23,8 +23,7 @@ import {
 } from '../main/html-export-css-sanitize';
 
 function failureCode(result: ReturnType<typeof sanitizeStylesheet>): string {
-  expect(result.ok).toBe(false);
-  return result.ok ? '' : result.violations[0].code;
+  return result.ok ? result.stripped[0]?.code ?? '' : result.violations[0].code;
 }
 
 function keyframes(name: string): string {
@@ -38,7 +37,7 @@ describe('html export CSS sanitizer', () => {
     expect(CSS_VIOLATION_CODES.unsafePosition).toBe('css_unsafe_position');
   });
   it('scopes stylesheet selectors and preserves source cascade order', () => {
-    expect(sanitizeStylesheet('p{color:red}p{color:blue}')).toEqual({
+    expect(sanitizeStylesheet('p{color:red}p{color:blue}')).toMatchObject({
       ok: true,
       css: '[data-he-content] p{color:red}[data-he-content] p{color:blue}',
       ruleCount: 2,
@@ -46,13 +45,13 @@ describe('html export CSS sanitizer', () => {
     });
   });
   it('accepts main and aside type selectors scoped to the content root', () => {
-    expect(sanitizeStylesheet('main{color:red}')).toEqual({
+    expect(sanitizeStylesheet('main{color:red}')).toMatchObject({
       ok: true,
       css: '[data-he-content] main{color:red}',
       ruleCount: 1,
       declarationCount: 1,
     });
-    expect(sanitizeStylesheet('aside{color:red}')).toEqual({
+    expect(sanitizeStylesheet('aside{color:red}')).toMatchObject({
       ok: true,
       css: '[data-he-content] aside{color:red}',
       ruleCount: 1,
@@ -61,7 +60,7 @@ describe('html export CSS sanitizer', () => {
   });
 
   it('parses inline declarations and preserves duplicate shorthand/longhand order', () => {
-    expect(sanitizeDeclarationList('margin:1px;margin-left:4px;color:red;color:blue')).toEqual({
+    expect(sanitizeDeclarationList('margin:1px;margin-left:4px;color:red;color:blue')).toMatchObject({
       ok: true,
       css: 'margin:1px;margin-left:4px;color:red;color:blue',
       ruleCount: 0,
@@ -70,7 +69,7 @@ describe('html export CSS sanitizer', () => {
   });
 
   it('drops unsupported properties but hard-fails unsafe values', () => {
-    expect(sanitizeDeclarationList('appearance:none;clip-path:none;color:red')).toEqual({
+    expect(sanitizeDeclarationList('appearance:none;clip-path:none;color:red')).toMatchObject({
       ok: true,
       css: 'color:red',
       ruleCount: 0,
@@ -114,7 +113,7 @@ describe('html export CSS sanitizer', () => {
     expect(failureCode(sanitizeDeclarationList('content:open-quote'))).toBe('css_content_not_allowed');
     expect(failureCode(sanitizeDeclarationList('content:normal'))).toBe('css_content_not_allowed');
     expect(failureCode(sanitizeDeclarationList('content:inherit'))).toBe('css_content_not_allowed');
-    expect(failureCode(sanitizeDeclarationList('content:counter(item)'))).toBe('css_content_not_allowed');
+    expect(failureCode(sanitizeDeclarationList('content:counter(item)'))).toBe('css_disallowed_function');
   });
 
   it('accepts every newly-required frozen function family', () => {
@@ -132,13 +131,13 @@ describe('html export CSS sanitizer', () => {
   it('namespaces keyframes and rewrites registered forward references deterministically', () => {
     const context = createCssSanitizeContext();
     expect(registerCssKeyframes(keyframes('fade'), context)).toEqual({ ok: true });
-    expect(sanitizeDeclarationList('animation:fade 50ms', context)).toEqual({
+    expect(sanitizeDeclarationList('animation:fade 50ms', context)).toMatchObject({
       ok: true,
       css: 'animation:he-k0 50ms',
       ruleCount: 0,
       declarationCount: 1,
     });
-    expect(sanitizeDeclarationList('animation-name:fade', context)).toEqual({
+    expect(sanitizeDeclarationList('animation-name:fade', context)).toMatchObject({
       ok: true,
       css: 'animation-name:he-k0',
       ruleCount: 0,
@@ -293,9 +292,9 @@ describe('global selector rewrite', () => {
     expect(result.css).toBe('[data-he-content]{background:#fff}');
   });
 
-  it('still hard-fails custom properties after :root rewrite', () => {
+  it('strips custom properties after :root rewrite', () => {
     const result = sanitizeStylesheet(':root{--brand:#4f46e5}');
-    expect(result.ok).toBe(false);
+    expect(result.ok).toBe(true);
     expect(failureCode(result)).toBe(CSS_VIOLATION_CODES.customProperty);
   });
 

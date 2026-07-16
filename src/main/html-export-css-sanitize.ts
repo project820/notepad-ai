@@ -101,7 +101,7 @@ export function cssRejectedCode<T extends CssRejectedSubcode>(inner: T): `css_re
   return `css_rejected.${inner}`;
 }
 export type CssSanitizeResult =
-  | { ok: true; css: string; ruleCount: number; declarationCount: number }
+  | { ok: true; css: string; ruleCount: number; declarationCount: number; stripped: CssViolation[] }
   | { ok: false; violations: CssViolation[] };
 export type CssContextRegistrationResult = { ok: true } | { ok: false; violations: CssViolation[] };
 
@@ -119,6 +119,7 @@ export interface CssSanitizeContext {
   keyframes: Map<string, string>;
   consumedKeyframes: Set<string>;
   nextKeyframeSequence: number;
+  stripped: CssViolation[];
 }
 
 type Failure = { violation: CssViolation };
@@ -163,6 +164,7 @@ export function createCssSanitizeContext(): CssSanitizeContext {
     keyframes: new Map(),
     consumedKeyframes: new Set(),
     nextKeyframeSequence: 0,
+    stripped: [],
   };
 }
 
@@ -353,6 +355,10 @@ function validateGlobalRootShape(selector: any): Failure | null {
 
 function violationResult(failure: Failure): CssSanitizeResult {
   return { ok: false, violations: [failure.violation] };
+}
+
+function strip(context: CssSanitizeContext, failure: Failure): void {
+  context.stripped.push(failure.violation);
 }
 
 function countRawBytes(input: string, context: CssSanitizeContext): Failure | null {
@@ -699,52 +705,43 @@ function validateNumericCaps(property: string, value: any, context: CssSanitizeC
   return null;
 }
 
-function sanitizeDeclarations(block: any, context: CssSanitizeContext, counts: Counts): string | Failure {
+function sanitizeDeclarations(block: any, context: CssSanitizeContext, counts: Counts): string {
   const output: string[] = [];
   const declarations = children(block);
   if (declarations.length > CSS_MAX_DECLARATIONS_PER_RULE) {
-    return fail(CSS_VIOLATION_CODES.tooManyDeclarationsPerRule, `rule has more than ${CSS_MAX_DECLARATIONS_PER_RULE} declarations`);
+    strip(context, fail(CSS_VIOLATION_CODES.tooManyDeclarationsPerRule, `rule has more than ${CSS_MAX_DECLARATIONS_PER_RULE} declarations`));
+    return '';
   }
   for (const declaration of declarations) {
-    if (declaration.type !== 'Declaration') return fail(CSS_VIOLATION_CODES.parseError, 'invalid declaration');
+    if (declaration.type !== 'Declaration') { strip(context, fail(CSS_VIOLATION_CODES.parseError, 'invalid declaration')); continue; }
     context.seenDeclarations++;
-    if (context.seenDeclarations > CSS_MAX_DECLARATIONS) return fail(CSS_VIOLATION_CODES.tooManyDeclarations, `more than ${CSS_MAX_DECLARATIONS} declarations`);
+    if (context.seenDeclarations > CSS_MAX_DECLARATIONS) { strip(context, fail(CSS_VIOLATION_CODES.tooManyDeclarations, `more than ${CSS_MAX_DECLARATIONS} declarations`)); break; }
     const property = String(declaration.property).toLowerCase();
-    if (declaration.important) return fail(CSS_VIOLATION_CODES.important, `!important on ${property}`);
-    if (property.startsWith('--')) return fail(CSS_VIOLATION_CODES.customProperty, `custom property ${property}`);
-    if (property === 'content') {
-      const contentFailure = validateContent(declaration.value);
-      if (contentFailure) return contentFailure;
-    }
-    const valueFailure = validateValue(declaration.value);
-    if (valueFailure) return valueFailure;
-    if (!PROPERTY_SET.has(property)) continue;
-    const numericFailure = validateNumericCaps(property, declaration.value, context);
-    if (numericFailure) return numericFailure;
-    const value = generated(declaration.value);
-    if (lexer.matchProperty(property, value).error) continue;
-    output.push(`${property}:${value}`);
+    let failure: Failure | null = declaration.important ? fail(CSS_VIOLATION_CODES.important, `!important on ${property}`) : null;
+    if (!failure && property.startsWith('--')) failure = fail(CSS_VIOLATION_CODES.customProperty, `custom property ${property}`);
+    if (!failure) failure = validateValue(declaration.value);
+    if (!failure && PROPERTY_SET.has(property)) failure = validateNumericCaps(property, declaration.value, context);
+    if (failure) { strip(context, failure); continue; }
+    if (!PROPERTY_SET.has(property) || lexer.matchProperty(property, generated(declaration.value)).error) continue;
+    output.push(`${property}:${generated(declaration.value)}`);
     counts.declarationCount++;
   }
   return output.join(';');
 }
 
-function sanitizeRule(rule: any, context: CssSanitizeContext, counts: Counts): string | Failure {
+function sanitizeRule(rule: any, context: CssSanitizeContext, counts: Counts): string {
   const ruleFailure = countRule(context, false);
-  if (ruleFailure) return ruleFailure;
+  if (ruleFailure) { strip(context, ruleFailure); return ''; }
   const selectors = children(rule.prelude);
-  if (!selectors.length) return fail(CSS_VIOLATION_CODES.parseError, 'rule without selectors');
-  if (selectors.length > CSS_MAX_SELECTORS_PER_RULE) return fail(CSS_VIOLATION_CODES.tooManySelectors, `rule has more than ${CSS_MAX_SELECTORS_PER_RULE} selectors`);
+  if (!selectors.length) { strip(context, fail(CSS_VIOLATION_CODES.parseError, 'rule without selectors')); return ''; }
+  if (selectors.length > CSS_MAX_SELECTORS_PER_RULE) { strip(context, fail(CSS_VIOLATION_CODES.tooManySelectors, `rule has more than ${CSS_MAX_SELECTORS_PER_RULE} selectors`)); return ''; }
   const outputSelectors: string[] = [];
   for (const selector of selectors) {
-    const selectorFailure = validateSelector(selector);
-    if (selectorFailure) return selectorFailure;
-    const shapeFailure = validateGlobalRootShape(selector);
-    if (shapeFailure) return shapeFailure;
+    const failure = validateSelector(selector) ?? validateGlobalRootShape(selector);
+    if (failure) { strip(context, failure); return ''; }
     outputSelectors.push(scopeSelector(selector));
   }
   const declarations = sanitizeDeclarations(rule.block, context, counts);
-  if (isFailure(declarations)) return declarations;
   if (declarations) counts.ruleCount++;
   return declarations ? `${outputSelectors.join(',')}{${declarations}}` : '';
 }
@@ -807,7 +804,6 @@ function sanitizeKeyframes(atRule: any, context: CssSanitizeContext, counts: Cou
       return fail(CSS_VIOLATION_CODES.disallowedSelector, 'invalid keyframe selector');
     }
     const declarations = sanitizeDeclarations(frame.block, context, counts);
-    if (isFailure(declarations)) return declarations;
     if (declarations) {
       counts.ruleCount++;
       output.push(`${selectors.map(generated).join(',')}{${declarations}}`);
@@ -850,11 +846,18 @@ function sanitizeNodes(nodes: any[], context: CssSanitizeContext, counts: Counts
 function sanitize(input: unknown, kind: 'stylesheet' | 'declarationList', context: CssSanitizeContext): CssSanitizeResult {
   try {
     if (typeof input !== 'string') return violationResult(fail(CSS_VIOLATION_CODES.parseError, 'CSS must be a string'));
-    const byteFailure = countRawBytes(input, context);
-    if (byteFailure) return violationResult(byteFailure);
+    const strippedStart = context.stripped.length;
+    let source = input;
+    const remaining = CSS_MAX_STYLESHEET_BYTES - context.rawBytes;
+    if (Buffer.byteLength(source, 'utf8') > remaining) {
+      const prefix = Buffer.from(source, 'utf8').subarray(0, Math.max(0, remaining)).toString('utf8');
+      source = kind === 'stylesheet' ? prefix.slice(0, prefix.lastIndexOf('}') + 1) : prefix.slice(0, prefix.lastIndexOf(';') + 1);
+      strip(context, fail(CSS_VIOLATION_CODES.tooLarge, `document CSS exceeds ${CSS_MAX_STYLESHEET_BYTES} bytes`));
+    }
+    context.rawBytes += Buffer.byteLength(source, 'utf8');
     let ast: any;
     try {
-      ast = parse(input, { context: kind, positions: false });
+      ast = parse(source, { context: kind, positions: false });
     } catch {
       return violationResult(fail(CSS_VIOLATION_CODES.parseError, 'CSS parse failed'));
     }
@@ -865,7 +868,7 @@ function sanitize(input: unknown, kind: 'stylesheet' | 'declarationList', contex
         : sanitizeDeclarations(ast, context, counts);
       return isFailure(css)
         ? violationResult(css)
-        : { ok: true, css, ruleCount: counts.ruleCount, declarationCount: counts.declarationCount };
+        : { ok: true, css, ruleCount: counts.ruleCount, declarationCount: counts.declarationCount, stripped: context.stripped.slice(strippedStart) };
     } catch {
       return violationResult(fail(CSS_VIOLATION_CODES.internal, 'sanitizer internal failure'));
     }

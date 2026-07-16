@@ -22,20 +22,20 @@ function sanitize(html: string, opts: { requireStructuralDocument?: boolean } = 
   return sanitizeHtmlExport({ html, isAllowedAssetId: () => true, ...opts });
 }
 
-function failureCode(html: string, opts: { requireStructuralDocument?: boolean } = {}): string {
+function dispositionCode(html: string, opts: { requireStructuralDocument?: boolean } = {}): string {
   const result = sanitize(html, opts);
-  expect(result.ok).toBe(false);
-  return result.ok ? '' : result.violations[0].code;
+  return result.ok ? result.stripped[0] ?? '' : result.violations[0].code;
 }
+const failureCode = dispositionCode;
+const failureCodeWithParse = dispositionCodeWithParse;
 
 function injectedParse(document: unknown): HtmlExportParse {
   return (() => document as DefaultTreeAdapterTypes.Document) as HtmlExportParse;
 }
 
-function failureCodeWithParse(document: unknown): string {
+function dispositionCodeWithParse(document: unknown): string {
   const result = sanitizeHtmlExport({ html: '', parse: injectedParse(document), isAllowedAssetId: () => false });
-  expect(result.ok).toBe(false);
-  return result.ok ? '' : result.violations[0].code;
+  return result.ok ? result.stripped[0] ?? '' : result.violations[0].code;
 }
 
 function documentWithTextNodes(count: number): DefaultTreeAdapterTypes.Document {
@@ -115,11 +115,11 @@ describe('sanitizeHtmlExport', () => {
     'iframe', 'object', 'embed', 'base', 'frame', 'frameset', 'applet', 'script', 'link', 'template',
     'slot', 'form', 'input', 'button',
   ])('rejects active tag <%s>', (tag) => {
-    expect(failureCodeWithParse(documentWithElement(tag))).toBe('html_active_tag');
+    expect(dispositionCodeWithParse(documentWithElement(tag))).toBe('html_active_tag');
   });
 
   it('rejects meta http-equiv as an active redirect surface', () => {
-    expect(failureCodeWithParse(documentWithElement('meta', [{ name: 'http-equiv', value: 'refresh' }]))).toBe('html_active_tag');
+    expect(dispositionCodeWithParse(documentWithElement('meta', [{ name: 'http-equiv', value: 'refresh' }]))).toBe('html_active_tag');
   });
 
   it.each([
@@ -134,14 +134,14 @@ describe('sanitizeHtmlExport', () => {
     ['xlink:href', '<svg><use xlink:href="#x"></use></svg>', 'html_reserved_namespace'],
     ['empty fragment href', '<a href="#">x</a>', 'html_url'],
   ])('rejects URL-bearing %s attribute', (_name, html, code) => {
-    expect(failureCode(html)).toBe(code);
+    expect(dispositionCode(html)).toBe(code);
   });
 
   it('rejects event handlers and app shell/runtime namespace preseed', () => {
-    expect(failureCode('<p onclick="x">x</p>')).toBe('html_event_handler');
-    expect(failureCode('<p data-he-layout="slides">x</p>')).toBe('html_reserved_namespace');
-    expect(failureCode('<p class="he-shell">x</p>')).toBe('html_reserved_namespace');
-    expect(failureCode('<p id="runtime-root">x</p>')).toBe('html_reserved_namespace');
+    expect(dispositionCode('<p onclick="x">x</p>')).toBe('html_event_handler');
+    expect(dispositionCode('<p data-he-layout="slides">x</p>')).toBe('html_reserved_namespace');
+    expect(dispositionCode('<p class="he-shell">x</p>')).toBe('html_reserved_namespace');
+    expect(dispositionCode('<p id="runtime-root">x</p>')).toBe('html_reserved_namespace');
   });
 
   it.each([
@@ -156,17 +156,20 @@ describe('sanitizeHtmlExport', () => {
     ['wrong prefix', 'assets:abcdefghijklmnop', false],
     ['uppercase prefix', 'ASSET:abcdefghijklmnop', false],
     ['dot in opaque ID', 'asset:abcdefghijklmno.', false],
-  ])('enforces opaque asset grammar: %s', (_name, src, accepted) => {
+  ])('strips invalid opaque asset IDs: %s', (_name, src, accepted) => {
     const result = sanitize(`<img src="${src}">`);
-    expect(result.ok).toBe(accepted);
-    if (!accepted && !result.ok) expect(result.violations[0].code).toBe('html_asset_id');
+    expect(result.ok).toBe(true);
+    if (!accepted && result.ok) {
+      expect(result.stripped).toContain('html_asset_id');
+      expect(result.bodyHtml).not.toContain(src);
+    }
   });
 
   it('accepts fragment-only links and source asset IDs', () => {
     const result = sanitize('<a href="#details">Details</a><picture><source src="asset:abcdefghijklmnop"></picture>');
     expect(result.ok).toBe(true);
   });
-  it('requires an allowed asset ID predicate and rejects denied syntactically valid asset IDs', () => {
+  it('strips denied syntactically valid asset IDs', () => {
     const allowed = sanitizeHtmlExport({
       html: '<img src="asset:abcdefghijklmnop">',
       isAllowedAssetId: (src) => src === 'asset:abcdefghijklmnop',
@@ -176,7 +179,8 @@ describe('sanitizeHtmlExport', () => {
       isAllowedAssetId: () => false,
     });
     expect(allowed.ok).toBe(true);
-    expect(denied.ok).toBe(false);
+    expect(denied.ok).toBe(true);
+    if (denied.ok) expect(denied.stripped).toContain('html_asset_id');
   });
 
   it.each([
@@ -187,10 +191,11 @@ describe('sanitizeHtmlExport', () => {
     'asset:abcdefghijklmnop?q=x',
     'asset:abcdefghijklmnop#x',
     'asset:abcdefghijklm%20',
-  ])('does not let a permissive asset validator authorize unsafe src %s', (src) => {
+  ])('strips unsafe src even with a permissive asset validator: %s', (src) => {
     const result = sanitizeHtmlExport({ html: `<img src="${src}">`, isAllowedAssetId: () => true });
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.violations[0].code).toBe('html_asset_id');
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.stripped).toContain('html_asset_id');
+    if (result.ok) expect(result.bodyHtml).not.toContain(src);
   });
 
   it('extracts stylesheet rules and non-empty inline styles with deterministic markers', () => {
@@ -221,26 +226,30 @@ describe('sanitizeHtmlExport', () => {
     expect(result.contentCss).toContain('@keyframes he-k0{from{opacity:0}to{opacity:1}}');
   });
 
-  it('surfaces CSS rejection subcodes without putting violation details in the code', () => {
+  it('strips CSS rejection subcodes without leaking violation details into codes', () => {
     const stylesheet = sanitize('<style>.x{background:url(https://example.test/x)}</style><p>safe</p>');
-    expect(stylesheet.ok).toBe(false);
-    if (!stylesheet.ok) expect(stylesheet.violations[0].code).toBe('css_rejected.css_network_function_not_allowed');
+    expect(stylesheet).toMatchObject({ ok: true, stripped: ['css_rejected.css_network_function_not_allowed'] });
 
     const inline = sanitize('<p style="color:red!important">safe</p>');
-    expect(inline.ok).toBe(false);
-    if (!inline.ok) {
-      expect(inline.violations[0].code).toBe('css_rejected.css_important_not_allowed');
-      expect(inline.violations[0].code).not.toContain('color');
-      expect(inline.violations[0].code).not.toContain('!important on color');
+    expect(inline).toMatchObject({ ok: true, stripped: ['css_rejected.css_important_not_allowed'] });
+    if (inline.ok) {
+      expect(inline.bodyHtml).not.toContain('style=');
+      expect(inline.stripped.join()).not.toContain('color');
     }
   });
-  it('preflights oversized malformed CSS before stylesheet registration can parse it', () => {
+  it('strips oversized malformed CSS before stylesheet registration can parse it', () => {
     const result = sanitize(`<style>${'@'.repeat(CSS_MAX_STYLESHEET_BYTES + 1)}</style>`);
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.violations[0].code).toBe('css_rejected.css_too_large');
-      expect(result.violations[0].detail).toBe(`document CSS exceeds ${CSS_MAX_STYLESHEET_BYTES} bytes`);
-    }
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.stripped).toContain('css_rejected.css_too_large');
+  });
+  it('keeps the document and ordinary rules while stripping :is() sticky declarations', () => {
+    const result = sanitize('<style>:is(.note){position:sticky;color:red}.plain{color:blue}</style><p class="note">Kept</p><p class="plain">Also kept</p>');
+    expect(result).toMatchObject({ ok: true, stripped: ['css_rejected.css_unsafe_position'] });
+    if (!result.ok) return;
+    expect(result.bodyHtml).toContain('Kept');
+    expect(result.contentCss).toContain(':is(.note){color:red}');
+    expect(result.contentCss).toContain('.plain{color:blue}');
+    expect(result.contentCss).not.toContain('sticky');
   });
 
   it('gives active and style-node attribute failures precedence over malformed nested CSS', () => {
@@ -273,7 +282,7 @@ describe('sanitizeHtmlExport', () => {
     expect(failureCode(html)).toBe(code);
   });
 
-  it('enforces CSS byte caps across multiple stylesheet and inline surfaces', () => {
+  it('strips CSS that exceeds aggregate byte caps across surfaces', () => {
     const exact = sanitize(
       `<style>${cssComment(CSS_MAX_STYLESHEET_BYTES - 8)}</style><style>/**/</style><p style="/**/">x</p>`,
     );
@@ -283,11 +292,7 @@ describe('sanitizeHtmlExport', () => {
     const past = sanitize(
       `<style>${cssComment(CSS_MAX_STYLESHEET_BYTES - 8)}</style><style>/**/</style><p style="/*x*/">x</p>`,
     );
-    expect(past.ok).toBe(false);
-    if (!past.ok) {
-      expect(past.violations[0].code).toBe('css_rejected.css_too_large');
-      expect(past.violations[0].detail).toBe(`document CSS exceeds ${CSS_MAX_STYLESHEET_BYTES} bytes`);
-    }
+    expect(past).toMatchObject({ ok: true, stripped: ['css_rejected.css_too_large'] });
   });
 
   it('enforces CSS rule and keyframe caps across separate style blocks', () => {
@@ -390,10 +395,14 @@ describe('sanitizeHtmlExport', () => {
     ['escaped import at-keyword', '@\\69mport x', 'css_rejected.svg_attribute'],
     ['ordinary curl text', 'curl(', null],
     ['ordinary important text', '@important', null],
-  ])('applies SVG CSS token boundaries through the HTML sanitizer: %s', (_name, label, code) => {
+  ])('strips SVG CSS token surfaces while retaining the SVG: %s', (_name, label, code) => {
     const result = sanitize(`<svg aria-label="${label}"><path d="M0 0"/></svg>`);
-    expect(result.ok).toBe(code === null);
-    if (code !== null && !result.ok) expect(result.violations[0].code).toBe(code);
+    expect(result.ok).toBe(true);
+    if (code !== null && result.ok) {
+      expect(result.stripped).toContain(code);
+      expect(result.bodyHtml).toContain('<svg');
+      expect(result.bodyHtml).not.toContain(label);
+    }
   });
 
   it('preserves SVG text while omitting formatting-only whitespace during document reconstruction', () => {

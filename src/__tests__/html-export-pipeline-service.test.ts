@@ -261,10 +261,10 @@ describe('HtmlExportPipelineService', () => {
     expect(firstResult.ok && firstResult.value.artifact.sha256).toBe(digest(first.registry.transitions[0].bytes));
   });
 
-  it('maps sanitizer rejection and worker rejection to pipeline-reject while preserving worker caps', async () => {
+  it('strips sanitizer violations while preserving worker rejections', async () => {
     const sanitizer = serviceFor();
     const sanitizerAttempt = start(sanitizer.service);
-    const sanitizerRaw = valueOf(sanitizer.service.storeRawModelOutput(1, sanitizerAttempt, '<script>alert(1)</script>'));
+    const sanitizerRaw = valueOf(sanitizer.service.storeRawModelOutput(1, sanitizerAttempt, '<section><script>alert(1)</script><p>safe</p></section>'));
     const sanitizerResult = await sanitizer.service.sanitize(1, sanitizerAttempt, sanitizerRaw.id);
 
     const worker = serviceFor();
@@ -273,22 +273,20 @@ describe('HtmlExportPipelineService', () => {
     const workerRaw = valueOf(worker.service.storeRawModelOutput(1, workerAttempt, '<p>worker cap</p>'));
     const workerResult = await worker.service.sanitize(1, workerAttempt, workerRaw.id);
 
-    expect(sanitizerResult.ok ? '' : sanitizerResult.error.kind).toBe('pipeline-reject');
+    expect(sanitizerResult.ok).toBe(true);
     expect(workerResult.ok ? '' : workerResult.error.kind).toBe('pipeline-oversize');
   });
 
-  it('rejects an unissued asset:<id> <img> src fail-closed (the direct path issues no asset IDs)', async () => {
+
+  it('removes an unissued asset:<id> image while preserving the document', async () => {
     const { service, registry } = serviceFor();
     const attemptId = start(service);
-    // asset:aaaaaaaaaaaaaaaa is a syntactically valid opaque ID (>=16 chars) that
-    // was never issued. With the pipeline's empty allowlist it must be rejected,
-    // not finalized as a broken image.
     const raw = valueOf(
-      service.storeRawModelOutput(1, attemptId, '<section><h1>t</h1><img src="asset:aaaaaaaaaaaaaaaa"></section>'),
+      service.storeRawModelOutput(1, attemptId, '<section><h1>t</h1><img src="asset:aaaaaaaaaaaaaaaa" alt="diagram"></section>'),
     );
     const result = await service.sanitize(1, attemptId, raw.id);
-    expect(result.ok ? '' : result.error.kind).toBe('pipeline-reject');
-    expect(registry.transitions).toHaveLength(0);
+    expect(result.ok).toBe(true);
+    expect(registry.transitions).toHaveLength(1);
   });
 
   it('rejects mismatched worker node, depth, and attribute counts before a registry transition', async () => {
