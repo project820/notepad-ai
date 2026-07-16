@@ -27,12 +27,51 @@ const FINAL_RESULT = {
   route: { provider: 'chatgpt', model: 'gpt-5.4-mini', transport: 'cli' },
 } as unknown as GenerationAttemptResult;
 
-/** A non-final (failed/partial) result — no finalized artifact to save. */
+/** Non-final failures with explicit pipeline stages and kinds. */
 const FAILED_RESULT = {
   state: 'failed',
-  attemptId: 'attempt-1',
+  stage: 'generate',
+  kind: 'pipeline-reject',
   route: { provider: 'chatgpt', model: 'gpt-5.4-mini', transport: 'cli' },
 } as unknown as GenerationAttemptResult;
+
+const SANITIZE_FAILED_RESULT = {
+  state: 'failed',
+  stage: 'sanitize',
+  kind: 'pipeline-reject',
+  route: { provider: 'chatgpt', model: 'gpt-5.4-mini', transport: 'cli' },
+} as unknown as GenerationAttemptResult;
+
+const LAYOUT_QUARANTINE_FAILED_RESULT = {
+  state: 'failed',
+  stage: 'quarantine',
+  kind: 'layout-violation',
+  route: { provider: 'chatgpt', model: 'gpt-5.4-mini', transport: 'cli' },
+} as unknown as GenerationAttemptResult;
+
+const INFRASTRUCTURE_QUARANTINE_FAILED_RESULT = {
+  state: 'failed',
+  stage: 'quarantine',
+  kind: 'quarantine-unavailable',
+  route: { provider: 'chatgpt', model: 'gpt-5.4-mini', transport: 'cli' },
+} as unknown as GenerationAttemptResult;
+
+const PARTIAL_LAYOUT_RESULT = {
+  state: 'partial',
+  attemptId: 'attempt-1',
+  resolvedArtifactId: 'resolved-1',
+  quarantineKind: 'layout-violation',
+  route: { provider: 'chatgpt', model: 'gpt-5.4-mini', transport: 'cli' },
+  callCount: 1,
+} as unknown as GenerationAttemptResult;
+
+const GENERATION_ERROR_CASES: ReadonlyArray<readonly [GenerationAttemptResult, string]> = [
+  [FAILED_RESULT, 'he.error.generate'],
+  [SANITIZE_FAILED_RESULT, 'he.error.sanitize'],
+  [LAYOUT_QUARANTINE_FAILED_RESULT, 'he.error.containment'],
+  [INFRASTRUCTURE_QUARANTINE_FAILED_RESULT, 'he.error.generate'],
+  [PARTIAL_LAYOUT_RESULT, 'he.error.containment'],
+];
 
 function setup(over: Partial<HtmlExportDeps> = {}, markdown = '# Title\n\nSome body.') {
   const host = document.createElement('div');
@@ -400,18 +439,19 @@ describe('mountHtmlExportWizard — viewport + abandon invalidation', () => {
 });
 
 describe('mountHtmlExportWizard — a non-final generation result surfaces an error', () => {
-  it('a failed/partial pipeline result → error step (no finalized artifact to save)', async () => {
+  it.each(GENERATION_ERROR_CASES)('maps %s to the localized error key', async (result, expectedError) => {
     const { host, handle } = setup({
-      generateHtmlExport: vi.fn(async () => FAILED_RESULT),
+      generateHtmlExport: vi.fn(async () => result),
     });
     click(host, 'orient-vertical');
     click(host, 'layout-scroll');
     click(host, 'design-default');
     setField(host, 'free-requirement', '');
     click(host, 'generate-submit');
-    await flush();
+    await settle(() => handle.getState().step === 'error');
     expect(handle.getState().step).toBe('error');
-    expect(host.querySelector('.he-error')).toBeTruthy();
+    expect(handle.getState().error).toBe(expectedError);
+    expect(host.querySelector('.he-error')?.textContent).toContain(expectedError);
   });
 
   it('invalidates the non-final attempt via cancelHtmlGeneration before the error state', async () => {
