@@ -242,6 +242,7 @@ export const en: Dict = {
     'he.continue': 'Continue',
     'he.generate': 'Generate',
     'he.fetching': 'Fetching the design…',
+    'he.entry.loading': 'Preparing HTML export…',
     'he.design.galleryLink': 'Open getdesign.md',
     'he.error.save': 'Could not save the file. Please try again.',
     'he.summary.title': 'Visual style',

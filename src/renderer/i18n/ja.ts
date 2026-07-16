@@ -107,7 +107,7 @@ export const ja: Dict = {
     'he.model': 'モデル',
     'he.tokenWarning': '文書が長いため、一部が切り捨てられる場合があります。', 'he.generating': '生成中…', 'he.regenerate': '再生成',
     'he.error.fetch': 'デザインを取得できませんでした。名前または URL を確認するか、既定のデザインを使用してください。', 'he.error.generate': '生成に失敗しました。もう一度お試しください。', 'he.error.sanitize': '生成された HTML/CSS を受け入れられませんでした。もう一度試し、フォントサイズには rem/em ではなく px を使い、外部リンクや画像を含めないでください。', 'he.error.tooLongSinglePass': '文書が長すぎて単一パスの HTML エクスポートができません（30,000 文字超）。短縮してからもう一度お試しください。',
-    'he.back': '戻る', 'he.cancel': 'キャンセル', 'he.continue': '続ける', 'he.generate': '生成', 'he.fetching': 'デザインを取得中…',
+    'he.back': '戻る', 'he.cancel': 'キャンセル', 'he.continue': '続ける', 'he.generate': '生成', 'he.fetching': 'デザインを取得中…', 'he.entry.loading': 'HTML エクスポートを準備中…',
     'he.design.galleryLink': 'getdesign.md を開く', 'he.error.save': 'ファイルを保存できませんでした。もう一度お試しください。',
     'he.summary.title': '表現スタイル', 'he.summary.A': 'ビジュアル', 'he.summary.B': 'バランス', 'he.summary.C': '詳細', 'he.summary.D': '原文', 'he.freeReq.title': '要望', 'he.freeReq.placeholder': '対象読者・強調点・残す/省く内容など、希望を自由に記入…', 'he.advanced.title': '詳細オプション', 'he.design.useDefault': '既定のデザインを使用', 'he.result.modelReady': 'コンテンツの準備完了',
     'he.saving': '保存中…', 'he.result.readyToSave': 'コンテンツの準備ができました。単一の自己完結型 HTML ファイルとして保存します。', 'he.result.save': 'HTML を保存', 'he.result.open': 'ブラウザで開く', 'he.result.saved': '保存しました。ブラウザで開けます。', 'he.error.containment': '選択したレイアウト内にコンテンツを収められませんでした。要約レベルを下げるか、スクロールレイアウトをお試しください。', 'he.error.notSelfContained': '生成された文書が完全な自己完結型ではなかったため保存しませんでした。もう一度お試しください。',
