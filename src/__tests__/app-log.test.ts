@@ -307,6 +307,38 @@ describe('app-log', () => {
     expect(oldReaddir).toHaveBeenCalledTimes(1);
     expect(newReaddir).toHaveBeenCalledTimes(1);
   });
+  it('does not let a stale prune mark a replacement logger as pruned', async () => {
+    let resolveOldReaddir: (names: string[]) => void = () => undefined;
+    const oldReaddir = vi.fn(() => new Promise<string[]>((resolve) => {
+      resolveOldReaddir = resolve;
+    }));
+    configureAppLog({
+      logDir: () => 'old-logs',
+      now: () => Date.parse('2026-07-16T12:00:00.000Z'),
+      appendFile: async () => undefined,
+      readdir: oldReaddir,
+      unlink: async () => undefined,
+      mkdir: async () => undefined,
+    });
+    await appLog('info', 'boot', 'old write');
+
+    const newReaddir = vi.fn(async () => []);
+    configureAppLog({
+      logDir: () => 'new-logs',
+      now: () => Date.parse('2026-07-16T12:00:00.000Z'),
+      appendFile: async () => undefined,
+      readdir: newReaddir,
+      unlink: async () => undefined,
+      mkdir: async () => undefined,
+    });
+
+    resolveOldReaddir([]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await appLog('info', 'boot', 'new write');
+
+    expect(oldReaddir).toHaveBeenCalledTimes(1);
+    expect(newReaddir).toHaveBeenCalledTimes(1);
+  });
   it('retries a failed prune after an overlapping write', async () => {
     let rejectFirstReaddir: (reason?: unknown) => void = () => undefined;
     const firstReaddir = new Promise<string[]>((_, reject) => {

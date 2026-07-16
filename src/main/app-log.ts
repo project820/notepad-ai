@@ -151,7 +151,7 @@ async function ensureDir(): Promise<string | null> {
   }
 }
 
-async function pruneExpired(dir: string): Promise<boolean> {
+async function pruneExpired(dir: string, generation: number): Promise<boolean> {
   if (!deps) return true;
   const today = utcDay(clock());
   if (lastPruneDay === today) return true;
@@ -175,7 +175,7 @@ async function pruneExpired(dir: string): Promise<boolean> {
       return true;
     }),
   );
-  if (pruneSucceeded.every(Boolean)) {
+  if (pruneSucceeded.every(Boolean) && generation === pruneGeneration) {
     lastPruneDay = today;
     return true;
   }
@@ -195,7 +195,7 @@ function schedulePrune(dir: string, retryAfterFailure = true): void {
     pruneRetryRequested = false;
     if (retry) schedulePrune(dir, false);
   };
-  pruneInFlight = pruneExpired(dir).then(finish, () => finish(false));
+  pruneInFlight = pruneExpired(dir, generation).then(finish, () => finish(false));
 }
 
 /**
