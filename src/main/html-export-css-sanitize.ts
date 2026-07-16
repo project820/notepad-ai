@@ -101,13 +101,14 @@ export function cssRejectedCode<T extends CssRejectedSubcode>(inner: T): `css_re
   return `css_rejected.${inner}`;
 }
 export type CssSanitizeResult =
-  | { ok: true; css: string; ruleCount: number; declarationCount: number }
+  | { ok: true; css: string; ruleCount: number; declarationCount: number; stripped: CssViolation[] }
   | { ok: false; violations: CssViolation[] };
 export type CssContextRegistrationResult = { ok: true } | { ok: false; violations: CssViolation[] };
 
 /**
  * Document-scoped accounting for multiple model <style> nodes and style attributes.
- * Callers that need forward animation references must pre-register every stylesheet first.
+ * Callers that need forward animation references must pre-register every surviving
+ * stylesheet first.
  */
 export interface CssSanitizeContext {
   registrationBytes: number;
@@ -119,6 +120,7 @@ export interface CssSanitizeContext {
   keyframes: Map<string, string>;
   consumedKeyframes: Set<string>;
   nextKeyframeSequence: number;
+  stripped: CssViolation[];
 }
 
 type Failure = { violation: CssViolation };
@@ -163,6 +165,7 @@ export function createCssSanitizeContext(): CssSanitizeContext {
     keyframes: new Map(),
     consumedKeyframes: new Set(),
     nextKeyframeSequence: 0,
+    stripped: [],
   };
 }
 
@@ -355,12 +358,10 @@ function violationResult(failure: Failure): CssSanitizeResult {
   return { ok: false, violations: [failure.violation] };
 }
 
-function countRawBytes(input: string, context: CssSanitizeContext): Failure | null {
-  context.rawBytes += Buffer.byteLength(input, 'utf8');
-  return context.rawBytes > CSS_MAX_STYLESHEET_BYTES
-    ? fail(CSS_VIOLATION_CODES.tooLarge, `document CSS exceeds ${CSS_MAX_STYLESHEET_BYTES} bytes`)
-    : null;
+function strip(context: CssSanitizeContext, failure: Failure): void {
+  context.stripped.push(failure.violation);
 }
+
 
 function countRule(context: CssSanitizeContext, atRule: boolean): Failure | null {
   if (atRule) context.seenAtRuleNodes++;
@@ -420,9 +421,13 @@ export function registerCssKeyframes(css: string, context: CssSanitizeContext): 
   try {
     const definitions: any[] = [];
     walk(ast, { enter(node: any) { if (node.type === 'Atrule' && String(node.name).toLowerCase() === 'keyframes') definitions.push(node); } });
+    const validationContext = createCssSanitizeContext();
+    const counts: Counts = { ruleCount: 0, declarationCount: 0 };
     for (const definition of definitions) {
       const name = keyframeName(definition);
       if (isFailure(name)) return { ok: false, violations: [name.violation] };
+      const frames = sanitizeKeyframeFrames(definition, validationContext, counts);
+      if (isFailure(frames) || !frames) continue;
       const scoped = allocateKeyframe(name, context, false);
       if (isFailure(scoped)) return { ok: false, violations: [scoped.violation] };
     }
@@ -699,52 +704,44 @@ function validateNumericCaps(property: string, value: any, context: CssSanitizeC
   return null;
 }
 
-function sanitizeDeclarations(block: any, context: CssSanitizeContext, counts: Counts): string | Failure {
+function sanitizeDeclarations(block: any, context: CssSanitizeContext, counts: Counts): string {
   const output: string[] = [];
   const declarations = children(block);
   if (declarations.length > CSS_MAX_DECLARATIONS_PER_RULE) {
-    return fail(CSS_VIOLATION_CODES.tooManyDeclarationsPerRule, `rule has more than ${CSS_MAX_DECLARATIONS_PER_RULE} declarations`);
+    strip(context, fail(CSS_VIOLATION_CODES.tooManyDeclarationsPerRule, `rule has more than ${CSS_MAX_DECLARATIONS_PER_RULE} declarations`));
+    return '';
   }
   for (const declaration of declarations) {
-    if (declaration.type !== 'Declaration') return fail(CSS_VIOLATION_CODES.parseError, 'invalid declaration');
+    if (declaration.type !== 'Declaration') { strip(context, fail(CSS_VIOLATION_CODES.parseError, 'invalid declaration')); continue; }
     context.seenDeclarations++;
-    if (context.seenDeclarations > CSS_MAX_DECLARATIONS) return fail(CSS_VIOLATION_CODES.tooManyDeclarations, `more than ${CSS_MAX_DECLARATIONS} declarations`);
+    if (context.seenDeclarations > CSS_MAX_DECLARATIONS) { strip(context, fail(CSS_VIOLATION_CODES.tooManyDeclarations, `more than ${CSS_MAX_DECLARATIONS} declarations`)); break; }
     const property = String(declaration.property).toLowerCase();
-    if (declaration.important) return fail(CSS_VIOLATION_CODES.important, `!important on ${property}`);
-    if (property.startsWith('--')) return fail(CSS_VIOLATION_CODES.customProperty, `custom property ${property}`);
-    if (property === 'content') {
-      const contentFailure = validateContent(declaration.value);
-      if (contentFailure) return contentFailure;
-    }
-    const valueFailure = validateValue(declaration.value);
-    if (valueFailure) return valueFailure;
-    if (!PROPERTY_SET.has(property)) continue;
-    const numericFailure = validateNumericCaps(property, declaration.value, context);
-    if (numericFailure) return numericFailure;
+    let failure: Failure | null = declaration.important ? fail(CSS_VIOLATION_CODES.important, `!important on ${property}`) : null;
+    if (!failure && property.startsWith('--')) failure = fail(CSS_VIOLATION_CODES.customProperty, `custom property ${property}`);
+    if (!failure) failure = validateValue(declaration.value);
+    if (!failure && PROPERTY_SET.has(property)) failure = validateNumericCaps(property, declaration.value, context);
+    if (failure) { strip(context, failure); continue; }
     const value = generated(declaration.value);
-    if (lexer.matchProperty(property, value).error) continue;
+    if (!PROPERTY_SET.has(property) || lexer.matchProperty(property, value).error) continue;
     output.push(`${property}:${value}`);
     counts.declarationCount++;
   }
   return output.join(';');
 }
 
-function sanitizeRule(rule: any, context: CssSanitizeContext, counts: Counts): string | Failure {
+function sanitizeRule(rule: any, context: CssSanitizeContext, counts: Counts): string {
   const ruleFailure = countRule(context, false);
-  if (ruleFailure) return ruleFailure;
+  if (ruleFailure) { strip(context, ruleFailure); return ''; }
   const selectors = children(rule.prelude);
-  if (!selectors.length) return fail(CSS_VIOLATION_CODES.parseError, 'rule without selectors');
-  if (selectors.length > CSS_MAX_SELECTORS_PER_RULE) return fail(CSS_VIOLATION_CODES.tooManySelectors, `rule has more than ${CSS_MAX_SELECTORS_PER_RULE} selectors`);
+  if (!selectors.length) { strip(context, fail(CSS_VIOLATION_CODES.parseError, 'rule without selectors')); return ''; }
+  if (selectors.length > CSS_MAX_SELECTORS_PER_RULE) { strip(context, fail(CSS_VIOLATION_CODES.tooManySelectors, `rule has more than ${CSS_MAX_SELECTORS_PER_RULE} selectors`)); return ''; }
   const outputSelectors: string[] = [];
   for (const selector of selectors) {
-    const selectorFailure = validateSelector(selector);
-    if (selectorFailure) return selectorFailure;
-    const shapeFailure = validateGlobalRootShape(selector);
-    if (shapeFailure) return shapeFailure;
+    const failure = validateSelector(selector) ?? validateGlobalRootShape(selector);
+    if (failure) { strip(context, failure); return ''; }
     outputSelectors.push(scopeSelector(selector));
   }
   const declarations = sanitizeDeclarations(rule.block, context, counts);
-  if (isFailure(declarations)) return declarations;
   if (declarations) counts.ruleCount++;
   return declarations ? `${outputSelectors.join(',')}{${declarations}}` : '';
 }
@@ -755,7 +752,7 @@ function validateAtRulePrelude(atRule: any): Failure | null {
   const nodes = valueNodes(atRule.prelude);
   if (name === 'media') {
     for (const node of nodes) {
-      if (node?.type === 'MediaQuery' && node.mediaType && String(node.mediaType).toLowerCase() !== 'print') return fail(CSS_VIOLATION_CODES.disallowedAtRule, `media type ${node.mediaType}`);
+      if (node?.type === 'MediaQuery' && node.mediaType && !['print', 'screen'].includes(String(node.mediaType).toLowerCase())) return fail(CSS_VIOLATION_CODES.disallowedAtRule, `media type ${node.mediaType}`);
       if (node?.type === 'Feature' && !MEDIA_FEATURES.has(String(node.name).toLowerCase())) return fail(CSS_VIOLATION_CODES.disallowedAtRule, `media feature ${node.name}`);
     }
   }
@@ -788,11 +785,7 @@ function validateAtRulePrelude(atRule: any): Failure | null {
   return null;
 }
 
-function sanitizeKeyframes(atRule: any, context: CssSanitizeContext, counts: Counts): string | Failure {
-  const name = keyframeName(atRule);
-  if (isFailure(name)) return name;
-  const scopedName = allocateKeyframe(name, context, true);
-  if (isFailure(scopedName)) return scopedName;
+function sanitizeKeyframeFrames(atRule: any, context: CssSanitizeContext, counts: Counts): string | Failure {
   const frames = children(atRule.block);
   let effectiveFrameCount = 0;
   const output: string[] = [];
@@ -807,13 +800,23 @@ function sanitizeKeyframes(atRule: any, context: CssSanitizeContext, counts: Cou
       return fail(CSS_VIOLATION_CODES.disallowedSelector, 'invalid keyframe selector');
     }
     const declarations = sanitizeDeclarations(frame.block, context, counts);
-    if (isFailure(declarations)) return declarations;
     if (declarations) {
       counts.ruleCount++;
       output.push(`${selectors.map(generated).join(',')}{${declarations}}`);
     }
   }
-  return output.length ? `@keyframes ${scopedName}{${output.join('')}}` : '';
+  return output.join('');
+}
+
+function sanitizeKeyframes(atRule: any, context: CssSanitizeContext, counts: Counts): string | Failure {
+  const name = keyframeName(atRule);
+  if (isFailure(name)) return name;
+  const frames = sanitizeKeyframeFrames(atRule, context, counts);
+  if (isFailure(frames)) return frames;
+  if (!frames) return '';
+  const scopedName = allocateKeyframe(name, context, true);
+  if (isFailure(scopedName)) return scopedName;
+  return `@keyframes ${scopedName}{${frames}}`;
 }
 
 function sanitizeNodes(nodes: any[], context: CssSanitizeContext, counts: Counts, depth: number): string | Failure {
@@ -826,22 +829,40 @@ function sanitizeNodes(nodes: any[], context: CssSanitizeContext, counts: Counts
       if (rule) output.push(rule);
       continue;
     }
-    if (node.type !== 'Atrule') return fail(CSS_VIOLATION_CODES.parseError, 'invalid stylesheet node');
+    if (node.type !== 'Atrule') {
+      strip(context, fail(CSS_VIOLATION_CODES.parseError, 'invalid stylesheet node'));
+      continue;
+    }
     const atRuleFailure = countRule(context, true);
-    if (atRuleFailure) return atRuleFailure;
+    if (atRuleFailure) { strip(context, atRuleFailure); continue; }
     const name = String(node.name).toLowerCase();
-    if (!AT_RULE_SET.has(name)) return fail(CSS_VIOLATION_CODES.disallowedAtRule, `@${name}`);
+    if (!AT_RULE_SET.has(name)) {
+      strip(context, fail(CSS_VIOLATION_CODES.disallowedAtRule, `@${name}`));
+      continue;
+    }
     if (name === 'keyframes') {
       const keyframes = sanitizeKeyframes(node, context, counts);
-      if (isFailure(keyframes)) return keyframes;
+      if (isFailure(keyframes)) {
+        strip(context, keyframes);
+        continue;
+      }
       if (keyframes) output.push(keyframes);
       continue;
     }
     const preludeFailure = validateAtRulePrelude(node);
-    if (preludeFailure) return preludeFailure;
-    if (!node.block) return fail(CSS_VIOLATION_CODES.disallowedAtRule, `@${name} without block`);
+    if (preludeFailure) {
+      strip(context, preludeFailure);
+      continue;
+    }
+    if (!node.block) {
+      strip(context, fail(CSS_VIOLATION_CODES.disallowedAtRule, `@${name} without block`));
+      continue;
+    }
     const content = sanitizeNodes(children(node.block), context, counts, depth + 1);
-    if (isFailure(content)) return content;
+    if (isFailure(content)) {
+      strip(context, content);
+      continue;
+    }
     if (content) output.push(`@${name} ${generated(node.prelude)}{${content}}`);
   }
   return output.join('');
@@ -850,11 +871,19 @@ function sanitizeNodes(nodes: any[], context: CssSanitizeContext, counts: Counts
 function sanitize(input: unknown, kind: 'stylesheet' | 'declarationList', context: CssSanitizeContext): CssSanitizeResult {
   try {
     if (typeof input !== 'string') return violationResult(fail(CSS_VIOLATION_CODES.parseError, 'CSS must be a string'));
-    const byteFailure = countRawBytes(input, context);
-    if (byteFailure) return violationResult(byteFailure);
+    const strippedStart = context.stripped.length;
+    let source = input;
+    const sourceBytes = Buffer.byteLength(source, 'utf8');
+    const remaining = CSS_MAX_STYLESHEET_BYTES - context.rawBytes;
+    if (sourceBytes > remaining) {
+      const prefix = Buffer.from(source, 'utf8').subarray(0, Math.max(0, remaining)).toString('utf8');
+      source = kind === 'stylesheet' ? prefix.slice(0, prefix.lastIndexOf('}') + 1) : prefix.slice(0, prefix.lastIndexOf(';') + 1);
+      strip(context, fail(CSS_VIOLATION_CODES.tooLarge, `document CSS exceeds ${CSS_MAX_STYLESHEET_BYTES} bytes`));
+    }
+    context.rawBytes += Math.min(sourceBytes, Math.max(0, remaining));
     let ast: any;
     try {
-      ast = parse(input, { context: kind, positions: false });
+      ast = parse(source, { context: kind, positions: false });
     } catch {
       return violationResult(fail(CSS_VIOLATION_CODES.parseError, 'CSS parse failed'));
     }
@@ -865,7 +894,7 @@ function sanitize(input: unknown, kind: 'stylesheet' | 'declarationList', contex
         : sanitizeDeclarations(ast, context, counts);
       return isFailure(css)
         ? violationResult(css)
-        : { ok: true, css, ruleCount: counts.ruleCount, declarationCount: counts.declarationCount };
+        : { ok: true, css, ruleCount: counts.ruleCount, declarationCount: counts.declarationCount, stripped: context.stripped.slice(strippedStart) };
     } catch {
       return violationResult(fail(CSS_VIOLATION_CODES.internal, 'sanitizer internal failure'));
     }

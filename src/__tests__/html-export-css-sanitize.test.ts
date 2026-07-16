@@ -23,8 +23,7 @@ import {
 } from '../main/html-export-css-sanitize';
 
 function failureCode(result: ReturnType<typeof sanitizeStylesheet>): string {
-  expect(result.ok).toBe(false);
-  return result.ok ? '' : result.violations[0].code;
+  return result.ok ? result.stripped[0]?.code ?? '' : result.violations[0].code;
 }
 
 function keyframes(name: string): string {
@@ -38,21 +37,33 @@ describe('html export CSS sanitizer', () => {
     expect(CSS_VIOLATION_CODES.unsafePosition).toBe('css_unsafe_position');
   });
   it('scopes stylesheet selectors and preserves source cascade order', () => {
-    expect(sanitizeStylesheet('p{color:red}p{color:blue}')).toEqual({
+    expect(sanitizeStylesheet('p{color:red}p{color:blue}')).toMatchObject({
       ok: true,
       css: '[data-he-content] p{color:red}[data-he-content] p{color:blue}',
       ruleCount: 2,
       declarationCount: 2,
     });
   });
+  it('strips invalid at-rules without discarding valid sibling rules', () => {
+    const result = sanitizeStylesheet('@import url(x);p{color:red}.note{font-weight:700}span{color:blue}');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.css).toContain('[data-he-content] p{color:red}');
+    expect(result.css).toContain('[data-he-content] .note{font-weight:700}');
+    expect(result.css).toContain('[data-he-content] span{color:blue}');
+    expect(result.css).not.toContain('@import');
+    expect(result.stripped).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: CSS_VIOLATION_CODES.disallowedAtRule }),
+    ]));
+  });
   it('accepts main and aside type selectors scoped to the content root', () => {
-    expect(sanitizeStylesheet('main{color:red}')).toEqual({
+    expect(sanitizeStylesheet('main{color:red}')).toMatchObject({
       ok: true,
       css: '[data-he-content] main{color:red}',
       ruleCount: 1,
       declarationCount: 1,
     });
-    expect(sanitizeStylesheet('aside{color:red}')).toEqual({
+    expect(sanitizeStylesheet('aside{color:red}')).toMatchObject({
       ok: true,
       css: '[data-he-content] aside{color:red}',
       ruleCount: 1,
@@ -61,7 +72,7 @@ describe('html export CSS sanitizer', () => {
   });
 
   it('parses inline declarations and preserves duplicate shorthand/longhand order', () => {
-    expect(sanitizeDeclarationList('margin:1px;margin-left:4px;color:red;color:blue')).toEqual({
+    expect(sanitizeDeclarationList('margin:1px;margin-left:4px;color:red;color:blue')).toMatchObject({
       ok: true,
       css: 'margin:1px;margin-left:4px;color:red;color:blue',
       ruleCount: 0,
@@ -70,7 +81,7 @@ describe('html export CSS sanitizer', () => {
   });
 
   it('drops unsupported properties but hard-fails unsafe values', () => {
-    expect(sanitizeDeclarationList('appearance:none;clip-path:none;color:red')).toEqual({
+    expect(sanitizeDeclarationList('appearance:none;clip-path:none;color:red')).toMatchObject({
       ok: true,
       css: 'color:red',
       ruleCount: 0,
@@ -114,7 +125,7 @@ describe('html export CSS sanitizer', () => {
     expect(failureCode(sanitizeDeclarationList('content:open-quote'))).toBe('css_content_not_allowed');
     expect(failureCode(sanitizeDeclarationList('content:normal'))).toBe('css_content_not_allowed');
     expect(failureCode(sanitizeDeclarationList('content:inherit'))).toBe('css_content_not_allowed');
-    expect(failureCode(sanitizeDeclarationList('content:counter(item)'))).toBe('css_content_not_allowed');
+    expect(failureCode(sanitizeDeclarationList('content:counter(item)'))).toBe('css_disallowed_function');
   });
 
   it('accepts every newly-required frozen function family', () => {
@@ -132,13 +143,13 @@ describe('html export CSS sanitizer', () => {
   it('namespaces keyframes and rewrites registered forward references deterministically', () => {
     const context = createCssSanitizeContext();
     expect(registerCssKeyframes(keyframes('fade'), context)).toEqual({ ok: true });
-    expect(sanitizeDeclarationList('animation:fade 50ms', context)).toEqual({
+    expect(sanitizeDeclarationList('animation:fade 50ms', context)).toMatchObject({
       ok: true,
       css: 'animation:he-k0 50ms',
       ruleCount: 0,
       declarationCount: 1,
     });
-    expect(sanitizeDeclarationList('animation-name:fade', context)).toEqual({
+    expect(sanitizeDeclarationList('animation-name:fade', context)).toMatchObject({
       ok: true,
       css: 'animation-name:he-k0',
       ruleCount: 0,
@@ -149,6 +160,23 @@ describe('html export CSS sanitizer', () => {
     expect(failureCode(sanitizeDeclarationList('animation:100ms linear linear', context))).toBe('css_unresolved_animation');
     expect(sanitizeDeclarationList('animation:none 100ms', context)).toMatchObject({ ok: true, css: 'animation:none 100ms' });
     expect(sanitizeDeclarationList('animation:100ms linear fade', context)).toMatchObject({ ok: true, css: 'animation:100ms linear he-k0' });
+  });
+  it('only registers keyframes with surviving frames', () => {
+    const rejected = '.x{animation:fade 100ms}@keyframes fade{from{background:url(https://example.test/x)}}';
+    const rejectedContext = createCssSanitizeContext();
+    expect(registerCssKeyframes(rejected, rejectedContext)).toEqual({ ok: true });
+    const rejectedResult = sanitizeStylesheet(rejected, rejectedContext);
+    expect(rejectedResult).toMatchObject({ ok: true, css: '' });
+    expect(rejectedResult.ok && rejectedResult.stripped.map((violation) => violation.code)).toContain('css_unresolved_animation');
+    expect(JSON.stringify(rejectedResult)).not.toContain('he-k0');
+
+    const accepted = '.x{animation:fade 100ms}@keyframes fade{from{opacity:0}to{opacity:1}}';
+    const acceptedContext = createCssSanitizeContext();
+    expect(registerCssKeyframes(accepted, acceptedContext)).toEqual({ ok: true });
+    expect(sanitizeStylesheet(accepted, acceptedContext)).toMatchObject({
+      ok: true,
+      css: '[data-he-content] .x{animation:he-k0 100ms}@keyframes he-k0{from{opacity:0}to{opacity:1}}',
+    });
   });
 
   it('rejects unresolved, duplicate, reserved, and ambiguous keyframe names', () => {
@@ -172,6 +200,20 @@ describe('html export CSS sanitizer', () => {
     const context = createCssSanitizeContext();
     expect(sanitizeDeclarationList(' '.repeat(CSS_MAX_STYLESHEET_BYTES), context).ok).toBe(true);
     expect(failureCode(sanitizeDeclarationList(' ', context))).toBe('css_too_large');
+  });
+  it('charges the aggregate byte budget for truncated surfaces', () => {
+    const context = createCssSanitizeContext();
+    const junk = '@'.repeat(CSS_MAX_STYLESHEET_BYTES + 1);
+    const safeRule = 'p{color:red}';
+    const safeSurface = `${' '.repeat(CSS_MAX_STYLESHEET_BYTES - Buffer.byteLength(safeRule, 'utf8'))}${safeRule}`;
+    const truncated = sanitizeStylesheet(junk, context);
+    const following = sanitizeStylesheet(safeSurface, context);
+
+    expect(failureCode(truncated)).toBe('css_too_large');
+    expect(failureCode(following)).toBe('css_too_large');
+    expect(context.rawBytes).toBe(CSS_MAX_STYLESHEET_BYTES);
+    expect(truncated.ok && following.ok ? Buffer.byteLength(`${truncated.css}${following.css}`, 'utf8') : 0)
+      .toBeLessThanOrEqual(CSS_MAX_STYLESHEET_BYTES);
   });
 
   it('enforces a separate aggregate registration byte budget', () => {
@@ -293,9 +335,9 @@ describe('global selector rewrite', () => {
     expect(result.css).toBe('[data-he-content]{background:#fff}');
   });
 
-  it('still hard-fails custom properties after :root rewrite', () => {
+  it('strips custom properties after :root rewrite', () => {
     const result = sanitizeStylesheet(':root{--brand:#4f46e5}');
-    expect(result.ok).toBe(false);
+    expect(result.ok).toBe(true);
     expect(failureCode(result)).toBe(CSS_VIOLATION_CODES.customProperty);
   });
 

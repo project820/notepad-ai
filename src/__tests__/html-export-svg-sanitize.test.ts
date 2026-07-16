@@ -72,14 +72,14 @@ describe('SVG preflight and reconstruction', () => {
     expect(preflight(`<svg><path d="M0 0" transform="${transform} translate(1)"/></svg>`).ok).toBe(false);
   });
 
-  it('rejects over-cap SVG attributes before token parsing while retaining CSS scans for every attribute', () => {
+  it('strips over-cap SVG attributes while retaining CSS scans for every attribute', () => {
     const overCap = 'é'.repeat((SVG_ATTRIBUTE_MAX_BYTES / 2) + 1);
     const capped = preflight(`<svg><path d="M0 0" fill="${overCap}"/></svg>`);
     expect(capped).toMatchObject({
       ok: false,
       violation: { code: 'html_svg_rejected' },
     });
-    if (!capped.ok) expect(capped.violation.detail).toContain(`exceeds ${SVG_ATTRIBUTE_MAX_BYTES} bytes`);
+    expect(capped.stripped).toContain('html_svg_rejected');
     expect(preflight('<svg><path d="M0 0" data-ignored="u/**/rl(https://e.test/x)"/></svg>')).toMatchObject({
       ok: false,
       violation: { code: 'css_rejected.svg_attribute' },

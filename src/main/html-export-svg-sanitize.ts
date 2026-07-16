@@ -26,9 +26,12 @@ type SvgPlanNodeChild = SvgPlanNode | { text: string };
 type UseReference = { href: string };
 
 export type SvgRootPlan = SvgPlanNode;
-export type SvgPreflightResult =
-  | { ok: true; plans: Map<Node, SvgRootPlan> }
-  | { ok: false; violation: { code: SvgViolationCode; detail: string } };
+export type SvgPreflightResult = {
+  ok: boolean;
+  plans: Map<Node, SvgRootPlan>;
+  stripped: SvgViolationCode[];
+  violation?: { code: SvgViolationCode; detail: string };
+};
 
 const ACTIVE_SVG_TAGS = new Set([
   'script', 'foreignobject', 'image', 'style', 'animate', 'set', 'animatemotion', 'animatetransform',
@@ -529,6 +532,7 @@ function validateRoot(
   root: Element,
   idCounts: Map<string, number>,
   isReservedValue: (value: string) => boolean,
+  stripped: SvgViolationCode[],
 ): SvgRootPlan | SvgFailure {
   const ids = new Map<string, SvgPlanNode>();
   const uses: UseReference[] = [];
@@ -550,38 +554,44 @@ function validateRoot(
     const seen = new Set<string>();
     // Drop the routine default SVG xmlns declaration parse5 marks as namespaced.
     const sourceAttrs = attrs(node).filter((attribute) => !isIgnorableSvgXmlnsDeclaration(attribute));
+    const rejectAttribute = (code: SvgViolationCode): void => {
+      stripped.push(code);
+    };
     for (const attribute of sourceAttrs) {
-      if (attribute.name.toLowerCase().startsWith('on')) return fail('html_event_handler', `event handler attribute ${attribute.name}`);
-    }
-    for (const attribute of sourceAttrs) {
+      const rawName = attribute.name.toLowerCase();
+      if (rawName.startsWith('on')) {
+        rejectAttribute('html_event_handler');
+        continue;
+      }
       // Reject real foreign prefixes/namespaces (xlink:, xml:, custom). Empty-string
       // prefix alone is not enough evidence of a foreign attr after xmlns filtering.
       if ((attribute.namespace != null && attribute.namespace !== '') || (attribute.prefix != null && attribute.prefix !== '')) {
-        return fail('html_reserved_namespace', `namespaced SVG attribute ${attribute.name}`);
+        rejectAttribute('html_reserved_namespace');
+        continue;
       }
-    }
-    for (const attribute of sourceAttrs) {
       if (Buffer.byteLength(attribute.value, 'utf8') > SVG_ATTRIBUTE_MAX_BYTES) {
-        return fail('html_svg_rejected', `SVG attribute ${attribute.name} exceeds ${SVG_ATTRIBUTE_MAX_BYTES} bytes`);
+        rejectAttribute('html_svg_rejected');
+        continue;
       }
-    }
-    for (const attribute of sourceAttrs) {
-      const canonical = ATTRIBUTE_CANONICAL.get(attribute.name.toLowerCase());
+      const canonical = ATTRIBUTE_CANONICAL.get(rawName);
       if (canonical === 'href' && (!/^#[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(attribute.value) || tag !== 'use')) {
-        return fail('html_url', 'SVG href must be an internal use fragment');
+        rejectAttribute('html_url');
+        continue;
       }
-    }
-    for (const attribute of sourceAttrs) {
-      if (hasCssUrlOrImport(attribute.value) || attribute.name.toLowerCase() === 'style') {
-        return fail(cssRejectedCode('svg_attribute'), `CSS surface in SVG attribute ${attribute.name}`);
+      if (hasCssUrlOrImport(attribute.value) || rawName === 'style') {
+        rejectAttribute(cssRejectedCode('svg_attribute'));
+        continue;
       }
-    }
-    const allowed = allowedAttributes(tag);
-    for (const attribute of sourceAttrs) {
-      const canonical = ATTRIBUTE_CANONICAL.get(attribute.name.toLowerCase());
-      if (!canonical || !allowed.has(canonical) || seen.has(canonical)) return fail('html_svg_rejected', `SVG attribute ${attribute.name} is not allowed on ${rawTag}`);
+      const allowed = allowedAttributes(tag);
+      if (!canonical || !allowed.has(canonical) || seen.has(canonical)) {
+        rejectAttribute('html_svg_rejected');
+        continue;
+      }
+      if (!validateAttributeValue(tag, canonical, attribute.value, isReservedValue)) {
+        rejectAttribute('html_svg_rejected');
+        continue;
+      }
       seen.add(canonical);
-      if (!validateAttributeValue(tag, canonical, attribute.value, isReservedValue)) return fail('html_svg_rejected', `invalid SVG ${canonical}`);
       outputAttrs.push({ name: canonical, value: attribute.value });
     }
     if (tag === 'use') {
@@ -626,19 +636,18 @@ function validateRoot(
 /** Preflights all SVG roots before generic HTML/CSS handling. */
 export function preflightSvgSubtrees(root: Node, isReservedValue: (value: string) => boolean): SvgPreflightResult {
   const plans = new Map<Node, SvgRootPlan>();
+  const stripped: SvgViolationCode[] = [];
   const idCounts = collectDocumentIdCounts(root);
-  let failure: SvgFailure | null = null;
   const visit = (node: Node): void => {
-    if (failure) return;
     const name = lowerName(node);
     if (name === 'svg') {
       if ((node as Element).namespaceURI !== SVG_NAMESPACE) {
-        failure = fail('html_reserved_namespace', 'svg root has a non-SVG namespace');
+        stripped.push('html_reserved_namespace');
         return;
       }
-      const plan = validateRoot(node as Element, idCounts, isReservedValue);
+      const plan = validateRoot(node as Element, idCounts, isReservedValue, stripped);
       if ('violation' in plan) {
-        failure = plan;
+        stripped.push(plan.violation.code);
         return;
       }
       plans.set(node, plan);
@@ -647,10 +656,12 @@ export function preflightSvgSubtrees(root: Node, isReservedValue: (value: string
     for (const child of childNodes(node)) visit(child);
   };
   visit(root);
-  if (failure !== null) {
-    return { ok: false, violation: (failure as SvgFailure).violation };
-  }
-  return { ok: true, plans };
+  return {
+    ok: stripped.length === 0,
+    plans,
+    stripped,
+    ...(stripped.length > 0 ? { violation: { code: stripped[0], detail: 'stripped SVG surface' } } : {}),
+  };
 }
 
 function makeText(value: string, parentNode: ParentNode | null): DefaultTreeAdapterTypes.TextNode {
