@@ -12,8 +12,8 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
 export const APP_LOG_RETENTION_DAYS = 3;
-export const APP_LOG_LINE_MAX_CHARS = 4_000;
-export const APP_LOG_FIELD_MAX_CHARS = 512;
+const APP_LOG_LINE_MAX_CHARS = 4_000;
+const APP_LOG_FIELD_MAX_CHARS = 512;
 
 export type AppLogLevel = 'info' | 'warn' | 'error';
 
@@ -104,10 +104,6 @@ export function parseAppLogDayFromFileName(name: string): string | null {
 export function configureAppLog(next: AppLogDeps): void {
   deps = next;
   lastPruneDay = '';
-}
-
-export function isAppLogConfigured(): boolean {
-  return deps != null;
 }
 
 async function ensureDir(): Promise<string | null> {
