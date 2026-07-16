@@ -265,6 +265,17 @@ describe('sanitizeHtmlExport', () => {
     expect(result.contentCss).not.toContain('animation:he-k');
     expect(result.stripped).toContain('css_rejected.css_unresolved_animation');
   });
+  it.each([
+    ['discarded object', '<object><style>@keyframes k {from{opacity:0}}</style></object>'],
+    ['unsafe SVG', '<svg><style>@keyframes k {from{opacity:0}}</style></svg>'],
+  ])('does not register keyframes from %s styles', (_name, discardedMarkup) => {
+    const result = sanitize(`${discardedMarkup}<div style="animation:k 100ms">x</div>`);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.contentCss).not.toContain('@keyframes he-k');
+    expect(result.contentCss).not.toContain('animation:he-k');
+    expect(result.stripped).toContain('css_rejected.css_unresolved_animation');
+  });
 
   it('pre-registers keyframes across style blocks before sanitizing forward animation references', () => {
     const result = sanitize(
@@ -463,13 +474,25 @@ describe('sanitizeHtmlExport', () => {
     if (!result.ok) return;
     expect(result.bodyHtml).toBe('<svg><text>&lt;&amp;<tspan> &gt; </tspan></text></svg>');
   });
-  it('preserves text when an unsafe SVG is dropped wholesale', () => {
+  it('does not preserve foreignObject text when an unsafe SVG is dropped wholesale', () => {
     const result = sanitize('<svg><foreignObject><text>Fallback label</text></foreignObject></svg>');
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.bodyHtml).toContain('Fallback label');
+    expect(result.bodyHtml).not.toContain('Fallback label');
     expect(result.bodyHtml).not.toContain('<svg');
     expect(result.stripped).toContain('html_active_tag');
+  });
+  it('falls back to SVG text without leaking style or script source', () => {
+    const styled = sanitize('<svg><style>path{fill:red}</style><text>Chart</text></svg>');
+    expect(styled.ok).toBe(true);
+    if (styled.ok) {
+      expect(styled.bodyHtml).toContain('Chart');
+      expect(styled.bodyHtml).not.toContain('path{fill:red}');
+    }
+
+    const scripted = sanitize('<svg><script>alert(1)</script></svg>');
+    expect(scripted.ok).toBe(true);
+    if (scripted.ok) expect(scripted.bodyHtml).not.toContain('alert(1)');
   });
 
   it.each([

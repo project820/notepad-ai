@@ -123,6 +123,8 @@ const ACTIVE_TAGS = new Set([
   'iframe', 'object', 'embed', 'base', 'frame', 'frameset', 'applet', 'script', 'link', 'template',
   'slot', 'form', 'input', 'button',
 ]);
+const SVG_FALLBACK_TEXT_TAGS = new Set(['text', 'tspan', 'title', 'desc']);
+const SVG_FALLBACK_SKIPPED_TAGS = new Set(['style', 'script', 'foreignobject']);
 const ACTIVE_CONTENT_CONTAINERS = new Set(['button', 'form', 'slot', 'template']);
 const GLOBAL_ATTRIBUTES = new Set(['class', 'id', 'title', 'lang', 'dir', 'role']);
 /** Inert global attrs transferable onto the content-root (class/id handled separately). */
@@ -503,7 +505,13 @@ function registerDocumentKeyframes(
   context: CssSanitizeContext,
   svgPlans: Map<Node, SvgRootPlan>,
 ): Failure | null {
-  if (svgPlans.has(node) || tagName(node) === 'template') return null;
+  const name = tagName(node);
+  if (
+    svgPlans.has(node) ||
+    name === 'template' ||
+    (name !== null && ACTIVE_TAGS.has(name) && !ACTIVE_CONTENT_CONTAINERS.has(name)) ||
+    name === 'svg'
+  ) return null;
   if (tagName(node) === 'style') {
     const registration = registerCssKeyframes(styleText(node), context);
     if (!registration.ok) return cssFailure(registration.violations[0]);
@@ -598,9 +606,12 @@ function authoredChildren(node: Node): Node[] {
   const templateContent = (node as { content?: Node }).content;
   return templateContent ? childNodes(templateContent) : childNodes(node);
 }
-function collectDescendantText(node: Node): string {
-  if ((node as { nodeName?: string }).nodeName === '#text') return textValue(node);
-  return childNodes(node).map(collectDescendantText).join('');
+function collectDescendantText(node: Node, includeText = false): string {
+  if ((node as { nodeName?: string }).nodeName === '#text') return includeText ? textValue(node) : '';
+  const name = tagName(node);
+  if (name !== null && SVG_FALLBACK_SKIPPED_TAGS.has(name)) return '';
+  const collectChildText = name !== null && SVG_FALLBACK_TEXT_TAGS.has(name);
+  return childNodes(node).map((child) => collectDescendantText(child, collectChildText)).join('');
 }
 
 function findBody(document: DefaultTreeAdapterTypes.Document): Element | null {
