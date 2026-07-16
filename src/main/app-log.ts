@@ -132,7 +132,6 @@ async function pruneExpired(dir: string): Promise<void> {
   if (!deps) return;
   const today = utcDay(clock());
   if (lastPruneDay === today) return;
-  lastPruneDay = today;
   const readdir = deps.readdir ?? ((d: string) => fs.readdir(d));
   const unlink = deps.unlink ?? ((p: string) => fs.unlink(p).then(() => undefined));
   let names: string[];
@@ -141,17 +140,19 @@ async function pruneExpired(dir: string): Promise<void> {
   } catch {
     return;
   }
-  await Promise.all(
+  const pruneSucceeded = await Promise.all(
     names.map(async (name) => {
       const day = parseAppLogDayFromFileName(name);
-      if (!day || !isExpiredAppLogDay(day, today)) return;
+      if (!day || !isExpiredAppLogDay(day, today)) return true;
       try {
         await unlink(path.join(dir, name));
       } catch {
-        // Best-effort retention; ignore busy/missing files.
+        return false;
       }
+      return true;
     }),
   );
+  if (pruneSucceeded.every(Boolean)) lastPruneDay = today;
 }
 
 function schedulePrune(dir: string): void {

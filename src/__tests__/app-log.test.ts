@@ -110,4 +110,28 @@ describe('app-log', () => {
     expect(unlinked.some((p) => p.endsWith('app-2026-07-13.log'))).toBe(false);
     expect(unlinked.some((p) => p.endsWith('keep.txt'))).toBe(false);
   });
+  it('retries pruning after a transient directory listing failure', async () => {
+    const readdir = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('temporary failure'))
+      .mockResolvedValueOnce(['app-2026-07-10.log']);
+    const unlink = vi.fn(async () => undefined);
+    configureAppLog({
+      logDir: () => 'logs',
+      now: () => Date.parse('2026-07-16T12:00:00.000Z'),
+      appendFile: async () => undefined,
+      readdir,
+      unlink,
+      mkdir: async () => undefined,
+    });
+
+    await appLog('info', 'boot', 'first write');
+    await new Promise((r) => setTimeout(r, 0));
+    await appLog('info', 'boot', 'second write');
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(readdir).toHaveBeenCalledTimes(2);
+    expect(unlink).toHaveBeenCalledWith('logs/app-2026-07-10.log');
+  });
 });
