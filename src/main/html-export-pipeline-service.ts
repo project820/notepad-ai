@@ -206,10 +206,8 @@ export class HtmlExportPipelineService {
       // never sanitized→finalized→saved as an export.
       requireStructuralDocument: true,
       // Fail-closed asset policy: the direct path issues NO asset IDs, so reject
-      // every `asset:<id>` src (an empty allowlist). Without this the sanitizer
-      // defaults to accepting any syntactically valid asset: value, letting a model
-      // emit `<img src="asset:neverissued">` that finalizes as a broken image. When
-      // real asset issuance is wired, pass the issued-ID allowlist instead.
+      // every `asset:<id>` src (an empty allowlist). When real asset issuance is
+      // wired, pass the issued-ID allowlist instead.
       isAllowedAssetId: () => false,
     });
     if (!sanitized.ok) return reject('HTML sanitizer rejected model output');

@@ -160,7 +160,7 @@ class FakeParseHost {
     if (this.failure) return { ok: false, error: this.failure };
     if (this.throwCause !== undefined) throw this.throwCause;
     const document = this.documentForNextParse ?? parse(html);
-    const sanitized = sanitizeHtmlExport({ html: '', parse: () => document });
+    const sanitized = sanitizeHtmlExport({ html: '', parse: () => document, isAllowedAssetId: () => false });
     if (!sanitized.ok) {
       return success({
         document,
@@ -297,7 +297,7 @@ describe('HtmlExportPipelineService', () => {
       const attemptId = start(service);
       const html = '<section id="section"><p class="body">Counted</p></section>';
       const document = parse(html);
-      const sanitized = sanitizeHtmlExport({ html, parse: () => document });
+      const sanitized = sanitizeHtmlExport({ html, parse: () => document, isAllowedAssetId: () => false });
       if (!sanitized.ok) throw new Error('test document must sanitize');
 
       parseHost.documentForNextParse = document;
