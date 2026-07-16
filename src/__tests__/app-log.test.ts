@@ -41,6 +41,31 @@ describe('app-log', () => {
     expect(formatAppLogField('a\nb\tc')).toBe('a b c');
     expect(formatAppLogField('x'.repeat(600)).endsWith('…')).toBe(true);
   });
+  it('redacts path edge forms without redacting HTTPS URLs', () => {
+    const field = formatAppLogField('Error:/Users/x/private ~alice/Documents/private /Users/x/App  Support/y /Users/x/private) /Users/x/private` https://example.com/path');
+    expect(field).toContain('Error:[REDACTED_PATH]');
+    expect(field).toContain('[REDACTED_PATH]');
+    expect(field).not.toContain('/Users/x/private');
+    expect(field).not.toContain('~alice/Documents/private');
+    expect(field).not.toContain('Support/y');
+    expect(field).not.toContain('private)');
+    expect(field).not.toContain('private`');
+    expect(field).toContain('https://example.com/path');
+  });
+  it('redacts bare password-like assignments but preserves unrelated keys', () => {
+    const field = formatAppLogField('password=hunter2 secret: abc credentials=xyz monkey=banana key=harmless');
+    expect(field).toContain('password=[REDACTED_SECRET]');
+    expect(field).toContain('secret:[REDACTED_SECRET]');
+    expect(field).toContain('credentials=[REDACTED_SECRET]');
+    expect(field).toContain('monkey=banana');
+    expect(field).toContain('key=harmless');
+    expect(field).not.toContain('hunter2');
+    expect(field).not.toContain('abc');
+    expect(field).not.toContain('xyz');
+  });
+  it('pre-caps large fields before redaction', () => {
+    expect(formatAppLogField('x'.repeat(4 * 1024 * 1024))).toHaveLength(512);
+  });
   it('redacts absolute paths and secret-like values from fields and messages', () => {
     const absolutePath = ['', 'Users', 'example', 'private'].join('/');
     const homePath = ['~', 'Library', 'private'].join('/');
@@ -178,6 +203,27 @@ describe('app-log', () => {
     expect(writes[0].data).toContain('INFO [boot] ready');
     expect(writes[0].data).toContain('version=0.7.0');
   });
+  it('uses one clock value for the log line and file day', async () => {
+    const writes: Array<{ path: string; data: string }> = [];
+    const now = vi.fn()
+      .mockReturnValueOnce(Date.parse('2026-07-16T23:59:59.999Z'))
+      .mockReturnValue(Date.parse('2026-07-17T00:00:00.000Z'));
+    configureAppLog({
+      logDir: () => 'logs',
+      now,
+      appendFile: async (filePath, data) => {
+        writes.push({ path: filePath, data });
+      },
+      readdir: async () => [],
+      unlink: async () => undefined,
+      mkdir: async () => undefined,
+    });
+
+    await appLog('info', 'boot', 'ready');
+
+    expect(writes[0].data).toContain('2026-07-16T23:59:59.999Z');
+    expect(writes[0].path).toBe('logs/app-2026-07-16.log');
+  });
 
   it('unlinks only expired app-*.log files during prune', async () => {
     const unlinked: string[] = [];
@@ -198,6 +244,52 @@ describe('app-log', () => {
     expect(unlinked.some((p) => p.endsWith('app-2026-07-10.log'))).toBe(true);
     expect(unlinked.some((p) => p.endsWith('app-2026-07-13.log'))).toBe(false);
     expect(unlinked.some((p) => p.endsWith('keep.txt'))).toBe(false);
+  });
+  it('treats an already-unlinked expired file as a successful prune', async () => {
+    const readdir = vi.fn(async () => ['app-2026-07-10.log']);
+    configureAppLog({
+      logDir: () => 'logs',
+      now: () => Date.parse('2026-07-16T12:00:00.000Z'),
+      appendFile: async () => undefined,
+      readdir,
+      unlink: async () => {
+        throw Object.assign(new Error('gone'), { code: 'ENOENT' });
+      },
+      mkdir: async () => undefined,
+    });
+
+    await appLog('info', 'boot', 'first write');
+    await new Promise((r) => setTimeout(r, 0));
+    await appLog('info', 'boot', 'second write');
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(readdir).toHaveBeenCalledTimes(1);
+  });
+  it('clears an in-flight prune when reconfigured', async () => {
+    const pendingReaddir = new Promise<string[]>(() => undefined);
+    configureAppLog({
+      logDir: () => 'old-logs',
+      now: () => Date.parse('2026-07-16T12:00:00.000Z'),
+      appendFile: async () => undefined,
+      readdir: async () => pendingReaddir,
+      unlink: async () => undefined,
+      mkdir: async () => undefined,
+    });
+    await appLog('info', 'boot', 'first write');
+
+    const readdir = vi.fn(async () => []);
+    configureAppLog({
+      logDir: () => 'new-logs',
+      now: () => Date.parse('2026-07-16T12:00:00.000Z'),
+      appendFile: async () => undefined,
+      readdir,
+      unlink: async () => undefined,
+      mkdir: async () => undefined,
+    });
+    await appLog('info', 'boot', 'second write');
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(readdir).toHaveBeenCalledTimes(1);
   });
   it('retries a failed prune after an overlapping write', async () => {
     let rejectFirstReaddir: (reason?: unknown) => void = () => undefined;

@@ -26,6 +26,7 @@ import { atomicWrite, nodeAtomicBackend, type AtomicWriteBackend } from '../atom
 import type { GenerationAttemptResult } from '../html-export-generation-orchestrator';
 import { isAiProviderId, type AiProviderId } from '../ai/types';
 import { isHtmlExportModelProviderAllowed } from '../ai/html-export-model-allowlist';
+import { VIEWPORT_MAX, VIEWPORT_MIN } from '../html-export-quarantine';
 import {
   designListContentsUrl,
   isAllowedDesignFetchUrl,
@@ -221,8 +222,8 @@ function isSaveFinalizedRequest(input: unknown): input is SaveFinalizedRequest {
 
 const HTML_GENERATE_PROMPT_MAX = 4 * 1024 * 1024;
 
-const HTML_GENERATE_VIEWPORT_MIN = 1;
-const HTML_GENERATE_VIEWPORT_MAX = 10_000;
+const HTML_GENERATE_VIEWPORT_MIN = VIEWPORT_MIN;
+const HTML_GENERATE_VIEWPORT_MAX = VIEWPORT_MAX;
 
 function isValidGenerateViewport(input: unknown): input is { width: number; height: number } {
   if (!isExactPlainObject(input) || Object.getOwnPropertySymbols(input).length !== 0) return false;
