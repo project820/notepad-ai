@@ -167,6 +167,7 @@ const HTML_EXPORT_DIRECT_DESIGN_KNOWLEDGE = [
   '4. Author complete, self-contained HTML with inline CSS — no scripts, no external fonts/assets. IMAGES: an <img> src may ONLY be an app-issued opaque asset ID (src="asset:…") explicitly listed in this prompt; NEVER emit data: URIs, remote URLs, or invented images. When no asset ID is provided, author without <img> and express any decoration in CSS. Every visual choice — layout, spacing, color, type scale — is yours to encode in CSS, honoring the design authority above.',
   '5. Use only LITERAL CSS values. CSS custom properties (`--name`) and `var()` are NOT supported and will be rejected — write concrete values inline. Global element selectors (html/body/:root/*) are allowed (scoped to the export content root) but prefer authoring styles against document content. CSS font-size and the size token of the font shorthand must use 0, Npx, or absolute keywords only (xx-small through xxx-large); never rem, em, or % because relative font sizes are rejected by the sanitizer.',
   '6. Use ONLY the supported HTML tag vocabulary (structural: section, article, main, aside, nav, header, footer, div, h1–h6, p, ul/ol/li, dl/dt/dd, figure/figcaption, blockquote, table/thead/tbody/tfoot/tr/th/td/caption, img/picture/source, svg; inline: span, strong/em/b/i/u/s, small, mark, sub/sup, code/pre/kbd/samp, abbr, time, a, br, hr). Attach classes, ids, and inline styles ONLY to these tags — unsupported tags are unwrapped and their attributes dropped, which orphans any CSS that targets them.',
+  '7. Links: use <a href> only for non-empty same-document fragments (#id); render external/source URLs as plain text.',
 ].join('\n');
 
 function designKnowledgeBlock(): string[] {
@@ -233,6 +234,8 @@ export function buildDirectHtmlPrompt(
     '- Self-contained only: inline CSS, no external stylesheets, no remote scripts, no network fetches.',
     '- CSS font-size and the font shorthand size must use px, 0, or absolute keywords only (medium, large, …). Never rem, em, or % for font size — relative font sizes are rejected.',
     '- Images: an <img> src may ONLY be an app-issued asset ID (src="asset:…") explicitly provided in this prompt; never data: URIs, never remote or relative URLs. No provided asset IDs means no <img> elements.',
+    '- Anchors: an <a href> may ONLY be a non-empty same-document fragment (#id). NEVER use https:, http:, mailto:, or any other scheme.',
+    '- Render external/source links from Markdown as plain text (the URL may appear as visible text); NEVER use <a href="https://…">.',
     '',
     'SOURCE DOCUMENT (Markdown — full text; do not omit any portion):',
     '"""',
@@ -335,6 +338,8 @@ export function buildSectionPrompt(
     '- Self-contained styling preferences: inline styles or classes that compose with a later shell.',
     '- Images: an <img> src may ONLY be an app-issued asset ID (src="asset:…") explicitly provided in this prompt; never data: URIs, never remote or relative URLs. No provided asset IDs means no <img> elements.',
     '- CSS font-size and the font shorthand size must use px, 0, or absolute keywords only (medium, large, …). Never rem, em, or % for font size — relative font sizes are rejected.',
+    '- Anchors: an <a href> may ONLY be a non-empty same-document fragment (#id). NEVER use https:, http:, mailto:, or any other scheme.',
+    '- Render external/source links from Markdown as plain text (the URL may appear as visible text); NEVER use <a href="https://…">.',
     '',
     'SECTION SOURCE (Markdown slice for this section only):',
     '"""',

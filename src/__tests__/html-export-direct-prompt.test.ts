@@ -146,6 +146,10 @@ describe('buildDirectHtmlPrompt — 1:1 config mapping + full source', () => {
     expect(prompt).not.toMatch(/inline data: images/i);
     expect(prompt).toMatch(/CSS font-size.*font shorthand size.*px.*0.*absolute keywords/i);
     expect(prompt).toMatch(/Never rem, em, or % for font size/i);
+    expect(prompt).toMatch(/<a href> may ONLY be a non-empty same-document fragment/i);
+    expect(prompt).toMatch(/NEVER use https:, http:, mailto:, or any other scheme/i);
+    expect(prompt).toMatch(/external\/source links from Markdown as plain text/i);
+    expect(prompt).toMatch(/NEVER use <a href="https:/i);
     // The legacy content-model guidance that forbids encoding HTML/CSS must NOT
     // appear in a direct-authoring prompt (AC-M1a contradiction guard).
     expect(prompt).not.toMatch(/never encode CSS, HTML/i);
