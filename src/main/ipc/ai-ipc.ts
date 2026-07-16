@@ -96,6 +96,8 @@ export function registerAiIpc({ getRegistry }: AiIpcDeps): void {
     activeChats.delete(key);
   });
   handleTrusted('ai:models', async (_e, force?: boolean) => getRegistry().getAvailableModels(force === true));
+  handleTrusted('ai:models-html', async (_e, force?: boolean) =>
+    getRegistry().getAvailableModelsForHtmlExport(force === true));
   handleTrusted('ai:reasoning-capabilities', async () => getRegistry().getReasoningCapabilities());
   handleTrusted('local-ai:get-config', async () => getRegistry().getLocalConfig());
   handleTrusted('local-ai:set-config', async (_e, partial: { ollama?: string; lmstudio?: string }) =>

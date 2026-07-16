@@ -50,6 +50,8 @@ import {
 
 import { isProviderAuthAttemptable } from '../../shared/provider-auth-status';
 
+/** Bound cloud live-catalog wait on the HTML inventory path (local entry must not stall). */
+const HTML_CLOUD_INVENTORY_TIMEOUT_MS = 1_500;
 export type ProviderMap = Partial<Record<AiProviderId, AiProvider>>;
 
 
@@ -66,6 +68,12 @@ export class ProviderRegistry {
   ) {}
   private reasoningSnapshotGeneration = 0;
   private reasoningAccountFingerprint = '';
+  /**
+   * Single-flight guard for live cloud listModels on the HTML path. Held until
+   * the cloud promise settles (not merely until the caller-facing race returns)
+   * so repeated wizard opens cannot stack unbounded cloud catalog calls.
+   */
+  private htmlCloudInventoryInFlight: Promise<ModelRef[]> | null = null;
 
   private bumpReasoningSnapshot(): void {
     this.reasoningSnapshotGeneration++;
@@ -171,6 +179,70 @@ export class ProviderRegistry {
     const seen = new Set<string>();
     const merged: ModelRef[] = [];
     for (const model of [...curated, ...live, ...localModels]) {
+      const key = `${model.provider}:${model.id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(model);
+    }
+    return merged;
+  }
+
+  /**
+   * HTML export inventory keeps the cloud display policy while preserving raw
+   * discovered local models. HTML has its own allowlist and must be able to
+   * inspect LM Studio models that chat intentionally hides.
+   *
+   * Unlike chat inventory, forced/stale HTML discovery is awaited: the renderer
+   * uses the returned local providers as capability evidence, so a fire-and-forget
+   * empty snapshot would falsely route the wizard to "no usable local model".
+   * Discovery stays hard-bounded by LocalModelCache (500ms timeout per provider).
+   *
+   * Local refresh is started before cloud inventory and awaited first. Cloud
+   * listModels is bounded for the caller and single-flighted until settlement so
+   * a hanging ChatGPT/live catalog cannot block HTML entry or be re-spawned on
+   * every wizard open (curated cloud IDs remain available either way).
+   */
+  async getAvailableModelsForHtmlExport(force = false): Promise<ModelRef[]> {
+    if (force) this.bumpReasoningSnapshot();
+    const curated = applyModelDisplayPolicy(getCuratedModels());
+    const cloudProviders = Object.values(this.providers).filter(
+      (provider): provider is AiProvider => provider != null && provider.authKind !== 'local',
+    );
+    const locals = this.localProviders();
+    // Start bounded local discovery BEFORE cloud inventory work.
+    const localRefresh =
+      locals.length > 0 && (force || this.localCache.isStale())
+        ? this.localCache.refreshInBackground(locals)
+        : Promise.resolve();
+    // Single-flight cloud inventory for the lifetime of the live promise.
+    let livePromise = this.htmlCloudInventoryInFlight;
+    if (!livePromise) {
+      livePromise = Promise.all(
+        cloudProviders.map(async (provider) => {
+          try {
+            return applyModelDisplayPolicy(await provider.listModels());
+          } catch {
+            return [] as ModelRef[];
+          }
+        }),
+      )
+        .then((batches) => batches.flat())
+        .finally(() => {
+          this.htmlCloudInventoryInFlight = null;
+        });
+      this.htmlCloudInventoryInFlight = livePromise;
+    }
+    await localRefresh;
+    // Bound cloud wait so local-only entry is not starved by a slow live catalog.
+    const live = await Promise.race([
+      livePromise,
+      new Promise<ModelRef[]>((resolve) => {
+        setTimeout(() => resolve([]), HTML_CLOUD_INVENTORY_TIMEOUT_MS);
+      }),
+    ]);
+    const seen = new Set<string>();
+    const merged: ModelRef[] = [];
+    for (const model of [...curated, ...live, ...this.localCache.snapshot()]) {
       const key = `${model.provider}:${model.id}`;
       if (seen.has(key)) continue;
       seen.add(key);

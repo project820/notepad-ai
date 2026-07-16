@@ -157,6 +157,7 @@ const api = {
   },
 
   aiModels: (force?: boolean): Promise<ModelRef[]> => ipcRenderer.invoke('ai:models', force),
+  aiModelsHtml: (force?: boolean): Promise<ModelRef[]> => ipcRenderer.invoke('ai:models-html', force),
   aiReasoningCapabilities: (): Promise<ReasoningCapabilitiesSnapshot> =>
     ipcRenderer.invoke('ai:reasoning-capabilities'),
 

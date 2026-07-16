@@ -56,11 +56,18 @@ describe('isHtmlExportProviderUsable (HTML transport honesty)', () => {
     ...partial,
   });
 
-  it('allows connected non-Claude allowlisted providers', () => {
+  it('requires discovered models for connected local providers', () => {
+    const ollama = base({ provider: 'ollama', connected: true, authKind: 'local' });
+    const lmstudio = base({ provider: 'lmstudio', connected: true, authKind: 'local' });
+    expect(isHtmlExportProviderUsable(ollama)).toBe(false);
+    expect(isHtmlExportProviderUsable(lmstudio)).toBe(false);
+    expect(isHtmlExportProviderUsable(ollama, { localProvidersWithModels: new Set(['ollama']) })).toBe(true);
+    expect(isHtmlExportProviderUsable(lmstudio, { localProvidersWithModels: new Set(['lmstudio']) })).toBe(true);
+  });
+
+  it('allows connected cloud allowlisted providers', () => {
     expect(isHtmlExportProviderUsable(base({ provider: 'chatgpt', connected: true, authKind: 'oauth' }))).toBe(true);
     expect(isHtmlExportProviderUsable(base({ provider: 'grok', connected: true }))).toBe(true);
-    expect(isHtmlExportProviderUsable(base({ provider: 'ollama', connected: true, authKind: 'local' }))).toBe(true);
-    expect(isHtmlExportProviderUsable(base({ provider: 'lmstudio', connected: true, authKind: 'local' }))).toBe(true);
   });
 
   it('rejects disconnected allowlisted providers', () => {
@@ -120,10 +127,12 @@ describe('isHtmlExportProviderUsable (HTML transport honesty)', () => {
     }))).toBe(false);
   });
 
-  it('htmlCapableProviderIds collects only usable providers', () => {
-    const ids = htmlCapableProviderIds([
+  it('htmlCapableProviderIds requires local discovery evidence', () => {
+    const statuses = [
       base({ provider: 'openrouter', connected: true }),
       base({ provider: 'chatgpt', connected: true, authKind: 'oauth' }),
+      base({ provider: 'ollama', connected: true, authKind: 'local' }),
+      base({ provider: 'lmstudio', connected: true, authKind: 'local' }),
       base({
         provider: 'claude',
         connected: true,
@@ -135,7 +144,10 @@ describe('isHtmlExportProviderUsable (HTML transport honesty)', () => {
         provider: 'grok',
         connected: false,
       }),
-    ]);
-    expect([...ids]).toEqual(['chatgpt']);
+    ];
+    expect([...htmlCapableProviderIds(statuses)]).toEqual(['chatgpt']);
+    expect([...htmlCapableProviderIds(statuses, {
+      localProvidersWithModels: new Set(['lmstudio']),
+    })]).toEqual(['chatgpt', 'lmstudio']);
   });
 });

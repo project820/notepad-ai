@@ -75,6 +75,7 @@ export type Api = HtmlExportPipelineApi & HtmlExportAssetApi & {
   aiCancel: (id: string) => Promise<void>;
   onAiChatEvent: (id: string, cb: (e: { kind: 'delta' | 'done' | 'error'; text?: string; message?: string; errorKind?: string }) => void) => () => void;
   aiModels: (force?: boolean) => Promise<ModelRef[]>;
+  aiModelsHtml: (force?: boolean) => Promise<ModelRef[]>;
   aiReasoningCapabilities: () => Promise<ReasoningCapabilitiesSnapshot>;
   aiProvidersStatus: () => Promise<ProviderAuthStatus[]>;
   aiHasAnyAuth: () => Promise<boolean>;

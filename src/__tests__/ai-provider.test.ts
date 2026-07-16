@@ -717,6 +717,155 @@ describe('ProviderRegistry local discovery is non-blocking', () => {
     const models = await reg.getAvailableModels();
     expect(models.filter((m) => m.provider === 'ollama').map((m) => m.id)).toEqual(['llama3']);
   });
+  it('keeps LM Studio hidden from chat inventory but includes it for HTML export', async () => {
+    const cache = new LocalModelCache();
+    await cache.refreshInBackground([
+      cacheFakeProvider('lmstudio', async () => [localModelRef('lmstudio', 'local-html-model')]),
+    ]);
+    const reg = new ProviderRegistry(
+      fakeKeyStore(),
+      {
+        chatgpt: fakeProvider('chatgpt', true, () => {}),
+        claude: fakeProvider('claude', true, () => {}),
+        openrouter: fakeProvider('openrouter', true, () => {}),
+        lmstudio: localFakeProvider('lmstudio', async () => []),
+      },
+      cache,
+    );
+
+    expect((await reg.getAvailableModels()).some((model) => model.provider === 'lmstudio')).toBe(false);
+    expect((await reg.getAvailableModelsForHtmlExport())
+      .filter((model) => model.provider === 'lmstudio')
+      .map((model) => model.id)).toEqual(['local-html-model']);
+  });
+  it('awaits forced local discovery on the HTML inventory path', async () => {
+    const cache = new LocalModelCache();
+    const lmstudio = cacheFakeProvider('lmstudio', async () => [
+      localModelRef('lmstudio', 'fresh-local'),
+    ]);
+    const reg = new ProviderRegistry(
+      fakeKeyStore(),
+      {
+        chatgpt: fakeProvider('chatgpt', true, () => {}),
+        claude: fakeProvider('claude', true, () => {}),
+        openrouter: fakeProvider('openrouter', true, () => {}),
+        lmstudio,
+      },
+      cache,
+    );
+
+    // Empty/stale cache + force=true must not return before discovery finishes.
+    expect(cache.snapshot()).toEqual([]);
+    const models = await reg.getAvailableModelsForHtmlExport(true);
+    expect(models.filter((model) => model.provider === 'lmstudio').map((model) => model.id))
+      .toEqual(['fresh-local']);
+    expect(lmstudio.listModels).toHaveBeenCalled();
+  });
+  it('starts HTML local discovery without waiting for cloud listModels', async () => {
+    const cache = new LocalModelCache();
+    let releaseCloud!: (models: ModelRef[]) => void;
+    const cloudHang = new Promise<ModelRef[]>((resolve) => {
+      releaseCloud = resolve;
+    });
+    const chatgpt = {
+      ...fakeProvider('chatgpt', true, () => {}),
+      listModels: vi.fn(() => cloudHang),
+    } as AiProvider & { listModels: ReturnType<typeof vi.fn> };
+    const lmstudio = cacheFakeProvider('lmstudio', async () => [
+      localModelRef('lmstudio', 'local-before-cloud'),
+    ]);
+    const reg = new ProviderRegistry(
+      fakeKeyStore(),
+      {
+        chatgpt,
+        claude: fakeProvider('claude', true, () => {}),
+        openrouter: fakeProvider('openrouter', true, () => {}),
+        lmstudio,
+      },
+      cache,
+    );
+
+    const pending = reg.getAvailableModelsForHtmlExport(true);
+    // Local discovery is bounded and must finish while cloud is still hanging.
+    await vi.waitFor(() => {
+      expect(cache.snapshot().map((model) => model.id)).toEqual(['local-before-cloud']);
+    });
+    expect(chatgpt.listModels).toHaveBeenCalled();
+
+    releaseCloud([]);
+    const models = await pending;
+    expect(models.filter((model) => model.provider === 'lmstudio').map((model) => model.id))
+      .toEqual(['local-before-cloud']);
+  });
+
+  it('returns HTML inventory when cloud listModels hangs past the cloud bound', async () => {
+    vi.useFakeTimers();
+    try {
+      const cache = new LocalModelCache();
+      const chatgpt = {
+        ...fakeProvider('chatgpt', true, () => {}),
+        listModels: vi.fn(() => new Promise<ModelRef[]>(() => {})),
+      } as AiProvider & { listModels: ReturnType<typeof vi.fn> };
+      const lmstudio = cacheFakeProvider('lmstudio', async () => [
+        localModelRef('lmstudio', 'local-despite-cloud-hang'),
+      ]);
+      const reg = new ProviderRegistry(
+        fakeKeyStore(),
+        {
+          chatgpt,
+          claude: fakeProvider('claude', true, () => {}),
+          openrouter: fakeProvider('openrouter', true, () => {}),
+          lmstudio,
+        },
+        cache,
+      );
+
+      const pending = reg.getAvailableModelsForHtmlExport(true);
+      await vi.advanceTimersByTimeAsync(1_500);
+      const models = await pending;
+      expect(models.filter((model) => model.provider === 'lmstudio').map((model) => model.id))
+        .toEqual(['local-despite-cloud-hang']);
+      // Curated cloud ids still present even when live cloud hang times out.
+      expect(models.some((model) => model.provider === 'chatgpt')).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it('single-flights hanging cloud listModels across concurrent HTML inventory calls', async () => {
+    vi.useFakeTimers();
+    try {
+      const cache = new LocalModelCache();
+      const listModels = vi.fn(() => new Promise<ModelRef[]>(() => {}));
+      const chatgpt = {
+        ...fakeProvider('chatgpt', true, () => {}),
+        listModels,
+      } as AiProvider & { listModels: ReturnType<typeof vi.fn> };
+      const lmstudio = cacheFakeProvider('lmstudio', async () => [
+        localModelRef('lmstudio', 'shared-local'),
+      ]);
+      const reg = new ProviderRegistry(
+        fakeKeyStore(),
+        {
+          chatgpt,
+          claude: fakeProvider('claude', true, () => {}),
+          openrouter: fakeProvider('openrouter', true, () => {}),
+          lmstudio,
+        },
+        cache,
+      );
+
+      const first = reg.getAvailableModelsForHtmlExport(true);
+      await vi.advanceTimersByTimeAsync(1_500);
+      await first;
+      // Second open while the first cloud hang is still unsettled must join, not re-call.
+      const second = reg.getAvailableModelsForHtmlExport(true);
+      await vi.advanceTimersByTimeAsync(1_500);
+      await second;
+      expect(listModels).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it('local providers report static connected auth without a network probe', async () => {
     const fetchSpy = vi.fn(() => Promise.reject(new Error('ECONNREFUSED')));

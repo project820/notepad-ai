@@ -48,8 +48,22 @@ export function filterHtmlExportModels<T extends { provider?: string }>(models: 
  * no-fallback transport. Fail-closed: uncertain Claude CLI readiness is not
  * capable (HTML is CLI-only for Claude; API-key-only auth is insufficient).
  */
-export function isHtmlExportProviderUsable(status: ProviderAuthStatus): boolean {
+export type HtmlExportProviderUsabilityOptions = {
+  localProvidersWithModels?: ReadonlySet<AiProviderId>;
+};
+
+/**
+ * Local providers report a static connected status, so they require model
+ * discovery evidence before the HTML surface may offer them.
+ */
+export function isHtmlExportProviderUsable(
+  status: ProviderAuthStatus,
+  options: HtmlExportProviderUsabilityOptions = {},
+): boolean {
   if (!isHtmlExportModelProviderAllowed(status.provider)) return false;
+  if (status.provider === 'ollama' || status.provider === 'lmstudio') {
+    return status.connected === true && options.localProvidersWithModels?.has(status.provider) === true;
+  }
   if (status.provider === 'claude') {
     // Claude HTML always routes through the CLI (never the Anthropic API).
     // getAuthStatus can report connected:true for API-only auth — reject that.
@@ -73,10 +87,11 @@ export function isHtmlExportProviderUsable(status: ProviderAuthStatus): boolean 
 /** Provider ids whose current auth status can actually run an HTML export. */
 export function htmlCapableProviderIds(
   statuses: readonly ProviderAuthStatus[],
+  options: HtmlExportProviderUsabilityOptions = {},
 ): Set<AiProviderId> {
   const capable = new Set<AiProviderId>();
   for (const status of statuses) {
-    if (isHtmlExportProviderUsable(status)) capable.add(status.provider);
+    if (isHtmlExportProviderUsable(status, options)) capable.add(status.provider);
   }
   return capable;
 }

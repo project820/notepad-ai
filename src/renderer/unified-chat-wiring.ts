@@ -40,12 +40,21 @@ let lastHtmlCapableProviderIds: Set<AiProviderId> | null = null;
 export function resolveHtmlCapableProviderIds(
   statuses: ProviderAuthStatus[] | null,
   cache: Set<AiProviderId> | null,
+  localProvidersWithModels: ReadonlySet<AiProviderId> = new Set(),
 ): { capable: Set<AiProviderId> | null; nextCache: Set<AiProviderId> | null } {
   if (statuses) {
-    const capable = htmlCapableProviderIds(statuses);
+    const capable = htmlCapableProviderIds(statuses, { localProvidersWithModels });
     return { capable, nextCache: capable };
   }
   return { capable: cache, nextCache: cache };
+}
+
+function htmlLocalProvidersWithModels(models: readonly { provider?: string }[]): Set<AiProviderId> {
+  const providers = new Set<AiProviderId>();
+  for (const model of models) {
+    if (model.provider === 'ollama' || model.provider === 'lmstudio') providers.add(model.provider);
+  }
+  return providers;
 }
 
 export type UnifiedChatWiring = {
@@ -260,9 +269,21 @@ export function initUnifiedChatWiring(ctx: AppContext, deps: UnifiedChatWiringDe
   }
 
   async function startHtmlExportWizard(guard: ToolPanelGuard) {
-    const hasAuth = await window.api.aiHasAnyAuth().catch(() => true);
+    // Force HTML local discovery BEFORE the generic auth gate. hasAnyAuth only
+    // reads the existing local snapshot; local-only users who just started
+    // Ollama/LM Studio would otherwise hit chat.noProvider and never reach the
+    // awaited aiModelsHtml path that populates the cache (Codex P2 on #42).
+    const htmlModels = await window.api.aiModelsHtml(true).catch(() => []);
     if (!guard.isCurrent()) return;
-    if (!hasAuth) {
+    const [statuses, hasAuth] = await Promise.all([
+      window.api.aiProvidersStatus().catch(() => null),
+      window.api.aiHasAnyAuth().catch(() => true),
+    ]);
+    if (!guard.isCurrent()) return;
+    const localDiscovered = htmlLocalProvidersWithModels(htmlModels);
+    // After forced discovery, local models alone are enough to attempt entry even
+    // if a racing hasAnyAuth still saw an empty snapshot (defensive).
+    if (!hasAuth && localDiscovered.size === 0) {
       setUnifiedChatOpen(true);
       unifiedChat.addMessage('assistant', t('chat.noProvider'));
       ctx.setStatus(t('status.connectProvider'));
@@ -272,11 +293,13 @@ export function initUnifiedChatWiring(ctx: AppContext, deps: UnifiedChatWiringDe
     // §5.3 honesty: generic auth is not enough — only open the wizard when at
     // least one provider can actually pin an HTML transport (Claude needs CLI).
     // Status-fetch failure reuses the last successful capable set (fail-closed
-    // continuity). Cold failure (no cache yet) keeps the hasAuth gate so a
+    // continuity). Cold failure (no cache yet) keeps the hasAuth/local gate so a
     // transient probe does not hard-break entry.
-    const statuses = await window.api.aiProvidersStatus().catch(() => null);
-    if (!guard.isCurrent()) return;
-    const entryCapable = resolveHtmlCapableProviderIds(statuses, lastHtmlCapableProviderIds);
+    const entryCapable = resolveHtmlCapableProviderIds(
+      statuses,
+      lastHtmlCapableProviderIds,
+      localDiscovered,
+    );
     lastHtmlCapableProviderIds = entryCapable.nextCache;
     if (entryCapable.capable && entryCapable.capable.size === 0) {
       setUnifiedChatOpen(true);
@@ -298,7 +321,13 @@ export function initUnifiedChatWiring(ctx: AppContext, deps: UnifiedChatWiringDe
       getMarkdown: () => ctx.editor.getDoc(),
       maxSourceCharsForModel: (m) => htmlExportSourceCharBudget(m ?? currentModelArg()),
       listHtmlModels: async () => {
-        const ms = await deps.loadModelsCached(true);
+        // Reuse the entry-time inventory first. A second forced refresh can race a
+        // 500ms local timeout and overwrite a just-proven Ollama/LM Studio discovery
+        // with [], emptying the picker after the wizard already admitted the user.
+        let ms = htmlModels;
+        if (ms.length === 0) {
+          ms = await window.api.aiModelsHtml(true).catch(() => []);
+        }
         const mapped = ms.map((m) => {
           const provider = m.provider ?? 'chatgpt';
           return {
@@ -316,7 +345,11 @@ export function initUnifiedChatWiring(ctx: AppContext, deps: UnifiedChatWiringDe
         // Status-fetch failure reuses the last successful capable set; only a cold
         // failure (no cache yet) falls back to allowlist-only.
         const liveStatuses = await window.api.aiProvidersStatus().catch(() => null);
-        const pickerCapable = resolveHtmlCapableProviderIds(liveStatuses, lastHtmlCapableProviderIds);
+        const pickerCapable = resolveHtmlCapableProviderIds(
+          liveStatuses,
+          lastHtmlCapableProviderIds,
+          htmlLocalProvidersWithModels(ms),
+        );
         lastHtmlCapableProviderIds = pickerCapable.nextCache;
         if (!pickerCapable.capable) return allowlisted;
         return allowlisted.filter((m) => isAiProviderId(m.provider) && pickerCapable.capable!.has(m.provider));
