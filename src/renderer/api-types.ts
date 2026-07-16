@@ -41,7 +41,7 @@ type AiChatRequest = {
   history: { role: 'user' | 'assistant'; text: string }[];
   userText: string;
   model?: string | { provider: AiProviderId; id: string };
-  surfaceMode?: 'write' | 'advise' | 'html' | 'block';
+  surfaceMode?: 'write' | 'advise' | 'block';
   images?: { mime: string; base64: string; bytes: number; name?: string }[];
   reasoningEffort?: ReasoningEffort;
 };

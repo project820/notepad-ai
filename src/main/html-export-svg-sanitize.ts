@@ -10,7 +10,7 @@ export type SvgViolationCode =
   | 'html_event_handler'
   | 'html_url'
   | 'html_svg_rejected'
-  | ReturnType<typeof cssRejectedCode>;
+  | ReturnType<typeof cssRejectedCode<'svg_attribute'>>;
 
 type Node = DefaultTreeAdapterTypes.Node;
 type Element = DefaultTreeAdapterTypes.Element;
