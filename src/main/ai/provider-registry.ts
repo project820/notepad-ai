@@ -183,6 +183,11 @@ export class ProviderRegistry {
    * HTML export inventory keeps the cloud display policy while preserving raw
    * discovered local models. HTML has its own allowlist and must be able to
    * inspect LM Studio models that chat intentionally hides.
+   *
+   * Unlike chat inventory, forced/stale HTML discovery is awaited: the renderer
+   * uses the returned local providers as capability evidence, so a fire-and-forget
+   * empty snapshot would falsely route the wizard to "no usable local model".
+   * Discovery stays hard-bounded by LocalModelCache (500ms timeout per provider).
    */
   async getAvailableModelsForHtmlExport(force = false): Promise<ModelRef[]> {
     if (force) this.bumpReasoningSnapshot();
@@ -201,7 +206,8 @@ export class ProviderRegistry {
     ).flat();
     const locals = this.localProviders();
     if (locals.length > 0 && (force || this.localCache.isStale())) {
-      void this.localCache.refreshInBackground(locals);
+      // Await on HTML only: capability gate needs discovery evidence, not a stale snapshot.
+      await this.localCache.refreshInBackground(locals);
     }
     const seen = new Set<string>();
     const merged: ModelRef[] = [];

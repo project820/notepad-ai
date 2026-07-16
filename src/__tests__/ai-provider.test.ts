@@ -738,6 +738,29 @@ describe('ProviderRegistry local discovery is non-blocking', () => {
       .filter((model) => model.provider === 'lmstudio')
       .map((model) => model.id)).toEqual(['local-html-model']);
   });
+  it('awaits forced local discovery on the HTML inventory path', async () => {
+    const cache = new LocalModelCache();
+    const lmstudio = cacheFakeProvider('lmstudio', async () => [
+      localModelRef('lmstudio', 'fresh-local'),
+    ]);
+    const reg = new ProviderRegistry(
+      fakeKeyStore(),
+      {
+        chatgpt: fakeProvider('chatgpt', true, () => {}),
+        claude: fakeProvider('claude', true, () => {}),
+        openrouter: fakeProvider('openrouter', true, () => {}),
+        lmstudio,
+      },
+      cache,
+    );
+
+    // Empty/stale cache + force=true must not return before discovery finishes.
+    expect(cache.snapshot()).toEqual([]);
+    const models = await reg.getAvailableModelsForHtmlExport(true);
+    expect(models.filter((model) => model.provider === 'lmstudio').map((model) => model.id))
+      .toEqual(['fresh-local']);
+    expect(lmstudio.listModels).toHaveBeenCalled();
+  });
 
   it('local providers report static connected auth without a network probe', async () => {
     const fetchSpy = vi.fn(() => Promise.reject(new Error('ECONNREFUSED')));
