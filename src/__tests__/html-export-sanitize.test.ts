@@ -110,6 +110,22 @@ describe('sanitizeHtmlExport', () => {
     if (!result.ok) return;
     expect(result.bodyHtml).toBe('<p>Kept</p>Text');
   });
+  it('unwraps content-bearing active containers while recording their removal', () => {
+    const result = sanitize('<form><p>Kept</p></form>');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bodyHtml).toContain('<p>Kept</p>');
+    expect(result.bodyHtml).not.toContain('<form');
+    expect(result.stripped).toContain('html_active_tag');
+  });
+  it('unwraps template content stored outside its childNodes array', () => {
+    const result = sanitize('<div><template><p>Template text</p></template></div>');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bodyHtml).toContain('<p>Template text</p>');
+    expect(result.bodyHtml).not.toContain('<template');
+    expect(result.stripped).toContain('html_active_tag');
+  });
 
   it.each([
     'iframe', 'object', 'embed', 'base', 'frame', 'frameset', 'applet', 'script', 'link', 'template',
@@ -142,6 +158,15 @@ describe('sanitizeHtmlExport', () => {
     expect(dispositionCode('<p data-he-layout="slides">x</p>')).toBe('html_reserved_namespace');
     expect(dispositionCode('<p class="he-shell">x</p>')).toBe('html_reserved_namespace');
     expect(dispositionCode('<p id="runtime-root">x</p>')).toBe('html_reserved_namespace');
+  });
+  it('removes stripped event and reserved attributes from exported HTML', () => {
+    const result = sanitize('<p onclick="x" data-he-layout="slides" class="he-shell">Kept</p>');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bodyHtml).toContain('Kept');
+    expect(result.bodyHtml).not.toContain('onclick');
+    expect(result.bodyHtml).not.toContain('data-he-');
+    expect(result.bodyHtml).not.toContain('he-shell');
   });
 
   it.each([
@@ -212,6 +237,15 @@ describe('sanitizeHtmlExport', () => {
     expect(result.contentCss).toContain('@layer he-authored{[data-he-content] .note{color:red}}');
     expect(result.contentCss).toContain('[data-he-content] [data-he-inline-style="0"]{font-weight:700}');
     expect(result.contentCss).toContain('[data-he-content] [data-he-inline-style="1"]{color:blue}');
+  });
+  it('strips style element attributes while preserving valid stylesheet rules', () => {
+    const result = sanitize('<style type="text/css">.note{color:red}</style><p class="note">Kept</p>');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bodyHtml).toContain('Kept');
+    expect(result.bodyHtml).not.toContain('<style');
+    expect(result.contentCss).toContain('[data-he-content] .note{color:red}');
+    expect(result.stripped).toContain('html_attribute');
   });
 
   it('pre-registers keyframes across style blocks before sanitizing forward animation references', () => {
@@ -411,6 +445,14 @@ describe('sanitizeHtmlExport', () => {
     if (!result.ok) return;
     expect(result.bodyHtml).toBe('<svg><text>&lt;&amp;<tspan> &gt; </tspan></text></svg>');
   });
+  it('preserves text when an unsafe SVG is dropped wholesale', () => {
+    const result = sanitize('<svg><foreignObject><text>Fallback label</text></foreignObject></svg>');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bodyHtml).toContain('Fallback label');
+    expect(result.bodyHtml).not.toContain('<svg');
+    expect(result.stripped).toContain('html_active_tag');
+  });
 
   it.each([
     ['script', '<svg><script>alert(1)</script></svg>', 'html_active_tag'],
@@ -602,15 +644,16 @@ describe('sanitizeHtmlExport — fail-closed structural gate (issue #27)', () =>
     expect(bodyIdx).toBeGreaterThan(htmlIdx);
   });
 
-  it('rejects unsafe root inline styles via the shared declaration sanitizer', () => {
-    // Network function in a body style is hard-failed by sanitizeDeclarationList.
-    expect(failureCode('<body style="background:url(https://evil.test/x.png)"><p>x</p></body>')).toBe(
-      'css_rejected.css_network_function_not_allowed',
-    );
-    // Custom properties are also rejected on root styles (same path as element styles).
-    expect(failureCode('<html style="color:var(--accent)"><body><p>x</p></body></html>')).toBe(
-      'css_rejected.css_custom_property_not_allowed',
-    );
+  it('strips unsafe root inline styles via the shared declaration sanitizer', () => {
+    const network = sanitize('<body style="background:url(https://evil.test/x.png)"><p>x</p></body>');
+    expect(network.ok).toBe(true);
+    if (network.ok) {
+      expect(network.stripped).toContain('css_rejected.css_network_function_not_allowed');
+      expect(network.contentCss).not.toContain('evil.test');
+    }
+    const custom = sanitize('<html style="color:var(--accent)"><body><p>x</p></body></html>');
+    expect(custom.ok).toBe(true);
+    if (custom.ok) expect(custom.stripped).toContain('css_rejected.css_custom_property_not_allowed');
   });
 
   it('emits no content-root style rule when html/body have no style attribute', () => {

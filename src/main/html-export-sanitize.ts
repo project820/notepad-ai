@@ -1,7 +1,6 @@
 import { parse, serialize, type DefaultTreeAdapterTypes } from 'parse5';
 import {
   createCssSanitizeContext,
-  CSS_MAX_STYLESHEET_BYTES,
   registerCssKeyframes,
   sanitizeDeclarationList,
   sanitizeStylesheet,
@@ -124,6 +123,7 @@ const ACTIVE_TAGS = new Set([
   'iframe', 'object', 'embed', 'base', 'frame', 'frameset', 'applet', 'script', 'link', 'template',
   'slot', 'form', 'input', 'button',
 ]);
+const ACTIVE_CONTENT_CONTAINERS = new Set(['button', 'form', 'slot', 'template']);
 const GLOBAL_ATTRIBUTES = new Set(['class', 'id', 'title', 'lang', 'dir', 'role']);
 /** Inert global attrs transferable onto the content-root (class/id handled separately). */
 const SAFE_ROOT_ATTRIBUTE_NAMES = ['lang', 'dir', 'title', 'role'] as const;
@@ -264,21 +264,6 @@ function contentRootIdentity(
     ...(Object.keys(contentRootAttrs).length > 0 ? { contentRootAttrs } : {}),
   };
 }
-/** Read and sanitize a root element's style attribute via the shared declaration sanitizer. */
-function readSanitizedRootInlineCss(
-  node: Element | null,
-  cssContext: CssSanitizeContext,
-): string | Failure | null {
-  if (!node) return null;
-  for (const attribute of attrs(node)) {
-    if (attribute.name.toLowerCase() !== 'style') continue;
-    const result = sanitizeDeclarationList(attribute.value, cssContext);
-    if (!result.ok) return cssFailure(result.violations[0]);
-    return result.css ? result.css : null;
-  }
-  return null;
-}
-
 /**
  * Transfer safe html/body inline styles onto the content-root wrapper as scoped
  * stylesheet rules (html first, body second so body wins by source order).
@@ -288,13 +273,26 @@ function readSanitizedRootInlineCss(
 function transferRootInlineStyles(
   document: DefaultTreeAdapterTypes.Document,
   context: Context,
-): Failure | null {
+): void {
   for (const node of [findElement(document, 'html'), findElement(document, 'body')]) {
-    const css = readSanitizedRootInlineCss(node, context.cssContext);
-    if (isFailure(css)) continue;
-    if (css) context.inlineRules.push(`[data-he-content]{${css}}`);
+    if (!node) continue;
+    for (const attribute of attrs(node)) {
+      if (attribute.name.toLowerCase() !== 'style') continue;
+      const result = sanitizeDeclarationList(attribute.value, context.cssContext);
+      if (!result.ok) {
+        context.stripped.push(...result.violations.map((violation) => ({
+          code: cssRejectedCode(violation.code),
+          detail: violation.detail,
+        })));
+        continue;
+      }
+      context.stripped.push(...result.stripped.map((violation) => ({
+        code: cssRejectedCode(violation.code),
+        detail: violation.detail,
+      })));
+      if (result.css) context.inlineRules.push(`[data-he-content]{${result.css}}`);
+    }
   }
-  return null;
 }
 
 /** Count element nodes strictly within `root`'s subtree (excludes `root` itself). */
@@ -403,50 +401,6 @@ function rejectDangerousAttribute(
   }
   return null;
 }
-function preflightAttributeFailure(
-  node: Node,
-  tag: string,
-  survives: boolean,
-  isAllowedAssetId: (src: string) => boolean,
-): Failure | null {
-  for (const attribute of attrs(node)) {
-    const name = attribute.name.toLowerCase();
-    const dangerous = rejectDangerousAttribute(attribute, isAllowedAssetId);
-    if (dangerous) return dangerous;
-    const reserved = rejectReservedClassOrId(name as 'class' | 'id', attribute.value);
-    if ((name === 'class' || name === 'id') && reserved) return reserved;
-    if (name === 'style' || !survives) continue;
-    if (!isAllowedAttribute(tag, name)) {
-      return fail(HTML_VIOLATION_CODES.attribute, `attribute ${name} is not allowed on ${tag}`);
-    }
-    if ((name === 'width' || name === 'height') && !DIMENSION.test(attribute.value)) {
-      return fail(HTML_VIOLATION_CODES.attribute, `${name} must be unitless or px`);
-    }
-  }
-  return null;
-}
-function preflightHtmlBoundary(root: Node, isAllowedAssetId: (src: string) => boolean): Failure | null {
-  const visit = (node: Node): Failure | null => {
-    const name = tagName(node);
-    if (name === 'svg') {
-      // SVG attributes are preflighted by the static SVG sanitizer after outer HTML boundaries.
-      return null;
-    }
-    if (name) {
-      if (ACTIVE_TAGS.has(name) || (name === 'meta' && attrs(node).some((attribute) => attribute.name.toLowerCase() === 'http-equiv'))) {
-        return fail(HTML_VIOLATION_CODES.activeTag, `active tag ${name}`);
-      }
-      const attributeFailure = preflightAttributeFailure(node, name, ALLOWED_TAGS.has(name), isAllowedAssetId);
-      if (attributeFailure) return attributeFailure;
-    }
-    for (const child of childNodes(node)) {
-      const childFailure = visit(child);
-      if (childFailure) return childFailure;
-    }
-    return null;
-  };
-  return visit(root);
-}
 
 function cssFailure(violation: CssViolation): Failure {
   return fail(cssRejectedCode(violation.code), violation.detail);
@@ -455,7 +409,10 @@ function cssFailure(violation: CssViolation): Failure {
 function sanitizeAttributes(node: Node, tag: string, context: Context, survives: boolean): SanitizedAttributes {
   const output: Attribute[] = [];
   let inlineCss: string | null = null;
-  for (const attribute of attrs(node)) {
+  for (const attribute of [
+    ...attrs(node).filter((attribute) => attribute.name.toLowerCase() !== 'style'),
+    ...attrs(node).filter((attribute) => attribute.name.toLowerCase() === 'style'),
+  ]) {
     const name = attribute.name.toLowerCase();
     const dangerous = rejectDangerousAttribute(attribute, context.isAllowedAssetId);
     if (dangerous) { context.stripped.push(dangerous.violation); continue; }
@@ -507,13 +464,14 @@ function makeElement(
 function styleText(node: Node): string {
   return childNodes(node).map((child) => textValue(child)).join('');
 }
-function validateStyleAttributes(node: Node, isAllowedAssetId: (src: string) => boolean): Failure | null {
+function stripStyleAttributes(node: Node, context: Context): void {
   for (const attribute of attrs(node)) {
-    const dangerous = rejectDangerousAttribute(attribute, isAllowedAssetId);
-    if (dangerous) return dangerous;
-    return fail(HTML_VIOLATION_CODES.attribute, `attribute ${attribute.name} is not allowed on style`);
+    const dangerous = rejectDangerousAttribute(attribute, context.isAllowedAssetId);
+    context.stripped.push(dangerous?.violation ?? {
+      code: HTML_VIOLATION_CODES.attribute,
+      detail: `attribute ${attribute.name} is not allowed on style`,
+    });
   }
-  return null;
 }
 
 function scanDiscardedNode(node: Node, context: Context): Failure | null {
@@ -525,8 +483,7 @@ function scanDiscardedNode(node: Node, context: Context): Failure | null {
     return null;
   }
   if (name === 'style') {
-    const attributeFailure = validateStyleAttributes(node, context.isAllowedAssetId);
-    if (attributeFailure) return attributeFailure;
+    stripStyleAttributes(node, context);
     const result = sanitizeStylesheet(styleText(node), context.cssContext);
     if (!result.ok) context.stripped.push(...result.violations.map((v) => ({ code: cssRejectedCode(v.code), detail: v.detail })));
     else { context.stripped.push(...result.stripped.map((v) => ({ code: cssRejectedCode(v.code), detail: v.detail }))); context.stylesheetRules.push(result.css); }
@@ -558,65 +515,32 @@ function registerDocumentKeyframes(
   const templateContent = (node as { content?: Node }).content;
   return templateContent ? registerDocumentKeyframes(templateContent, context, svgPlans) : null;
 }
-function preflightCssSurfaces(
-  root: Node,
-  isAllowedAssetId: (src: string) => boolean,
-  svgPlans: Map<Node, SvgRootPlan>,
-): Failure | null {
-  let cssBytes = 0;
-  const addBytes = (css: string): Failure | null => {
-    cssBytes += Buffer.byteLength(css, 'utf8');
-    return cssBytes > CSS_MAX_STYLESHEET_BYTES
-      ? fail(cssRejectedCode('css_too_large'), `document CSS exceeds ${CSS_MAX_STYLESHEET_BYTES} bytes`)
-      : null;
-  };
-  const visit = (node: Node): Failure | null => {
-    if (svgPlans.has(node)) return null;
-    const name = tagName(node);
-    if (name && (ACTIVE_TAGS.has(name) || (name === 'meta' && attrs(node).some((attribute) => attribute.name.toLowerCase() === 'http-equiv')))) {
-      return fail(HTML_VIOLATION_CODES.activeTag, `active tag ${name}`);
-    }
-    if (name) {
-      const attributeFailure = preflightAttributeFailure(node, name, ALLOWED_TAGS.has(name), isAllowedAssetId);
-      if (attributeFailure) return attributeFailure;
-    }
-    if (name === 'style') {
-      const attributeFailure = validateStyleAttributes(node, isAllowedAssetId);
-      if (attributeFailure) return attributeFailure;
-      return addBytes(styleText(node));
-    }
-    if (name) {
-      for (const attribute of attrs(node)) {
-        if (attribute.name.toLowerCase() !== 'style') continue;
-        const byteFailure = addBytes(attribute.value);
-        if (byteFailure) return byteFailure;
-      }
-    }
-    for (const child of childNodes(node)) {
-      const childFailure = visit(child);
-      if (childFailure) return childFailure;
-    }
-    return null;
-  };
-  return visit(root);
-}
 
 function sanitizeNode(node: Node, context: Context, parentNode: DefaultTreeAdapterTypes.ParentNode | null): SanitizedNode[] | Failure {
   const svgPlan = context.svgPlans.get(node);
   if (svgPlan) return [reconstructSvgRoot(svgPlan, parentNode)];
   const name = tagName(node);
-  if (name === 'svg') return [];
+  if (name === 'svg') {
+    const text = collectDescendantText(node);
+    return text ? [makeText(text, parentNode)] : [];
+  }
   if (!name) {
     if ((node as { nodeName?: string }).nodeName === '#text') return [makeText(textValue(node), parentNode)];
     return [];
   }
   if (ACTIVE_TAGS.has(name) || (name === 'meta' && attrs(node).some((attribute) => attribute.name.toLowerCase() === 'http-equiv'))) {
     context.stripped.push({ code: HTML_VIOLATION_CODES.activeTag, detail: `active tag ${name}` });
-    return [];
+    if (!ACTIVE_CONTENT_CONTAINERS.has(name)) return [];
+    const unwrapped: SanitizedNode[] = [];
+    for (const child of authoredChildren(node)) {
+      const sanitized = sanitizeNode(child, context, parentNode);
+      if (isFailure(sanitized)) return sanitized;
+      unwrapped.push(...sanitized);
+    }
+    return unwrapped;
   }
   if (name === 'style') {
-    const attributeFailure = validateStyleAttributes(node, context.isAllowedAssetId);
-    if (attributeFailure) return attributeFailure;
+    stripStyleAttributes(node, context);
     const sourceCss = styleText(node);
     const result = sanitizeStylesheet(sourceCss, context.cssContext);
     if (!result.ok) context.stripped.push(...result.violations.map((v) => ({ code: cssRejectedCode(v.code), detail: v.detail })));
@@ -662,6 +586,15 @@ function sanitizeNode(node: Node, context: Context, parentNode: DefaultTreeAdapt
   return [placeholder];
 }
 
+function authoredChildren(node: Node): Node[] {
+  const templateContent = (node as { content?: Node }).content;
+  return templateContent ? childNodes(templateContent) : childNodes(node);
+}
+function collectDescendantText(node: Node): string {
+  if ((node as { nodeName?: string }).nodeName === '#text') return textValue(node);
+  return childNodes(node).map(collectDescendantText).join('');
+}
+
 function findBody(document: DefaultTreeAdapterTypes.Document): Element | null {
   return findElement(document, 'body');
 }
@@ -687,14 +620,12 @@ export function sanitizeHtmlExport(options: HtmlExportSanitizeOptions): HtmlExpo
     const counts = countParsedTree(document);
     if (isFailure(counts)) return { ok: false, violations: [counts.violation] };
     const isAllowedAssetId = options.isAllowedAssetId;
-    const htmlBoundary = preflightHtmlBoundary(document, isAllowedAssetId);
     const svgPreflight = preflightSvgSubtrees(document, isReservedValue);
     const svgPlans = svgPreflight.plans;
-    const initialStripped: HtmlSanitizerViolation[] = [
-      ...(htmlBoundary ? [htmlBoundary.violation] : []),
-      ...svgPreflight.stripped.map((code) => ({ code, detail: 'stripped SVG surface' })),
-    ];
-
+    const svgStripped = svgPreflight.stripped.map((code) => ({
+      code,
+      detail: 'stripped SVG surface',
+    }));
     const sourceNodes = childNodes(document);
     const cssContext = createCssSanitizeContext();
     const registrationFailure = registerDocumentKeyframes(document, cssContext, svgPlans);
@@ -706,7 +637,7 @@ export function sanitizeHtmlExport(options: HtmlExportSanitizeOptions): HtmlExpo
       nextInlineStyle: 0,
       cssContext,
       svgPlans,
-      stripped: [...initialStripped, ...registrationStripped],
+      stripped: [...registrationStripped],
     };
     const outputDocument = parse('<!doctype html><html><head></head><body></body></html>');
     const outputBody = findBody(outputDocument);
@@ -720,6 +651,7 @@ export function sanitizeHtmlExport(options: HtmlExportSanitizeOptions): HtmlExpo
     }
     outputBody.childNodes = outputNodes as DefaultTreeAdapterTypes.ChildNode[];
     for (const child of outputBody.childNodes) child.parentNode = outputBody;
+    context.stripped.push(...svgStripped);
 
     // Fail-closed structural gate (issue #27): a response that is not a structural
     // HTML document — e.g. model narration/prose — parses to a body of text nodes
@@ -760,8 +692,7 @@ export function sanitizeHtmlExport(options: HtmlExportSanitizeOptions): HtmlExpo
     }
 
     const rootIdentity = contentRootIdentity(document, isAllowedAssetId);
-    const rootStyleFailure = transferRootInlineStyles(document, context);
-    if (rootStyleFailure) return { ok: false, violations: [rootStyleFailure.violation] };
+    transferRootInlineStyles(document, context);
     return {
       ok: true,
       bodyHtml: serialize(outputBody),

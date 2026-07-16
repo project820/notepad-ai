@@ -44,6 +44,18 @@ describe('html export CSS sanitizer', () => {
       declarationCount: 2,
     });
   });
+  it('strips invalid at-rules without discarding valid sibling rules', () => {
+    const result = sanitizeStylesheet('@import url(x);p{color:red}.note{font-weight:700}span{color:blue}');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.css).toContain('[data-he-content] p{color:red}');
+    expect(result.css).toContain('[data-he-content] .note{font-weight:700}');
+    expect(result.css).toContain('[data-he-content] span{color:blue}');
+    expect(result.css).not.toContain('@import');
+    expect(result.stripped).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: CSS_VIOLATION_CODES.disallowedAtRule }),
+    ]));
+  });
   it('accepts main and aside type selectors scoped to the content root', () => {
     expect(sanitizeStylesheet('main{color:red}')).toMatchObject({
       ok: true,

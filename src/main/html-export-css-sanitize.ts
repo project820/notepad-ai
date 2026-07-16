@@ -361,12 +361,6 @@ function strip(context: CssSanitizeContext, failure: Failure): void {
   context.stripped.push(failure.violation);
 }
 
-function countRawBytes(input: string, context: CssSanitizeContext): Failure | null {
-  context.rawBytes += Buffer.byteLength(input, 'utf8');
-  return context.rawBytes > CSS_MAX_STYLESHEET_BYTES
-    ? fail(CSS_VIOLATION_CODES.tooLarge, `document CSS exceeds ${CSS_MAX_STYLESHEET_BYTES} bytes`)
-    : null;
-}
 
 function countRule(context: CssSanitizeContext, atRule: boolean): Failure | null {
   if (atRule) context.seenAtRuleNodes++;
@@ -722,8 +716,9 @@ function sanitizeDeclarations(block: any, context: CssSanitizeContext, counts: C
     if (!failure) failure = validateValue(declaration.value);
     if (!failure && PROPERTY_SET.has(property)) failure = validateNumericCaps(property, declaration.value, context);
     if (failure) { strip(context, failure); continue; }
-    if (!PROPERTY_SET.has(property) || lexer.matchProperty(property, generated(declaration.value)).error) continue;
-    output.push(`${property}:${generated(declaration.value)}`);
+    const value = generated(declaration.value);
+    if (!PROPERTY_SET.has(property) || lexer.matchProperty(property, value).error) continue;
+    output.push(`${property}:${value}`);
     counts.declarationCount++;
   }
   return output.join(';');
@@ -822,22 +817,40 @@ function sanitizeNodes(nodes: any[], context: CssSanitizeContext, counts: Counts
       if (rule) output.push(rule);
       continue;
     }
-    if (node.type !== 'Atrule') return fail(CSS_VIOLATION_CODES.parseError, 'invalid stylesheet node');
+    if (node.type !== 'Atrule') {
+      strip(context, fail(CSS_VIOLATION_CODES.parseError, 'invalid stylesheet node'));
+      continue;
+    }
     const atRuleFailure = countRule(context, true);
-    if (atRuleFailure) return atRuleFailure;
+    if (atRuleFailure) { strip(context, atRuleFailure); continue; }
     const name = String(node.name).toLowerCase();
-    if (!AT_RULE_SET.has(name)) return fail(CSS_VIOLATION_CODES.disallowedAtRule, `@${name}`);
+    if (!AT_RULE_SET.has(name)) {
+      strip(context, fail(CSS_VIOLATION_CODES.disallowedAtRule, `@${name}`));
+      continue;
+    }
     if (name === 'keyframes') {
       const keyframes = sanitizeKeyframes(node, context, counts);
-      if (isFailure(keyframes)) return keyframes;
+      if (isFailure(keyframes)) {
+        strip(context, keyframes);
+        continue;
+      }
       if (keyframes) output.push(keyframes);
       continue;
     }
     const preludeFailure = validateAtRulePrelude(node);
-    if (preludeFailure) return preludeFailure;
-    if (!node.block) return fail(CSS_VIOLATION_CODES.disallowedAtRule, `@${name} without block`);
+    if (preludeFailure) {
+      strip(context, preludeFailure);
+      continue;
+    }
+    if (!node.block) {
+      strip(context, fail(CSS_VIOLATION_CODES.disallowedAtRule, `@${name} without block`));
+      continue;
+    }
     const content = sanitizeNodes(children(node.block), context, counts, depth + 1);
-    if (isFailure(content)) return content;
+    if (isFailure(content)) {
+      strip(context, content);
+      continue;
+    }
     if (content) output.push(`@${name} ${generated(node.prelude)}{${content}}`);
   }
   return output.join('');
