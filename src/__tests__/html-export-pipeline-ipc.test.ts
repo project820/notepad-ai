@@ -1098,10 +1098,12 @@ describe('HTML export pipeline IPC', () => {
       const invalidViewports = [
         { width: 'x'.repeat(1_000_000), height: [] },
         { width: -1, height: 720 },
+        { width: 319, height: 720 },
         { width: Number.NaN, height: 720 },
         { width: Number.POSITIVE_INFINITY, height: 720 },
         { width: 1280.5, height: 720 },
-        { width: 10_001, height: 720 },
+        { width: 4097, height: 720 },
+        { width: 10_000, height: 720 },
       ];
 
       for (const viewport of invalidViewports) {
@@ -1114,6 +1116,20 @@ describe('HTML export pipeline IPC', () => {
       }
 
       expect(generateHtml).not.toHaveBeenCalled();
+      for (const viewport of [
+        { width: 320, height: 720 },
+        { width: 4096, height: 720 },
+        { width: 1280, height: 720 },
+        { width: 720, height: 1280 },
+      ]) {
+        const result = await ipc.handler('html:generate')!(eventFor(sender), {
+          prompt: 'make it',
+          model: { provider: 'chatgpt', id: 'gpt-5.4-mini' },
+          viewport,
+        });
+        expect(result).toMatchObject({ state: 'final', finalizedArtifactId: 'finalized-1' });
+      }
+      expect(generateHtml).toHaveBeenCalledTimes(4);
 
       // An allowlisted provider is forwarded to the main-owned generator.
       const ok = await ipc.handler('html:generate')!(eventFor(sender), {
@@ -1121,7 +1137,7 @@ describe('HTML export pipeline IPC', () => {
         model: { provider: 'chatgpt', id: 'gpt-5.4-mini' },
         viewport: { width: 1280, height: 720 },
       });
-      expect(generateHtml).toHaveBeenCalledTimes(1);
+      expect(generateHtml).toHaveBeenCalledTimes(5);
       expect(generateHtml).toHaveBeenCalledWith(91, {
         prompt: 'make it',
         model: { provider: 'chatgpt', id: 'gpt-5.4-mini' },

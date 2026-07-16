@@ -17,15 +17,29 @@ const APP_LOG_FIELD_MAX_CHARS = 512;
 const REDACTED_PATH = '[REDACTED_PATH]';
 const REDACTED_SECRET = '[REDACTED_SECRET]';
 
+/**
+ * Redact secrets and path-like values. Single-segment absolute paths (such as
+ * /tmp or /api) are deliberately preserved to avoid over-redacting prose;
+ * macOS home paths (/Users/<name>/...) have at least two segments and redact.
+ */
 function redactAppLogText(value: string): string {
-  return value
+  const redacted = value
     .replace(/\bBearer\s+[A-Za-z0-9._~+/\-=]+/gi, `Bearer ${REDACTED_SECRET}`)
     .replace(/\bsk-[A-Za-z0-9_-]{4,}\b/g, REDACTED_SECRET)
     .replace(/\bapi[_-]?key\s*([=:])\s*(?:"[^"]*"|'[^']*'|[^\s,;]+)/gi, (_match, separator: string) => `api_key${separator}${REDACTED_SECRET}`)
     .replace(/\b([A-Za-z_][A-Za-z0-9_]*_(?:API_KEY|ACCESS_TOKEN|TOKEN|SECRET|PASSWORD))\s*([=:])\s*(?:"[^"]*"|'[^']*'|[^\s,;]+)/gi, (_match, key: string, separator: string) => `${key}${separator}${REDACTED_SECRET}`)
-    .replace(/\b(access[_-]?token|refresh[_-]?token|token)\s*([=:])\s*(?:"[^"]*"|'[^']*'|[^\s,;]+)/gi, (_match, key: string, separator: string) => `${key}${separator}${REDACTED_SECRET}`)
-    .replace(/\bauthorization\s*:\s*(?:(?:[A-Za-z]+\s+)?(?:"[^"]*"|'[^']*'|[^\s,;]+))/gi, `authorization: ${REDACTED_SECRET}`)
-    .replace(/(^|[\s"'(=])(?:file:\/\/)?(?:~(?:\/[^\s"'`,;:()[\]{}\/]+(?: [^\s"'`,;:()[\]{}\/]+)*)+|(?:\/[^\s"'`,;:()[\]{}\/]+(?: [^\s"'`,;:()[\]{}\/]+)*(?=\/))*\/[^\s"'`,;:()[\]{}\/]+)/g, `$1${REDACTED_PATH}`);
+    .replace(/\b(access[_-]?token|refresh[_-]?token|token|password|passphrase|secret|credentials?)\s*([=:])\s*(?:"[^"]*"|'[^']*'|[^\s,;]+)/gi, (_match, key: string, separator: string) => `${key}${separator}${REDACTED_SECRET}`)
+    .replace(/\bauthorization\s*:\s*(?:(?:[A-Za-z]+\s+)?(?:"[^"]*"|'[^']*'|[^\s,;]+))/gi, `authorization: ${REDACTED_SECRET}`);
+  return redacted
+    .split(/(https?:\/\/[^\s"'`<>]+)/gi)
+    .map((part) => /^https?:\/\//i.test(part)
+      ? part.replace(/([?&][^=\s"'`<>&]+)=((?:\/|%2f)[^&\s"'`<>]*)/gi, `$1=${REDACTED_PATH}`)
+      : part.replace(
+        /(^|[\s"'(=:])(?:file:\/\/)?(?:~(?:[A-Za-z0-9._-]+)?\/(?:[^\s~"',;:[\]{}\/]+(?: {1,2}[^\s~"',;:[\]{}\/]+)*\/)*[^\s~"',;:[\]{}\/]+|\/(?:[^\s~"',;:[\]{}\/]+(?: {1,2}[^\s~"',;:[\]{}\/]+)*\/)+[^\s~"',;:[\]{}\/]+)/g,
+        `$1${REDACTED_PATH}`,
+      ),
+    )
+    .join('');
 }
 
 export type AppLogLevel = 'info' | 'warn' | 'error';
@@ -51,6 +65,7 @@ let deps: AppLogDeps | null = null;
 let pruneInFlight: Promise<void> | null = null;
 let lastPruneDay = '';
 let pruneRetryRequested = false;
+let pruneGeneration = 0;
 
 function clock(): number {
   return deps?.now?.() ?? Date.now();
@@ -66,7 +81,7 @@ function logFileName(day: string): string {
 
 function clampText(value: string, max: number): string {
   if (value.length <= max) return value;
-  return `${value.slice(0, max)}…`;
+  return `${value.slice(0, Math.max(0, max - 1))}…`;
 }
 
 /** Serialize a field value for a single log line (no newlines, hard-capped). */
@@ -74,7 +89,8 @@ export function formatAppLogField(value: string | number | boolean | null | unde
   if (value === undefined) return '';
   if (value === null) return 'null';
   if (typeof value === 'boolean' || typeof value === 'number') return String(value);
-  return clampText(redactAppLogText(value.replace(/[\r\n\t]+/g, ' ').trim()), APP_LOG_FIELD_MAX_CHARS);
+  const capped = value.slice(0, 8 * APP_LOG_FIELD_MAX_CHARS);
+  return clampText(redactAppLogText(capped.replace(/[\r\n\t]+/g, ' ').trim()), APP_LOG_FIELD_MAX_CHARS);
 }
 
 export function formatAppLogLine(
@@ -116,7 +132,9 @@ export function parseAppLogDayFromFileName(name: string): string | null {
  * userData path is set. Subsequent calls replace deps (tests).
  */
 export function configureAppLog(next: AppLogDeps): void {
+  pruneGeneration += 1;
   deps = next;
+  pruneInFlight = null;
   lastPruneDay = '';
   pruneRetryRequested = false;
 }
@@ -151,8 +169,8 @@ async function pruneExpired(dir: string): Promise<boolean> {
       if (!day || !isExpiredAppLogDay(day, today)) return true;
       try {
         await unlink(path.join(dir, name));
-      } catch {
-        return false;
+      } catch (error) {
+        return (error as NodeJS.ErrnoException).code === 'ENOENT';
       }
       return true;
     }),
@@ -165,11 +183,13 @@ async function pruneExpired(dir: string): Promise<boolean> {
 }
 
 function schedulePrune(dir: string, retryAfterFailure = true): void {
+  const generation = pruneGeneration;
   if (pruneInFlight) {
     pruneRetryRequested = true;
     return;
   }
   const finish = (pruneSucceeded: boolean) => {
+    if (generation !== pruneGeneration) return;
     pruneInFlight = null;
     const retry = pruneRetryRequested || (!pruneSucceeded && retryAfterFailure);
     pruneRetryRequested = false;
@@ -189,8 +209,9 @@ export function appLog(
   fields?: AppLogFields,
 ): Promise<void> {
   if (!deps) return Promise.resolve();
-  const line = formatAppLogLine(level, scope, message, fields, clock());
-  const day = utcDay(clock());
+  const nowMs = clock();
+  const line = formatAppLogLine(level, scope, message, fields, nowMs);
+  const day = utcDay(nowMs);
   const write = (async () => {
     const dir = await ensureDir();
     if (!dir) return;

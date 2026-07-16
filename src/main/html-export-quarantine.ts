@@ -22,8 +22,8 @@ export type QuarantineViewport = { width: number; height: number };
 /** Fallback measurement viewport (landscape 720p). Hosts and callers share this. */
 export const DEFAULT_VIEWPORT: QuarantineViewport = { width: 1280, height: 720 };
 
-const VIEWPORT_MIN = 320;
-const VIEWPORT_MAX = 4096;
+export const VIEWPORT_MIN = 320;
+export const VIEWPORT_MAX = 4096;
 
 /**
  * Validate/clamp a renderer- or caller-supplied viewport. Invalid/absent input
