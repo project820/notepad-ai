@@ -55,6 +55,19 @@ describe('app-log', () => {
     expect(field).not.toContain(homePath);
     expect(line).not.toContain(absolutePath);
   });
+  it('redacts suffixed secret assignments case-insensitively', () => {
+    const field = formatAppLogField('XAI_API_KEY=secret-xai GITHUB_TOKEN: secret-github MY_ACCESS_TOKEN=secret-access xAi_SeCrEt: secret-secret my_password=secret-password');
+    expect(field).toContain('XAI_API_KEY=[REDACTED_SECRET]');
+    expect(field).toContain('GITHUB_TOKEN:[REDACTED_SECRET]');
+    expect(field).toContain('MY_ACCESS_TOKEN=[REDACTED_SECRET]');
+    expect(field).toContain('xAi_SeCrEt:[REDACTED_SECRET]');
+    expect(field).toContain('my_password=[REDACTED_SECRET]');
+    expect(field).not.toContain('secret-xai');
+    expect(field).not.toContain('secret-github');
+    expect(field).not.toContain('secret-access');
+    expect(field).not.toContain('secret-secret');
+    expect(field).not.toContain('secret-password');
+  });
   it('redacts token assignments and authorization values from persisted fields', async () => {
     const writes: string[] = [];
     const modelId = 'caller-model?token=secret-model-token';
