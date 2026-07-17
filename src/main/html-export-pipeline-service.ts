@@ -23,15 +23,26 @@ import { HTML_SANITIZER_LIMITS, sanitizeHtmlExport } from './html-export-sanitiz
 
 export const HTML_EXPORT_RAW_MODEL_OUTPUT_MAX_BYTES = HTML_EXPORT_RAW_ARTIFACT_MAX_BYTES;
 export const HTML_EXPORT_PIPELINE_STAGE_MAX_BYTES = HTML_EXPORT_STAGE_ARTIFACT_MAX_BYTES;
+const RAW_TEXT_OPENING_TAG = /^<(style|script|title|textarea)\b/i;
+
 function findBalancedClosingMarker(
   source: string,
   start: number,
   closingMarker: RegExp,
 ): RegExpExecArray | undefined {
+  const searchFlags = closingMarker.global ? closingMarker.flags : `${closingMarker.flags}g`;
+  const closingMarkerSearch = new RegExp(closingMarker.source, searchFlags);
+  closingMarkerSearch.lastIndex = start;
+  let closing = closingMarkerSearch.exec(source);
   let cursor = start;
   let preBalance = 0;
 
   while (cursor < source.length) {
+    while (closing && closing.index < cursor) {
+      closing = closingMarkerSearch.exec(source);
+    }
+    if (closing?.index === cursor && preBalance === 0) return closing;
+
     if (source.startsWith('<!--', cursor)) {
       const commentEnd = source.indexOf('-->', cursor + 4);
       if (commentEnd === -1) return undefined;
@@ -55,7 +66,7 @@ function findBalancedClosingMarker(
       if (tagEnd === source.length) return undefined;
 
       const tag = source.slice(cursor, tagEnd + 1);
-      const rawTextElement = /^<(style|script)\b/i.exec(tag)?.[1]?.toLowerCase();
+      const rawTextElement = RAW_TEXT_OPENING_TAG.exec(tag)?.[1];
       if (rawTextElement) {
         const rawTextClose = new RegExp(`</${rawTextElement}\\s*>`, 'gi');
         rawTextClose.lastIndex = tagEnd + 1;
@@ -71,16 +82,10 @@ function findBalancedClosingMarker(
         preBalance = Math.max(0, preBalance - 1);
       }
 
-      closingMarker.lastIndex = cursor;
-      const closing = closingMarker.exec(source);
-      if (closing?.index === cursor && preBalance === 0) return closing;
       cursor = tagEnd + 1;
       continue;
     }
 
-    closingMarker.lastIndex = cursor;
-    const closing = closingMarker.exec(source);
-    if (closing?.index === cursor && preBalance === 0) return closing;
     cursor += 1;
   }
 }

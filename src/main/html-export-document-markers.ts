@@ -49,7 +49,7 @@ export function findHtmlExportDocumentMarkers(source: string): HtmlExportDocumen
       markers.push({ index: cursor, kind: 'html' });
     }
 
-    const rawTextElement = /^<(style|script)\b/i.exec(tag)?.[1]?.toLowerCase();
+    const rawTextElement = /^<(style|script|title|textarea)\b/i.exec(tag)?.[1]?.toLowerCase();
     if (rawTextElement) {
       const rawTextClose = new RegExp(`</${rawTextElement}\\s*>`, 'gi');
       rawTextClose.lastIndex = tagEnd + 1;

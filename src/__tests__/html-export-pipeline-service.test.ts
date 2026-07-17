@@ -15,6 +15,7 @@ import {
 } from '../shared/html-export-pipeline';
 import type { HtmlExportParseValue } from '../main/html-export-parse-host';
 import { sanitizeHtmlExport } from '../main/html-export-sanitize';
+import { findHtmlExportDocumentMarkers } from '../main/html-export-document-markers';
 import {
   HTML_EXPORT_PIPELINE_STAGE_MAX_BYTES,
   HTML_EXPORT_RAW_MODEL_OUTPUT_MAX_BYTES,
@@ -303,11 +304,31 @@ describe('extractHtmlExportDocument', () => {
     const output = '<!doctype html><html><body><p>kept</p></body></html>\nNote: close with </html>';
     expect(extractHtmlExportDocument(output)).toBe('<!doctype html><html><body><p>kept</p></body></html>');
   });
-  it('ignores pre and html markers inside raw-text elements', () => {
-    const output = '<!doctype html><html><head><style>.x::before{content:"<pre>"}</style></head><body><p>kept</p></body></html>\nTrailing prose.';
+  it.each([
+    ['style', '.x::before{content:"<pre>"}'],
+    ['title', 'About <html> tags'],
+    ['textarea', 'About <html> tags'],
+  ])('ignores pre and html markers inside %s', (element, content) => {
+    const output = `<!doctype html><html><head><${element}>${content}</${element}></head><body><p>kept</p></body></html>\nTrailing prose.`;
+    expect(findHtmlExportDocumentMarkers(output)).toEqual([
+      { index: 0, kind: 'doctype' },
+      { index: '<!doctype html>'.length, kind: 'html' },
+    ]);
     expect(extractHtmlExportDocument(output)).toBe(
-      '<!doctype html><html><head><style>.x::before{content:"<pre>"}</style></head><body><p>kept</p></body></html>',
+      `<!doctype html><html><head><${element}>${content}</${element}></head><body><p>kept</p></body></html>`,
     );
+  });
+  it.each(['title', 'textarea'])('ignores HTML closing markers inside %s', (element) => {
+    const output = `<!doctype html><html><head><${element}>About </html> tags</${element}></head><body><p>kept</p></body></html>`;
+
+    expect(extractHtmlExportDocument(output)).toBe(output);
+  });
+  it('extracts a 2 MB document with one long paragraph in linear time', () => {
+    const output = `<html><body><p>${'x'.repeat(2 * 1024 * 1024)}</p></body></html>`;
+    const startedAt = performance.now();
+
+    expect(extractHtmlExportDocument(output)).toBe(output);
+    expect(performance.now() - startedAt).toBeLessThan(500);
   });
   it('prefers html-labeled fragments over larger unlabeled markup fences', () => {
     const output = '```html\n<section><p>kept</p></section>\n```\n```\nconst template = `<section><p>This is a much larger JavaScript template literal.</p></section>`;\n```';
