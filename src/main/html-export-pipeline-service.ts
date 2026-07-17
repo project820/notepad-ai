@@ -25,38 +25,43 @@ export const HTML_EXPORT_PIPELINE_STAGE_MAX_BYTES = HTML_EXPORT_STAGE_ARTIFACT_M
 export function extractHtmlExportDocument(modelOutput: string): string {
   if (/^\s*(?:<!doctype\b|<html\b)/i.test(modelOutput)) return modelOutput;
 
-  const fence = /^```[A-Za-z0-9-]*[ \t]*\r?$/gm;
-  const closingFence = /^```[ \t]*\r?$/gm;
+  const fence = /^```\S*[ \t]*\r?$/gm;
+  const nextFence = /^```(\S*)[ \t]*\r?$/gm;
   let best: { start: number; end: number; preference: number } | undefined;
   let opening: RegExpExecArray | null;
   while ((opening = fence.exec(modelOutput))) {
     const afterOpening = opening.index + opening[0].length;
     const start = modelOutput[afterOpening] === '\n' ? afterOpening + 1 : afterOpening;
-    closingFence.lastIndex = start;
-    const closing = closingFence.exec(modelOutput);
-    let end = closing ? closing.index : modelOutput.length;
+    nextFence.lastIndex = start;
+    const boundary = nextFence.exec(modelOutput);
+    let end = boundary ? boundary.index : modelOutput.length;
     let content = modelOutput.slice(start, end);
-    if (/<!doctype\b|<html\b/i.test(content) && !/<\/html\s*>/i.test(content)) {
-      const closingHtml = /<\/html\s*>/gi;
-      closingHtml.lastIndex = end;
-      const documentClosing = closingHtml.exec(modelOutput);
-      if (documentClosing) {
-        end = documentClosing.index + documentClosing[0].length;
-        content = modelOutput.slice(start, end);
-      } else {
-        let lastClosing = closing;
-        let candidate: RegExpExecArray | null;
-        while ((candidate = closingFence.exec(modelOutput))) lastClosing = candidate;
-        end = lastClosing ? lastClosing.index : modelOutput.length;
+    let preference = /<!doctype\b|<html\b/i.test(content) ? 2 : content.includes('<') ? 1 : 0;
+    if (preference === 2 && !/<\/html\s*>/i.test(content) && (!boundary || !boundary[1])) {
+      const extension = /<\/html\s*>|^```(\S*)[ \t]*\r?$/gmi;
+      extension.lastIndex = end;
+      let lastClosing = boundary;
+      let candidate: RegExpExecArray | null;
+      while ((candidate = extension.exec(modelOutput))) {
+        if (candidate[0][0] === '<') {
+          end = candidate.index + candidate[0].length;
+          content = modelOutput.slice(start, end);
+          break;
+        }
+        if (candidate[1]) break;
+        lastClosing = candidate;
+      }
+      if (!/<\/html\s*>/i.test(content) && lastClosing) {
+        end = lastClosing.index;
         content = modelOutput.slice(start, end);
       }
     }
-    const preference = /<!doctype\b|<html\b/i.test(content) ? 2 : content.includes('<') ? 1 : 0;
+    if (/<\/html\s*>/i.test(content)) preference = 3;
     if (!best || preference > best.preference || (preference === best.preference && end - start > best.end - best.start)) {
       best = { start, end, preference };
     }
-    if (!closing) break;
-    fence.lastIndex = closing.index + closing[0].length;
+    if (!boundary) break;
+    fence.lastIndex = boundary[1] ? boundary.index : boundary.index + boundary[0].length;
   }
   if (best && best.preference > 0) return modelOutput.slice(best.start, best.end);
 

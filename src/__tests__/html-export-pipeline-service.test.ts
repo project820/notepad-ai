@@ -201,6 +201,16 @@ describe('extractHtmlExportDocument', () => {
       '<!doctype html><html><body><p>kept</p></body></html>\n',
     );
   });
+  it('does not merge an unterminated HTML draft with a complete sibling document fence', () => {
+    expect(extractHtmlExportDocument('```html\n<html><body><p>draft</p>\nNarration\n```html\n<html><body><p>v2</p></body></html>\n```')).toBe(
+      '<html><body><p>v2</p></body></html>\n',
+    );
+  });
+  it('does not include a sibling CSS fence after an unterminated HTML fence', () => {
+    expect(extractHtmlExportDocument('```html\n<html><body><p>draft</p>\n```css\nbody { color: red; }\n```')).toBe(
+      '<html><body><p>draft</p>\n',
+    );
+  });
   it('does not truncate a fenced document at literal fences inside a pre block', () => {
     const document = '```html\n<!doctype html><html><body><pre>\n```\ninner code\n```\n</pre><p>tail content</p></body></html>\n```';
     expect(extractHtmlExportDocument(document)).toBe(
@@ -226,6 +236,11 @@ describe('extractHtmlExportDocument', () => {
   it('extracts a full document from an xhtml fence', () => {
     expect(extractHtmlExportDocument('```xhtml\n<!doctype html><html><body><p>kept</p></body></html>\n```')).toBe(
       '<!doctype html><html><body><p>kept</p></body></html>\n',
+    );
+  });
+  it('supports non-alphanumeric fenced language tags', () => {
+    expect(extractHtmlExportDocument('```c++\n<html><body><p>kept</p></body></html>\n```')).toBe(
+      '<html><body><p>kept</p></body></html>\n',
     );
   });
   it('slices a complete document from leading narration and otherwise passes text through', () => {
