@@ -4,6 +4,7 @@ import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { installBlockAi } from '../block-ai';
 import { closeOpenMenu } from '../dropdown';
+import { setLocale } from '../i18n';
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
@@ -17,6 +18,7 @@ afterEach(() => {
   document.body.innerHTML = '';
   vi.restoreAllMocks();
   vi.useRealTimers();
+  setLocale('en');
 });
 
 function mount(over: {
@@ -265,7 +267,7 @@ describe('block-ai auth affordance (PR-2 Bug A)', () => {
     signInBtn!.click();
     expect(openAiSettings).toHaveBeenCalledTimes(1);
   });
-  it('renders the add-key affordance for the composer API-key requirement', async () => {
+  it('renders localized English composer copy and the add-key affordance for a coded auth error', async () => {
     const openAiSettings = vi.fn();
     const { view, aiChat, emit } = mountAuth(
       openAiSettings,
@@ -280,26 +282,60 @@ describe('block-ai auth affordance (PR-2 Bug A)', () => {
     emit({
       kind: 'error',
       errorKind: 'auth',
+      errorCode: 'grok_composer_requires_api_key',
       message: 'grok-composer-2.5-fast requires an xAI API key.',
     });
 
-    const signInBtn = document.querySelector<HTMLButtonElement>('#ba-options .ba-signin');
+    const optionsEl = document.querySelector<HTMLDivElement>('#ba-options')!;
+    const signInBtn = optionsEl.querySelector<HTMLButtonElement>('.ba-signin');
+    expect(optionsEl.querySelector('.ba-auth-code')?.textContent).toBe(
+      'Grok Composer requires an xAI API key. Add it in AI settings to use this model.',
+    );
     expect(signInBtn).toBeTruthy();
     signInBtn!.click();
     expect(openAiSettings).toHaveBeenCalledTimes(1);
   });
+  it('renders localized Korean composer copy and the add-key affordance for a coded auth error', async () => {
+    setLocale('ko');
+    const openAiSettings = vi.fn();
+    const { view, emit } = mountAuth(
+      openAiSettings,
+      { provider: 'grok', id: 'grok-composer-2.5-fast' },
+    );
+    await openAndGenerate(view);
 
-  it('keeps the escaped-innerHTML path for non-auth errors (no sign-in affordance)', async () => {
+    emit({
+      kind: 'error',
+      errorKind: 'auth',
+      errorCode: 'grok_composer_requires_api_key',
+      message: 'grok-composer-2.5-fast requires an xAI API key.',
+    });
+
+    const optionsEl = document.querySelector<HTMLDivElement>('#ba-options')!;
+    expect(optionsEl.querySelector('.ba-auth-code')?.textContent).toBe(
+      'Grok Composer를 사용하려면 xAI API 키가 필요합니다. AI 설정에서 키를 추가하세요.',
+    );
+    expect(optionsEl.querySelector('.ba-signin')).toBeTruthy();
+  });
+
+  it('renders only localized coded copy for non-auth errors', async () => {
     const openAiSettings = vi.fn();
     const { view, emit } = mountAuth(openAiSettings);
     await openAndGenerate(view);
 
-    emit({ kind: 'error', errorKind: 'network', message: 'boom-network' });
+    emit({
+      kind: 'error',
+      errorKind: 'network',
+      errorCode: 'grok_composer_requires_api_key',
+      message: 'ignored by localized coded copy',
+    });
 
     const optionsEl = document.querySelector<HTMLDivElement>('#ba-options')!;
     expect(optionsEl.querySelector('.ba-signin')).toBeNull();
     expect(optionsEl.querySelector('.ba-auth-error')).toBeNull();
-    expect(optionsEl.querySelector('.ba-error')?.textContent).toContain('boom-network');
+    expect(optionsEl.querySelector('.ba-error')?.textContent).toBe(
+      'Grok Composer requires an xAI API key. Add it in AI settings to use this model.',
+    );
     expect(openAiSettings).not.toHaveBeenCalled();
   });
 });

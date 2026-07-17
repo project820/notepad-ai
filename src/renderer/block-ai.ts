@@ -454,12 +454,12 @@ export function installBlockAi(deps: BlockAiDeps) {
         inflightId = null;
       } else if (e.kind === 'error') {
         const message = e.errorCode ? aiChatErrorMessage(e) : undefined;
-        if (message) {
+        if (e.errorKind === 'auth') {
+          // A coded auth error needs both its localized remediation copy and the
+          // settings affordance; uncoded auth errors retain the fixed copy only.
+          renderAuthAffordance(optionsEl, deps.openAiSettings, message);
+        } else if (message) {
           optionsEl.innerHTML = `<div class="ba-error">${escapeHtml(message)}</div>`;
-        } else if (e.errorKind === 'auth') {
-          // Classified auth failure (e.g. expired ChatGPT session): show a fixed,
-          // DOM-constructed sign-in affordance. Never surface the raw provider body.
-          renderAuthAffordance(optionsEl, deps.openAiSettings);
         } else {
           optionsEl.innerHTML = `<div class="ba-error">${escapeHtml(aiChatErrorMessage(e))}</div>`;
         }
@@ -578,10 +578,20 @@ const AUTH_AFFORDANCE_COPY: Record<'ko' | 'en', { message: string; button: strin
  * surfaced (no innerHTML / interpolation), so a hostile error body cannot inject
  * markup. The button routes to the AI settings / login modal via `onSignIn`.
  */
-function renderAuthAffordance(optionsEl: HTMLElement, onSignIn?: () => void): void {
+function renderAuthAffordance(
+  optionsEl: HTMLElement,
+  onSignIn?: () => void,
+  codedMessage?: string,
+): void {
   const copy = AUTH_AFFORDANCE_COPY[getLocale() === 'ko' ? 'ko' : 'en'];
   const wrap = document.createElement('div');
   wrap.className = 'ba-error ba-auth-error';
+  if (codedMessage) {
+    const codedMsg = document.createElement('div');
+    codedMsg.className = 'ba-auth-code';
+    codedMsg.textContent = codedMessage;
+    wrap.appendChild(codedMsg);
+  }
   const msg = document.createElement('div');
   msg.className = 'ba-auth-msg';
   msg.textContent = copy.message;
