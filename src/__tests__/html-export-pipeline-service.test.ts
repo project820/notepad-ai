@@ -201,6 +201,17 @@ describe('extractHtmlExportDocument', () => {
       '<!doctype html><html><body><p>kept</p></body></html>\n',
     );
   });
+  it('does not truncate a fenced document at literal fences inside a pre block', () => {
+    const document = '```html\n<!doctype html><html><body><pre>\n```\ninner code\n```\n</pre><p>tail content</p></body></html>\n```';
+    expect(extractHtmlExportDocument(document)).toBe(
+      '<!doctype html><html><body><pre>\n```\ninner code\n```\n</pre><p>tail content</p></body></html>',
+    );
+  });
+
+  it('passes through an unfenced document containing literal fences inside a pre block', () => {
+    const document = '<!doctype html><html><body><pre>\n```\ninner code\n```\n</pre><p>tail content</p></body></html>';
+    expect(extractHtmlExportDocument(document)).toBe(document);
+  });
 
   it('keeps an unfenced document ahead of a later fenced code snippet', () => {
     const document = '<!doctype html><html><body><p>kept</p></body></html>\n```css\nbody { color: red; }\n```';

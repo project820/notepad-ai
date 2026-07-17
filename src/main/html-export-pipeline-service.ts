@@ -34,8 +34,23 @@ export function extractHtmlExportDocument(modelOutput: string): string {
     const start = modelOutput[afterOpening] === '\n' ? afterOpening + 1 : afterOpening;
     closingFence.lastIndex = start;
     const closing = closingFence.exec(modelOutput);
-    const end = closing ? closing.index : modelOutput.length;
-    const content = modelOutput.slice(start, end);
+    let end = closing ? closing.index : modelOutput.length;
+    let content = modelOutput.slice(start, end);
+    if (/<!doctype\b|<html\b/i.test(content) && !/<\/html\s*>/i.test(content)) {
+      const closingHtml = /<\/html\s*>/gi;
+      closingHtml.lastIndex = end;
+      const documentClosing = closingHtml.exec(modelOutput);
+      if (documentClosing) {
+        end = documentClosing.index + documentClosing[0].length;
+        content = modelOutput.slice(start, end);
+      } else {
+        let lastClosing = closing;
+        let candidate: RegExpExecArray | null;
+        while ((candidate = closingFence.exec(modelOutput))) lastClosing = candidate;
+        end = lastClosing ? lastClosing.index : modelOutput.length;
+        content = modelOutput.slice(start, end);
+      }
+    }
     const preference = /<!doctype\b|<html\b/i.test(content) ? 2 : content.includes('<') ? 1 : 0;
     if (!best || preference > best.preference || (preference === best.preference && end - start > best.end - best.start)) {
       best = { start, end, preference };
