@@ -3,7 +3,7 @@
 
 - **ChatGPT:** `gpt-5.6`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, and `gpt-5.5` are verified against OpenAI's latest-model documentation. `gpt-5.3-codex-spark` is displayable only when it appears in the authenticated `/models` response; it is intentionally absent from the fallback catalog.
 - **Claude:** `claude-opus-4-8`, `claude-sonnet-5`, and `claude-haiku-4-5` are CLI-smoke-verified below. `claude-sonnet-4-6` remains accepted as a legacy selection but is not curated.
-- **Grok:** `grok-4.5` and `grok-composer-2.5-fast` are the verified xAI catalog IDs used by the Grok provider.
+- **Grok:** `grok-4.5` is available through both the xAI API and Grok CLI. `grok-composer-2.5-fast` requires an xAI API key; CLI-only authentication lists `grok-4.5` only.
 
 ## Claude CLI verification
 

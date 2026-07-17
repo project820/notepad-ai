@@ -373,6 +373,20 @@ describe('ProviderRegistry routing', () => {
     expect(chatgptIds).toContain('gpt-5.6-sol');
     expect(chatgptIds.filter((id) => id === 'gpt-5.6')).toHaveLength(1); // deduped
   });
+  it('does not reintroduce API-only Grok composer in the HTML catalog for CLI auth', async () => {
+    const cliGrokModels: ModelRef[] = [
+      { provider: 'grok', id: 'grok-4.5', label: 'Grok 4.5', humanizeEngineId: 'openai', requiresAuth: true },
+    ];
+    const reg = new ProviderRegistry(fakeKeyStore(), {
+      grok: fakeProvider('grok', true, () => {}, cliGrokModels),
+    });
+
+    const grokIds = (await reg.getAvailableModelsForHtmlExport())
+      .filter((model) => model.provider === 'grok')
+      .map((model) => model.id);
+
+    expect(grokIds).toEqual(['grok-4.5']);
+  });
 });
 
 // ---------------------------------------------------------------------------

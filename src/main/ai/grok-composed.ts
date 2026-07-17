@@ -198,7 +198,8 @@ export class ComposedGrokProvider implements AiProvider {
   }
 
   async listModels(): Promise<ModelRef[]> {
-    return this.api.listModels();
+    const [apiStatus, models] = await Promise.all([this.api.getAuthStatus(), this.api.listModels()]);
+    return apiStatus.connected ? models : models.filter((model) => SHARED_TRANSPORT_MODEL_IDS.has(model.id));
   }
 
   /**

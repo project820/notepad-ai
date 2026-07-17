@@ -149,7 +149,15 @@ export class ProviderRegistry {
     // actually up AND has discovered models (mirrors the renderer's zero-auth notice).
     return this.localCache.snapshot().length > 0;
   }
-
+  private routeAwareCuratedModels(live: readonly ModelRef[]): ModelRef[] {
+    const grok = this.providers.grok;
+    return applyModelDisplayPolicy(getCuratedModels()).filter(
+      (model) => model.provider !== 'grok'
+        || model.id !== 'grok-composer-2.5-fast'
+        || !grok
+        || live.some((listed) => listed.provider === 'grok' && listed.id === model.id),
+    );
+  }
   /**
    * Curated catalog merged with every registered cloud provider's model list and
    * the local model-cache snapshot (deduped by `provider:id`). Local discovery is
@@ -157,7 +165,6 @@ export class ProviderRegistry {
    */
   async getAvailableModels(force = false): Promise<ModelRef[]> {
     if (force) this.bumpReasoningSnapshot();
-    const curated = applyModelDisplayPolicy(getCuratedModels());
     const cloudProviders = Object.values(this.providers).filter(
       (provider): provider is AiProvider => provider != null && provider.authKind !== 'local',
     );
@@ -170,6 +177,7 @@ export class ProviderRegistry {
         }
       }))
     ).flat();
+    const curated = this.routeAwareCuratedModels(live);
     const locals = this.localProviders();
     if (locals.length > 0 && (force || this.localCache.isStale())) {
       // Fire-and-forget: must not block the cloud model list.
@@ -204,7 +212,6 @@ export class ProviderRegistry {
    */
   async getAvailableModelsForHtmlExport(force = false): Promise<ModelRef[]> {
     if (force) this.bumpReasoningSnapshot();
-    const curated = applyModelDisplayPolicy(getCuratedModels());
     const cloudProviders = Object.values(this.providers).filter(
       (provider): provider is AiProvider => provider != null && provider.authKind !== 'local',
     );
@@ -240,6 +247,7 @@ export class ProviderRegistry {
         setTimeout(() => resolve([]), HTML_CLOUD_INVENTORY_TIMEOUT_MS);
       }),
     ]);
+    const curated = this.routeAwareCuratedModels(live);
     const seen = new Set<string>();
     const merged: ModelRef[] = [];
     for (const model of [...curated, ...live, ...this.localCache.snapshot()]) {
