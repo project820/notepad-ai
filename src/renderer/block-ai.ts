@@ -27,6 +27,7 @@ function modelLabelFor(provider: string | undefined, id: string, label?: string)
 
 /** Approx. char budget for the selected fragment to stay under ~1000 tokens. */
 const SELECTION_CHAR_CAP = 2500;
+const MODEL_MENU_REFRESH_TIMEOUT_MS = 1_500;
 
 /** Compact display: mini models stay bare; others gain a "GPT" or "Codex" tag
  *  so users can tell family at a glance.
@@ -98,6 +99,12 @@ export function installBlockAi(deps: BlockAiDeps) {
   let inflightId: string | null = null;
   let inflightCleanup: (() => void) | null = null;
   let outsideListener: ((ev: MouseEvent) => void) | null = null;
+  let cachedModels: Awaited<ReturnType<BlockAiDeps['loadModels']>> = [];
+  let hasFreshModelSnapshot = false;
+  void deps.loadModels().then(
+    (models) => { cachedModels = models; },
+    () => {},
+  );
 
   // ===== Pill =====
   const pill = document.createElement('button');
@@ -265,10 +272,35 @@ export function installBlockAi(deps: BlockAiDeps) {
     // Model dropdown wiring — round sparkle icon button
     const modelBtn = root.querySelector<HTMLButtonElement>('#ba-model')!;
     modelBtn.addEventListener('click', async () => {
-      // loadModels(true) returns the current snapshot immediately AND kicks a
-      // background local-cache refresh (non-blocking) so newly loaded local
-      // models appear on the next open.
-      const models = await deps.loadModels(true);
+      const refresh = deps.loadModels(true);
+      let refreshTimeout: ReturnType<typeof setTimeout> | undefined;
+      const result = await Promise.race([
+        refresh.then(
+          (models) => ({ models, fresh: true }),
+          () => ({ models: cachedModels, fresh: false }),
+        ),
+        new Promise<{ models: typeof cachedModels; fresh: false }>((resolve) => {
+          refreshTimeout = setTimeout(
+            () => resolve({ models: cachedModels, fresh: false }),
+            MODEL_MENU_REFRESH_TIMEOUT_MS,
+          );
+        }),
+      ]);
+      if (refreshTimeout !== undefined) clearTimeout(refreshTimeout);
+      if (result.fresh) {
+        cachedModels = result.models;
+        hasFreshModelSnapshot = true;
+      }
+      else {
+        void refresh.then(
+          (models) => {
+            cachedModels = models;
+            hasFreshModelSnapshot = true;
+          },
+          () => {},
+        );
+      }
+      const models = result.models;
       const curRaw = deps.getBlockModel();
       const curKey =
         typeof curRaw === 'string'
@@ -291,7 +323,7 @@ export function installBlockAi(deps: BlockAiDeps) {
       const hasCurrentSelection = items.some((item) => item.selected);
       if (items.length === 0) items.push({ value: 'chatgpt:gpt-5.4-mini', label: modelLabelFor('chatgpt', 'gpt-5.4-mini'), hint: '', selected: true });
       else if (!hasCurrentSelection) items[0].selected = true;
-      if (!hasCurrentSelection && items[0].value !== curKey) deps.onBlockModelChange(items[0].value);
+      if (hasFreshModelSnapshot && !hasCurrentSelection && items[0].value !== curKey) deps.onBlockModelChange(items[0].value);
       openMenu({
         anchor: modelBtn,
         items,

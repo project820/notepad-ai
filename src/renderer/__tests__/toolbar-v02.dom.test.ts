@@ -37,8 +37,10 @@ function mountToolbar(over: Partial<ToolbarHandlers> = {}) {
 }
 
 afterEach(() => {
+  closeOpenMenu();
   document.body.innerHTML = '';
   localStorage.clear();
+  vi.useRealTimers();
 });
 
 describe('toolbar #4 — left-panel toggle moved into the toolbar (AC5)', () => {
@@ -277,6 +279,23 @@ describe('toolbar — model dropdown (G003 local providers)', () => {
     expect(document.querySelector('[data-value="grok:grok-composer-2.5-fast"]')).toBeNull();
     expect(onModelChange).toHaveBeenCalledTimes(1);
     expect(onModelChange).toHaveBeenCalledWith('chatgpt:gpt-5.6');
+  });
+  it('opens from the cached inventory when a forced refresh stalls', async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const { controls } = mountToolbar({
+      loadModels: () => {
+        calls += 1;
+        if (calls === 1) return Promise.resolve([{ id: 'gpt-5.6', provider: 'chatgpt' }]);
+        return new Promise(() => {});
+      },
+    });
+
+    await Promise.resolve();
+    controls.querySelector<HTMLButtonElement>('#hdr-model')!.click();
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    expect(document.querySelector('[data-value="chatgpt:gpt-5.6"]')).not.toBeNull();
   });
 
   it('does not migrate a visible selection while a transient empty inventory is reinjected', async () => {

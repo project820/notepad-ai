@@ -115,7 +115,10 @@ const BUTTONS: ButtonSpec[] = [
   { kind: 'action', id: 'fmt-hr', html: ICONS.hr, tipKey: 'tip.hr', action: 'hr' },
 ];
 
+const MODEL_MENU_REFRESH_TIMEOUT_MS = 1_500;
+
 let cachedModels: { id: string; label?: string; provider?: string; contextWindow?: number }[] = [];
+let hasFreshModelSnapshot = false;
 
 let reasoningCapabilities: {
   featureEnabled: boolean;
@@ -247,7 +250,35 @@ export function createToolbar(parent: HTMLElement, h: ToolbarHandlers) {
     const langBtn = controls.querySelector<HTMLButtonElement>('#hdr-lang')!;
 
     modelBtn.addEventListener('click', async () => {
-      cachedModels = await h.loadModels(true);
+      const refresh = h.loadModels(true);
+      let refreshTimeout: ReturnType<typeof setTimeout> | undefined;
+      const result = await Promise.race([
+        refresh.then(
+          (models) => ({ models, fresh: true }),
+          () => ({ models: cachedModels, fresh: false }),
+        ),
+        new Promise<{ models: typeof cachedModels; fresh: false }>((resolve) => {
+          refreshTimeout = setTimeout(
+            () => resolve({ models: cachedModels, fresh: false }),
+            MODEL_MENU_REFRESH_TIMEOUT_MS,
+          );
+        }),
+      ]);
+      if (refreshTimeout !== undefined) clearTimeout(refreshTimeout);
+      if (result.fresh) {
+        cachedModels = result.models;
+        hasFreshModelSnapshot = true;
+      }
+      else {
+        void refresh.then(
+          (models) => {
+            cachedModels = models;
+            hasFreshModelSnapshot = true;
+          },
+          () => {},
+        );
+      }
+      const models = result.models;
       void refreshReasoningCapabilities();
       const PROVIDER_LABELS: Record<string, string> = {
         chatgpt: 'ChatGPT', claude: 'Claude', openrouter: 'OpenRouter', ollama: 'Ollama', lmstudio: 'LM Studio', grok: 'Grok',
@@ -258,11 +289,11 @@ export function createToolbar(parent: HTMLElement, h: ToolbarHandlers) {
           ? modelKey({ provider: isAiProviderId(cur.provider) ? cur.provider : 'chatgpt', id: cur.id })
           : modelKey({
               provider:
-                (cachedModels.find((m) => m.id === ((typeof cur === 'string' ? cur : '') || 'gpt-5.4-mini'))
+                (models.find((m) => m.id === ((typeof cur === 'string' ? cur : '') || 'gpt-5.4-mini'))
                   ?.provider as AiProviderId | undefined) ?? 'chatgpt',
               id: (typeof cur === 'string' ? cur : '') || 'gpt-5.4-mini',
             });
-      const sorted = applyModelDisplayPolicy(cachedModels as ModelRef[], {
+      const sorted = applyModelDisplayPolicy(models as ModelRef[], {
         currentSelection: parseModelKey(currentKey),
       }).sort(
         (a, b) =>
@@ -282,7 +313,7 @@ export function createToolbar(parent: HTMLElement, h: ToolbarHandlers) {
       const hasCurrentSelection = items.some((item) => item.selected);
       if (items.length === 0) items.push({ value: 'chatgpt:gpt-5.4-mini', label: 'gpt-5.4-mini', hint: 'ChatGPT', selected: true });
       else if (!hasCurrentSelection) items[0].selected = true;
-      if (!hasCurrentSelection && items[0].value !== currentKey) h.onModelChange(items[0].value);
+      if (hasFreshModelSnapshot && !hasCurrentSelection && items[0].value !== currentKey) h.onModelChange(items[0].value);
       if (h.onOpenSettings) items.push({ value: '__settings__', label: 'Manage providers & custom model…' });
       openMenu({
         anchor: modelBtn,

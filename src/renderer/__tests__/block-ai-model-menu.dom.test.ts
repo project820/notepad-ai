@@ -16,6 +16,7 @@ afterEach(() => {
   for (const v of openViews.splice(0)) v.destroy();
   document.body.innerHTML = '';
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 function mount(over: {
@@ -115,6 +116,25 @@ describe('block-ai model menu (G003 local providers)', () => {
     expect(document.querySelector('[data-value="grok:grok-composer-2.5-fast"]')).toBeNull();
     expect(onBlockModelChange).toHaveBeenCalledTimes(1);
     expect(onBlockModelChange).toHaveBeenCalledWith('chatgpt:gpt-5.6');
+  });
+  it('opens from the cached inventory when a forced refresh stalls', async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const { view } = mount({
+      loadModels: () => {
+        calls += 1;
+        if (calls === 1) return Promise.resolve([{ id: 'gpt-5.6', provider: 'chatgpt' }]);
+        return new Promise(() => {});
+      },
+    });
+
+    await Promise.resolve();
+    view.dispatch({ selection: { anchor: 0, head: 5 } });
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', metaKey: true, shiftKey: true }));
+    Array.from(document.querySelectorAll<HTMLButtonElement>('#ba-model')).at(-1)!.click();
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    expect(document.querySelector('[data-value="chatgpt:gpt-5.6"]')).not.toBeNull();
   });
 });
 // PR-2 (Bug A): mount block-ai with an injected openAiSettings + a stubbed
