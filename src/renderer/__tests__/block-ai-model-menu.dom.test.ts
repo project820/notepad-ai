@@ -139,10 +139,11 @@ describe('block-ai model menu (G003 local providers)', () => {
     expect(onBlockModelChange).toHaveBeenCalledTimes(1);
     expect(onBlockModelChange).toHaveBeenCalledWith('chatgpt:gpt-5.6');
   });
-  it('hides composer from a stale cached inventory when the forced refresh stalls', async () => {
+  it('keeps a persisted composer selection when its last completed inventory contains it and refresh stalls', async () => {
     vi.useFakeTimers();
     let calls = 0;
-    const { view } = mount({
+    const { view, onBlockModelChange } = mount({
+      getBlockModel: () => ({ provider: 'grok', id: 'grok-composer-2.5-fast' }),
       loadModels: () => {
         calls += 1;
         return calls === 1
@@ -156,7 +157,8 @@ describe('block-ai model menu (G003 local providers)', () => {
     Array.from(document.querySelectorAll<HTMLButtonElement>('#ba-model')).at(-1)!.click();
     await vi.advanceTimersByTimeAsync(1_500);
 
-    expect(document.querySelector('[data-value="grok:grok-composer-2.5-fast"]')).toBeNull();
+    expect(document.querySelector('[data-value="grok:grok-composer-2.5-fast"]')).not.toBeNull();
+    expect(onBlockModelChange).not.toHaveBeenCalled();
   });
   it('shows composer from a fresh inventory', async () => {
     const { view } = mount({

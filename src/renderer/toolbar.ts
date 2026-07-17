@@ -118,7 +118,7 @@ const BUTTONS: ButtonSpec[] = [
 const MODEL_MENU_REFRESH_TIMEOUT_MS = 1_500;
 
 let cachedModels: { id: string; label?: string; provider?: string; contextWindow?: number }[] = [];
-let hasFreshModelSnapshot = false;
+let lastCompletedInventory: typeof cachedModels | undefined;
 
 let reasoningCapabilities: {
   featureEnabled: boolean;
@@ -267,13 +267,13 @@ export function createToolbar(parent: HTMLElement, h: ToolbarHandlers) {
       if (refreshTimeout !== undefined) clearTimeout(refreshTimeout);
       if (result.fresh) {
         cachedModels = result.models;
-        hasFreshModelSnapshot = true;
+        lastCompletedInventory = result.models;
       }
       else {
         void refresh.then(
           (models) => {
             cachedModels = models;
-            hasFreshModelSnapshot = true;
+            lastCompletedInventory = models;
           },
           () => {},
         );
@@ -293,8 +293,15 @@ export function createToolbar(parent: HTMLElement, h: ToolbarHandlers) {
                   ?.provider as AiProviderId | undefined) ?? 'chatgpt',
               id: (typeof cur === 'string' ? cur : '') || 'gpt-5.4-mini',
             });
+      const inventoryContainsComposer = lastCompletedInventory?.some(
+        (model) => model.provider === 'grok' && model.id === 'grok-composer-2.5-fast',
+      ) ?? false;
+      const modelsForMenu =
+        !result.fresh && !inventoryContainsComposer
+          ? (models as ModelRef[]).filter((model) => !isRouteHiddenModel(model))
+          : models as ModelRef[];
       const sorted = applyModelDisplayPolicy(
-        result.fresh ? models as ModelRef[] : (models as ModelRef[]).filter((model) => !isRouteHiddenModel(model)),
+        modelsForMenu,
         { currentSelection: parseModelKey(currentKey) },
       ).sort(
         (a, b) =>
@@ -314,7 +321,10 @@ export function createToolbar(parent: HTMLElement, h: ToolbarHandlers) {
       const hasCurrentSelection = items.some((item) => item.selected);
       if (items.length === 0) items.push({ value: 'chatgpt:gpt-5.4-mini', label: 'gpt-5.4-mini', hint: 'ChatGPT', selected: true });
       else if (!hasCurrentSelection) items[0].selected = true;
-      if (hasFreshModelSnapshot && !hasCurrentSelection && items[0].value !== currentKey) h.onModelChange(items[0].value);
+      const lastCompletedSelectionPresent = lastCompletedInventory?.some((model) =>
+        modelKey({ provider: model.provider ?? 'chatgpt', id: model.id }) === currentKey,
+      ) ?? false;
+      if (lastCompletedInventory && !lastCompletedSelectionPresent && !hasCurrentSelection && items[0].value !== currentKey) h.onModelChange(items[0].value);
       if (h.onOpenSettings) items.push({ value: '__settings__', label: 'Manage providers & custom model…' });
       openMenu({
         anchor: modelBtn,
@@ -414,7 +424,7 @@ export function createToolbar(parent: HTMLElement, h: ToolbarHandlers) {
   // ===== Model list — load once =====
   void (async () => {
     cachedModels = await h.loadModels();
-    hasFreshModelSnapshot = true;
+    lastCompletedInventory = cachedModels;
     if (!h.getModel() && cachedModels[0]) {
       const first = cachedModels[0];
       h.onModelChange(modelKey({ provider: (first.provider as AiProviderId | undefined) ?? 'chatgpt', id: first.id }));

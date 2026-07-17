@@ -297,10 +297,13 @@ describe('toolbar — model dropdown (G003 local providers)', () => {
 
     expect(document.querySelector('[data-value="chatgpt:gpt-5.6"]')).not.toBeNull();
   });
-  it('hides composer from a stale cached inventory when the forced refresh stalls', async () => {
+  it('keeps a persisted composer selection when its last completed inventory contains it and refresh stalls', async () => {
     vi.useFakeTimers();
     let calls = 0;
+    const onModelChange = vi.fn();
     const { controls } = mountToolbar({
+      onModelChange,
+      getModel: () => ({ provider: 'grok', id: 'grok-composer-2.5-fast' }),
       loadModels: () => {
         calls += 1;
         return calls === 1
@@ -312,7 +315,8 @@ describe('toolbar — model dropdown (G003 local providers)', () => {
     controls.querySelector<HTMLButtonElement>('#hdr-model')!.click();
     await vi.advanceTimersByTimeAsync(1_500);
 
-    expect(document.querySelector('[data-value="grok:grok-composer-2.5-fast"]')).toBeNull();
+    expect(document.querySelector('[data-value="grok:grok-composer-2.5-fast"]')).not.toBeNull();
+    expect(onModelChange).not.toHaveBeenCalled();
   });
   it('shows composer from a fresh inventory', async () => {
     const { controls } = mountToolbar({

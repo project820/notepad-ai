@@ -100,11 +100,11 @@ export function installBlockAi(deps: BlockAiDeps) {
   let inflightCleanup: (() => void) | null = null;
   let outsideListener: ((ev: MouseEvent) => void) | null = null;
   let cachedModels: Awaited<ReturnType<BlockAiDeps['loadModels']>> = [];
-  let hasFreshModelSnapshot = false;
+  let lastCompletedInventory: typeof cachedModels | undefined;
   void deps.loadModels().then(
     (models) => {
       cachedModels = models;
-      hasFreshModelSnapshot = true;
+      lastCompletedInventory = models;
     },
     () => {},
   );
@@ -292,13 +292,13 @@ export function installBlockAi(deps: BlockAiDeps) {
       if (refreshTimeout !== undefined) clearTimeout(refreshTimeout);
       if (result.fresh) {
         cachedModels = result.models;
-        hasFreshModelSnapshot = true;
+        lastCompletedInventory = result.models;
       }
       else {
         void refresh.then(
           (models) => {
             cachedModels = models;
-            hasFreshModelSnapshot = true;
+            lastCompletedInventory = models;
           },
           () => {},
         );
@@ -311,8 +311,15 @@ export function installBlockAi(deps: BlockAiDeps) {
           : curRaw
             ? modelKey(curRaw)
             : 'chatgpt:gpt-5.4-mini';
+      const inventoryContainsComposer = lastCompletedInventory?.some(
+        (model) => model.provider === 'grok' && model.id === 'grok-composer-2.5-fast',
+      ) ?? false;
+      const modelsForMenu =
+        !result.fresh && !inventoryContainsComposer
+          ? (models as ModelRef[]).filter((model) => !isRouteHiddenModel(model))
+          : models as ModelRef[];
       const items = applyModelDisplayPolicy(
-        result.fresh ? models as ModelRef[] : (models as ModelRef[]).filter((model) => !isRouteHiddenModel(model)),
+        modelsForMenu,
         { currentSelection: parseModelKey(curKey) },
       ).map((m) => {
         const provider = m.provider ?? 'chatgpt';
@@ -327,7 +334,10 @@ export function installBlockAi(deps: BlockAiDeps) {
       const hasCurrentSelection = items.some((item) => item.selected);
       if (items.length === 0) items.push({ value: 'chatgpt:gpt-5.4-mini', label: modelLabelFor('chatgpt', 'gpt-5.4-mini'), hint: '', selected: true });
       else if (!hasCurrentSelection) items[0].selected = true;
-      if (hasFreshModelSnapshot && !hasCurrentSelection && items[0].value !== curKey) deps.onBlockModelChange(items[0].value);
+      const lastCompletedSelectionPresent = lastCompletedInventory?.some((model) =>
+        modelKey({ provider: model.provider ?? 'chatgpt', id: model.id }) === curKey,
+      ) ?? false;
+      if (lastCompletedInventory && !lastCompletedSelectionPresent && !hasCurrentSelection && items[0].value !== curKey) deps.onBlockModelChange(items[0].value);
       openMenu({
         anchor: modelBtn,
         items,
