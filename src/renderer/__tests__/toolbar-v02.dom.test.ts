@@ -297,6 +297,33 @@ describe('toolbar — model dropdown (G003 local providers)', () => {
 
     expect(document.querySelector('[data-value="chatgpt:gpt-5.6"]')).not.toBeNull();
   });
+  it('hides composer from a stale cached inventory when the forced refresh stalls', async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const { controls } = mountToolbar({
+      loadModels: () => {
+        calls += 1;
+        return calls === 1
+          ? Promise.resolve([{ id: 'grok-composer-2.5-fast', provider: 'grok' }])
+          : new Promise(() => {});
+      },
+    });
+    await Promise.resolve();
+    controls.querySelector<HTMLButtonElement>('#hdr-model')!.click();
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    expect(document.querySelector('[data-value="grok:grok-composer-2.5-fast"]')).toBeNull();
+  });
+  it('shows composer from a fresh inventory', async () => {
+    const { controls } = mountToolbar({
+      loadModels: async () => [{ id: 'grok-composer-2.5-fast', provider: 'grok' }],
+    });
+    await flush();
+    controls.querySelector<HTMLButtonElement>('#hdr-model')!.click();
+    await flush();
+
+    expect(document.querySelector('[data-value="grok:grok-composer-2.5-fast"]')).not.toBeNull();
+  });
   it('migrates a stale persisted composer after the startup snapshot resolves and refresh stalls', async () => {
     vi.useFakeTimers();
     vi.resetModules();

@@ -4,7 +4,7 @@ import { t, getLocale, setLocale, onLocaleChange, type Locale } from './i18n';
 import { modelKey, parseModelKey } from './model-key';
 import { stepTypography, type TypographyPref } from './typography';
 import { formatContextWindow, modelContextWindowTokens } from '../main/ai/output-budget';
-import { applyModelDisplayPolicy } from '../main/ai/model-display-policy';
+import { applyModelDisplayPolicy, isRouteHiddenModel } from '../main/ai/model-display-policy';
 import { isAiProviderId, type AiProviderId, type ModelRef, type ReasoningEffort } from '../main/ai/types';
 
 export type Theme = 'system' | 'light' | 'dark';
@@ -293,9 +293,10 @@ export function createToolbar(parent: HTMLElement, h: ToolbarHandlers) {
                   ?.provider as AiProviderId | undefined) ?? 'chatgpt',
               id: (typeof cur === 'string' ? cur : '') || 'gpt-5.4-mini',
             });
-      const sorted = applyModelDisplayPolicy(models as ModelRef[], {
-        currentSelection: parseModelKey(currentKey),
-      }).sort(
+      const sorted = applyModelDisplayPolicy(
+        result.fresh ? models as ModelRef[] : (models as ModelRef[]).filter((model) => !isRouteHiddenModel(model)),
+        { currentSelection: parseModelKey(currentKey) },
+      ).sort(
         (a, b) =>
           (a.provider ?? '').localeCompare(b.provider ?? '') ||
           (a.label ?? a.id).localeCompare(b.label ?? b.id),

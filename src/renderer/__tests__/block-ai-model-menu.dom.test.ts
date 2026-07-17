@@ -139,6 +139,36 @@ describe('block-ai model menu (G003 local providers)', () => {
     expect(onBlockModelChange).toHaveBeenCalledTimes(1);
     expect(onBlockModelChange).toHaveBeenCalledWith('chatgpt:gpt-5.6');
   });
+  it('hides composer from a stale cached inventory when the forced refresh stalls', async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const { view } = mount({
+      loadModels: () => {
+        calls += 1;
+        return calls === 1
+          ? Promise.resolve([{ id: 'grok-composer-2.5-fast', provider: 'grok' }])
+          : new Promise(() => {});
+      },
+    });
+    await Promise.resolve();
+    view.dispatch({ selection: { anchor: 0, head: 5 } });
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', metaKey: true, shiftKey: true }));
+    Array.from(document.querySelectorAll<HTMLButtonElement>('#ba-model')).at(-1)!.click();
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    expect(document.querySelector('[data-value="grok:grok-composer-2.5-fast"]')).toBeNull();
+  });
+  it('shows composer from a fresh inventory', async () => {
+    const { view } = mount({
+      loadModels: async () => [{ id: 'grok-composer-2.5-fast', provider: 'grok' }],
+    });
+    view.dispatch({ selection: { anchor: 0, head: 5 } });
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', metaKey: true, shiftKey: true }));
+    Array.from(document.querySelectorAll<HTMLButtonElement>('#ba-model')).at(-1)!.click();
+    await flush();
+
+    expect(document.querySelector('[data-value="grok:grok-composer-2.5-fast"]')).not.toBeNull();
+  });
   it('does not migrate while the startup snapshot remains unresolved', async () => {
     vi.useFakeTimers();
     const { view, onBlockModelChange } = mount({
