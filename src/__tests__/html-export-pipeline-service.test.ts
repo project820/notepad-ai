@@ -196,6 +196,27 @@ describe('extractHtmlExportDocument', () => {
     expect(extractHtmlExportDocument('before\n```\n<p>unclosed</p>')).toBe('<p>unclosed</p>');
   });
 
+  it('prefers an HTML document fence over a sibling CSS fence', () => {
+    expect(extractHtmlExportDocument('```css\nbody { color: red; }\n```\n```html\n<!doctype html><html><body><p>kept</p></body></html>\n```')).toBe(
+      '<!doctype html><html><body><p>kept</p></body></html>\n',
+    );
+  });
+
+  it('keeps an unfenced document ahead of a later fenced code snippet', () => {
+    const document = '<!doctype html><html><body><p>kept</p></body></html>\n```css\nbody { color: red; }\n```';
+    expect(extractHtmlExportDocument(document)).toBe(document);
+  });
+
+  it('preserves a clean document containing literal fences byte-for-byte', () => {
+    const document = '<html><body><pre>\n```\nconst value = 1;\n```</pre></body></html>';
+    expect(extractHtmlExportDocument(document)).toBe(document);
+  });
+
+  it('extracts a full document from an xhtml fence', () => {
+    expect(extractHtmlExportDocument('```xhtml\n<!doctype html><html><body><p>kept</p></body></html>\n```')).toBe(
+      '<!doctype html><html><body><p>kept</p></body></html>\n',
+    );
+  });
   it('slices a complete document from leading narration and otherwise passes text through', () => {
     expect(extractHtmlExportDocument('Here is the page.\n<!DOCTYPE html><html><body><p>kept</p></body></html>\nThanks.')).toBe(
       '<!DOCTYPE html><html><body><p>kept</p></body></html>',

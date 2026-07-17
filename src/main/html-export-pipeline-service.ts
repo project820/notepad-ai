@@ -23,18 +23,27 @@ import { HTML_SANITIZER_LIMITS, sanitizeHtmlExport } from './html-export-sanitiz
 export const HTML_EXPORT_RAW_MODEL_OUTPUT_MAX_BYTES = HTML_EXPORT_RAW_ARTIFACT_MAX_BYTES;
 export const HTML_EXPORT_PIPELINE_STAGE_MAX_BYTES = HTML_EXPORT_STAGE_ARTIFACT_MAX_BYTES;
 export function extractHtmlExportDocument(modelOutput: string): string {
-  const fence = /```(?:html)?[ \t]*(?:\r?\n|$)/gi;
-  let largest: { start: number; end: number } | undefined;
+  if (/^\s*(?:<!doctype\b|<html\b)/i.test(modelOutput)) return modelOutput;
+
+  const fence = /^```[A-Za-z0-9-]*[ \t]*\r?$/gm;
+  const closingFence = /^```[ \t]*\r?$/gm;
+  let best: { start: number; end: number; preference: number } | undefined;
   let opening: RegExpExecArray | null;
   while ((opening = fence.exec(modelOutput))) {
-    const start = opening.index + opening[0].length;
-    const closing = modelOutput.indexOf('```', start);
-    const end = closing === -1 ? modelOutput.length : closing;
-    if (!largest || end - start > largest.end - largest.start) largest = { start, end };
-    if (closing === -1) break;
-    fence.lastIndex = closing + 3;
+    const afterOpening = opening.index + opening[0].length;
+    const start = modelOutput[afterOpening] === '\n' ? afterOpening + 1 : afterOpening;
+    closingFence.lastIndex = start;
+    const closing = closingFence.exec(modelOutput);
+    const end = closing ? closing.index : modelOutput.length;
+    const content = modelOutput.slice(start, end);
+    const preference = /<!doctype\b|<html\b/i.test(content) ? 2 : content.includes('<') ? 1 : 0;
+    if (!best || preference > best.preference || (preference === best.preference && end - start > best.end - best.start)) {
+      best = { start, end, preference };
+    }
+    if (!closing) break;
+    fence.lastIndex = closing.index + closing[0].length;
   }
-  if (largest) return modelOutput.slice(largest.start, largest.end);
+  if (best && best.preference > 0) return modelOutput.slice(best.start, best.end);
 
   const documentStart = /<!doctype\b|<html\b/i.exec(modelOutput);
   if (!documentStart) return modelOutput;

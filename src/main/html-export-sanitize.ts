@@ -686,20 +686,18 @@ export function sanitizeHtmlExport(options: HtmlExportSanitizeOptions): HtmlExpo
           ],
         };
       }
-      const topLevelNarration = childNodes(outputBody).filter(
+      const topLevelNarration = new Set(childNodes(outputBody).filter(
         (child) =>
           (child as { nodeName?: string }).nodeName === '#text' &&
           !isHtmlAsciiWhitespaceOnly(textValue(child)),
-      );
-      if (topLevelNarration.length > 0) {
-        outputBody.childNodes = childNodes(outputBody).filter((child) => !topLevelNarration.includes(child)) as DefaultTreeAdapterTypes.ChildNode[];
+      ));
+      if (topLevelNarration.size > 0) {
+        outputBody.childNodes = childNodes(outputBody).filter((child) => !topLevelNarration.has(child)) as DefaultTreeAdapterTypes.ChildNode[];
         for (const child of outputBody.childNodes) child.parentNode = outputBody;
-        context.stripped.push(
-          ...topLevelNarration.map(() => ({
-            code: HTML_VIOLATION_CODES.topLevelNarration,
-            detail: 'stripped top-level narration/prose text',
-          })),
-        );
+        context.stripped.push({
+          code: HTML_VIOLATION_CODES.topLevelNarration,
+          detail: 'stripped top-level narration/prose text',
+        });
       }
     }
 

@@ -585,13 +585,13 @@ describe('sanitizeHtmlExport — fail-closed structural gate (issue #27)', () =>
 
   it('strips mixed narration from an otherwise-valid structural document', () => {
     const withPreamble =
-      'Sure, here is the document:\n\n<section><h1>Title</h1><p>Body copy.</p></section>';
+      'Sure, here is the document:\n\n<section><h1>Title</h1><p>Body copy.</p></section>\nDone.';
     const result = sanitize(withPreamble, structural);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.bodyHtml).not.toContain('Sure, here is the document');
     expect(result.bodyHtml).toContain('<h1>Title</h1>');
-    expect(result.stripped).toContain(HTML_VIOLATION_CODES.topLevelNarration);
+    expect(result.stripped.filter((code) => code === HTML_VIOLATION_CODES.topLevelNarration)).toHaveLength(1);
   });
 
   it('accepts whitespace-only text between top-level structural elements', () => {
