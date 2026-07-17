@@ -37,7 +37,12 @@ function cacheWith(models: ModelRef[]): LocalModelCache {
   } as unknown as LocalModelCache;
 }
 
-const noKeys = {} as unknown as ApiKeyStore;
+const noKeys = {
+  getKeyStatus: async () => ({ connected: false, persisted: false }),
+} as unknown as ApiKeyStore;
+const grokApiKeys = {
+  getKeyStatus: async () => ({ connected: true, persisted: false }),
+} as unknown as ApiKeyStore;
 const localModel: ModelRef = { provider: 'ollama', id: 'llama3', label: 'llama3' } as ModelRef;
 
 describe('ProviderRegistry.hasAnyAuth — local is discovery, not auth', () => {
@@ -122,7 +127,7 @@ describe('ProviderRegistry model aggregation', () => {
       { currentSelection },
     );
     const apiPicker = applyModelDisplayPolicy(
-      await new ProviderRegistry(noKeys, { grok: api }, cacheWith([])).getAvailableModels(),
+      await new ProviderRegistry(grokApiKeys, { grok: api }, cacheWith([])).getAvailableModels(),
       { currentSelection },
     );
 

@@ -149,13 +149,13 @@ export class ProviderRegistry {
     // actually up AND has discovered models (mirrors the renderer's zero-auth notice).
     return this.localCache.snapshot().length > 0;
   }
-  private routeAwareCuratedModels(live: readonly ModelRef[]): ModelRef[] {
-    const grok = this.providers.grok;
+  private async routeAwareCuratedModels(): Promise<ModelRef[]> {
+    const grokApiConnected = this.providers.grok !== undefined
+      && (await this.keys.getKeyStatus('grok')).connected;
     return applyModelDisplayPolicy(getCuratedModels()).filter(
       (model) => model.provider !== 'grok'
         || model.id !== 'grok-composer-2.5-fast'
-        || !grok
-        || live.some((listed) => listed.provider === 'grok' && listed.id === model.id),
+        || grokApiConnected,
     );
   }
   /**
@@ -177,7 +177,7 @@ export class ProviderRegistry {
         }
       }))
     ).flat();
-    const curated = this.routeAwareCuratedModels(live);
+    const curated = await this.routeAwareCuratedModels();
     const locals = this.localProviders();
     if (locals.length > 0 && (force || this.localCache.isStale())) {
       // Fire-and-forget: must not block the cloud model list.
@@ -247,7 +247,7 @@ export class ProviderRegistry {
         setTimeout(() => resolve([]), HTML_CLOUD_INVENTORY_TIMEOUT_MS);
       }),
     ]);
-    const curated = this.routeAwareCuratedModels(live);
+    const curated = await this.routeAwareCuratedModels();
     const seen = new Set<string>();
     const merged: ModelRef[] = [];
     for (const model of [...curated, ...live, ...this.localCache.snapshot()]) {

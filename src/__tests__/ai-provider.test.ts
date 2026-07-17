@@ -845,6 +845,30 @@ describe('ProviderRegistry local discovery is non-blocking', () => {
       vi.useRealTimers();
     }
   });
+  it('keeps Grok Composer in HTML inventory when another cloud catalog hangs and xAI is connected', async () => {
+    vi.useFakeTimers();
+    try {
+      const keys = fakeKeyStore();
+      await keys.setApiKey('grok', 'xai-key-1234');
+      const chatgpt = {
+        ...fakeProvider('chatgpt', true, () => {}),
+        listModels: vi.fn(() => new Promise<ModelRef[]>(() => {})),
+      } as AiProvider & { listModels: ReturnType<typeof vi.fn> };
+      const grok = fakeProvider('grok', true, () => {});
+      const reg = new ProviderRegistry(keys, { chatgpt, grok }, new LocalModelCache());
+
+      const pending = reg.getAvailableModelsForHtmlExport(true);
+      await vi.advanceTimersByTimeAsync(1_500);
+      const models = await pending;
+
+      expect(models).toContainEqual(expect.objectContaining({
+        provider: 'grok',
+        id: 'grok-composer-2.5-fast',
+      }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it('single-flights hanging cloud listModels across concurrent HTML inventory calls', async () => {
     vi.useFakeTimers();
     try {
