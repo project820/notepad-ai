@@ -4,6 +4,7 @@ import { clampChatWidth } from './chat-layout';
 import { guardVerdict } from './humanize-guards';
 import { styleDirective, detectLanguage, type Naturalness } from './humanize-engine';
 import { t } from './i18n';
+import { aiChatErrorMessage } from './ai-error-message';
 import { modelContextWindowTokens } from '../main/ai/output-budget';
 import { isAiProviderId, type AiProviderId, type ProviderAuthStatus } from '../main/ai/types';
 import {
@@ -226,8 +227,9 @@ export function initUnifiedChatWiring(ctx: AppContext, deps: UnifiedChatWiringDe
         unifiedChat.completeRequest();
         unifiedChat.setStreaming(false);
       } else if (e.kind === 'error') {
-        stream.fail(e.message ?? t('status.aiError'));
-        ctx.setStatus(e.message ?? t('status.aiError'));
+        const message = aiChatErrorMessage(e);
+        stream.fail(message);
+        ctx.setStatus(message);
         cleanup();
         ucInflight = null;
         unifiedChat.failRequest();

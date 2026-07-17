@@ -18,6 +18,7 @@ export function registerAuthIpc({ getRegistry }: { getRegistry: () => ProviderRe
   handleTrusted('auth:cancel-login', async () => { cancelLogin(); });
   handleTrusted('auth:logout', async () => { await logout(); });
   handleTrusted('auth:providers-status', async () => getRegistry().getAuthStatuses());
+  handleTrusted('ai:key-status', async () => getRegistry().hasGrokApiKey());
   handleTrusted('auth:has-any', async () => getRegistry().hasAnyAuth());
   handleTrusted('auth:set-api-key', async (_e, args: { provider: AiProviderId; key: string }) => {
     if (!isAiProviderId(args?.provider)) throw new Error('Unknown provider');

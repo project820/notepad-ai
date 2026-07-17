@@ -3,7 +3,7 @@ import type { AiProviderId, ModelRef } from './types';
 type ModelDisplaySelection = Pick<ModelRef, 'provider' | 'id'>;
 
 export type ModelDisplayPolicyContext = {
-  /** Current selection for this picker. It is always reinjected to prevent lockout. */
+  /** Current selection for this picker. It is reinjected when its source is still available. */
   currentSelection?: ModelDisplaySelection;
 };
 
@@ -23,7 +23,9 @@ const ALLOWED_CLOUD_MODEL_IDS: Readonly<Record<'chatgpt' | 'claude' | 'grok', re
 function humanizeEngineId(provider: AiProviderId): string {
   return provider === 'claude' ? 'claude' : provider === 'openrouter' ? 'openrouter' : 'openai';
 }
-
+export function isRouteHiddenModel(selection: ModelDisplaySelection): boolean {
+  return selection.provider === 'grok' && selection.id === 'grok-composer-2.5-fast';
+}
 function reinjectedSelection(selection: ModelDisplaySelection): ModelRef {
   return {
     provider: selection.provider,
@@ -38,7 +40,8 @@ function reinjectedSelection(selection: ModelDisplaySelection): ModelRef {
 /**
  * Restrict catalog display to product-approved exact IDs. Ollama discovery is
  * deliberately passed through. Persisted/current selections are reinjected
- * after filtering so catalog updates never strand an existing user.
+ * after filtering when their source is still available, so catalog updates
+ * never strand an existing user while route-hidden curated models stay hidden.
  */
 export function applyModelDisplayPolicy(
   models: readonly ModelRef[],
@@ -55,7 +58,11 @@ export function applyModelDisplayPolicy(
   const selected = current
     ? models.find((model) => model.provider === current.provider && model.id === current.id)
     : undefined;
-  if (current && !visible.some((model) => model.provider === current.provider && model.id === current.id)) {
+  if (
+    current
+    && !visible.some((model) => model.provider === current.provider && model.id === current.id)
+    && (selected || !isRouteHiddenModel(current))
+  ) {
     visible.push(selected ? { ...selected, custom: true } : reinjectedSelection(current));
   }
   return visible;

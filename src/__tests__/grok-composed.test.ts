@@ -4,7 +4,7 @@ import { API_KEY_PROVIDERS, ApiKeyStore, type KeyStoreBackend } from '../main/ai
 import { ComposedGrokProvider } from '../main/ai/grok-composed';
 import { XaiApiProvider, XAI_CHAT_COMPLETIONS_URL } from '../main/ai/xai-api-provider';
 import type { CliProcess, CliSpawn } from '../main/ai/cli-runner';
-import type { AiChatEvent, AiChatRequest, ProviderAuthStatus } from '../main/ai/types';
+import type { AiChatEvent, AiChatRequest, ModelRef, ProviderAuthStatus } from '../main/ai/types';
 
 const request: AiChatRequest = {
   instructions: 'Be concise.',
@@ -142,12 +142,12 @@ describe('XaiApiProvider', () => {
 });
 
 describe('ComposedGrokProvider restricted transport routing', () => {
-  function harness(apiConnected: boolean, apiEvents: AiChatEvent[]) {
+  function harness(apiConnected: boolean, apiEvents: AiChatEvent[], models: ModelRef[] = []) {
     let apiCalls = 0;
     let cliCalls = 0;
     const api = {
       getAuthStatus: async () => sourceStatus(apiConnected),
-      listModels: async () => [],
+      listModels: async () => models,
       streamChat: async (_request: AiChatRequest, onEvent: (event: AiChatEvent) => void) => {
         apiCalls++;
         apiEvents.forEach(onEvent);
@@ -177,6 +177,69 @@ describe('ComposedGrokProvider restricted transport routing', () => {
       authKind: 'api_key',
       cliStatus: { installed: true, authState: 'succeeded' },
     });
+  });
+  it('lists composer only when an xAI API key is connected', async () => {
+    const models: ModelRef[] = [
+      { provider: 'grok', id: 'grok-4.5', label: 'Grok 4.5', humanizeEngineId: 'openai', requiresAuth: true },
+      { provider: 'grok', id: 'grok-composer-2.5-fast', label: 'Grok Composer 2.5 Fast', humanizeEngineId: 'openai', requiresAuth: true },
+    ];
+
+    const cliOnly = await harness(false, [], models).provider.listModels();
+    expect(cliOnly.map((model) => model.id)).toEqual(['grok-4.5']);
+    await expect(harness(true, [], models).provider.listModels()).resolves.toEqual(models);
+  });
+  it('surfaces an auth error instead of forwarding composer to the CLI-only route', async () => {
+    const h = harness(false, []);
+    const events: AiChatEvent[] = [];
+
+    await h.provider.streamChat({
+      ...request,
+      model: { provider: 'grok', id: 'grok-composer-2.5-fast' },
+    }, (event) => events.push(event));
+
+    expect(h.apiCalls()).toBe(0);
+    expect(h.cliCalls()).toBe(0);
+    expect(events).toEqual([{
+      kind: 'error',
+      message: 'grok-composer-2.5-fast requires an xAI API key.',
+      errorKind: 'auth',
+      errorCode: 'grok_composer_requires_api_key',
+    }]);
+  });
+  it('forwards custom model IDs to the CLI-only route', async () => {
+    const h = harness(false, []);
+    const events: AiChatEvent[] = [];
+
+    await h.provider.streamChat({
+      ...request,
+      model: { provider: 'grok', id: 'my-fine-tune' },
+    }, (event) => events.push(event));
+
+    expect(h.apiCalls()).toBe(0);
+    expect(h.cliCalls()).toBe(1);
+    expect(events).toEqual([
+      { kind: 'delta', text: 'CLI' },
+      { kind: 'done', text: 'CLI' },
+    ]);
+  });
+  it('keeps the API route for composer when an xAI API key is connected', async () => {
+    const h = harness(true, [
+      { kind: 'delta', text: 'API' },
+      { kind: 'done', text: 'API' },
+    ]);
+    const events: AiChatEvent[] = [];
+
+    await h.provider.streamChat({
+      ...request,
+      model: { provider: 'grok', id: 'grok-composer-2.5-fast' },
+    }, (event) => events.push(event));
+
+    expect(h.apiCalls()).toBe(1);
+    expect(h.cliCalls()).toBe(0);
+    expect(events).toEqual([
+      { kind: 'delta', text: 'API' },
+      { kind: 'done', text: 'API' },
+    ]);
   });
   it('keeps a confirmed logout as an auth-failed cache entry instead of fresh unknown', async () => {
     const h = harness(false, []);

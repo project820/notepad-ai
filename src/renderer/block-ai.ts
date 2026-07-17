@@ -2,6 +2,7 @@ import { EditorView, ViewUpdate } from '@codemirror/view';
 import { StateEffect } from '@codemirror/state';
 import MarkdownIt from 'markdown-it';
 import { t, getLocale } from './i18n';
+import { aiChatErrorMessage } from './ai-error-message';
 import { type Quality } from './quality';
 import { openMenu } from './dropdown';
 import { buildBlockAiInstructions } from './block-ai-prompt-handler';
@@ -9,7 +10,7 @@ import { styleDirective, detectLanguage, type Naturalness } from './humanize-eng
 import { isAiProviderId, type AiProviderId, type ModelRef } from '../main/ai/types';
 import { modelKey, parseModelKey } from './model-key';
 import { formatContextWindow, modelContextWindowTokens } from '../main/ai/output-budget';
-import { applyModelDisplayPolicy } from '../main/ai/model-display-policy';
+import { applyModelDisplayPolicy, isRouteHiddenModel } from '../main/ai/model-display-policy';
 import { triggerCliOnboarding } from './settings-modal';
 
 /** Provider labels for the Block AI model menu. */
@@ -27,6 +28,7 @@ function modelLabelFor(provider: string | undefined, id: string, label?: string)
 
 /** Approx. char budget for the selected fragment to stay under ~1000 tokens. */
 const SELECTION_CHAR_CAP = 2500;
+const MODEL_MENU_REFRESH_TIMEOUT_MS = 1_500;
 
 /** Compact display: mini models stay bare; others gain a "GPT" or "Codex" tag
  *  so users can tell family at a glance.
@@ -98,6 +100,15 @@ export function installBlockAi(deps: BlockAiDeps) {
   let inflightId: string | null = null;
   let inflightCleanup: (() => void) | null = null;
   let outsideListener: ((ev: MouseEvent) => void) | null = null;
+  let cachedModels: Awaited<ReturnType<BlockAiDeps['loadModels']>> = [];
+  let lastCompletedInventory: typeof cachedModels | undefined;
+  void deps.loadModels().then(
+    (models) => {
+      cachedModels = models;
+      lastCompletedInventory = models;
+    },
+    () => {},
+  );
 
   // ===== Pill =====
   const pill = document.createElement('button');
@@ -265,10 +276,36 @@ export function installBlockAi(deps: BlockAiDeps) {
     // Model dropdown wiring — round sparkle icon button
     const modelBtn = root.querySelector<HTMLButtonElement>('#ba-model')!;
     modelBtn.addEventListener('click', async () => {
-      // loadModels(true) returns the current snapshot immediately AND kicks a
-      // background local-cache refresh (non-blocking) so newly loaded local
-      // models appear on the next open.
-      const models = await deps.loadModels(true);
+      const refresh = deps.loadModels(true);
+      const grokKeyStatus = window.api?.aiGrokKeyStatus?.().catch(() => false) ?? Promise.resolve(false);
+      let refreshTimeout: ReturnType<typeof setTimeout> | undefined;
+      const result = await Promise.race([
+        refresh.then(
+          (models) => ({ models, fresh: true }),
+          () => ({ models: cachedModels, fresh: false }),
+        ),
+        new Promise<{ models: typeof cachedModels; fresh: false }>((resolve) => {
+          refreshTimeout = setTimeout(
+            () => resolve({ models: cachedModels, fresh: false }),
+            MODEL_MENU_REFRESH_TIMEOUT_MS,
+          );
+        }),
+      ]);
+      if (refreshTimeout !== undefined) clearTimeout(refreshTimeout);
+      if (result.fresh) {
+        cachedModels = result.models;
+        lastCompletedInventory = result.models;
+      }
+      else {
+        void refresh.then(
+          (models) => {
+            cachedModels = models;
+            lastCompletedInventory = models;
+          },
+          () => {},
+        );
+      }
+      const models = result.models;
       const curRaw = deps.getBlockModel();
       const curKey =
         typeof curRaw === 'string'
@@ -276,9 +313,14 @@ export function installBlockAi(deps: BlockAiDeps) {
           : curRaw
             ? modelKey(curRaw)
             : 'chatgpt:gpt-5.4-mini';
-      const items = applyModelDisplayPolicy(models as ModelRef[], {
-        currentSelection: parseModelKey(curKey),
-      }).map((m) => {
+      const modelsForMenu =
+        !result.fresh && !(await grokKeyStatus)
+          ? (models as ModelRef[]).filter((model) => !isRouteHiddenModel(model))
+          : models as ModelRef[];
+      const items = applyModelDisplayPolicy(
+        modelsForMenu,
+        { currentSelection: parseModelKey(curKey) },
+      ).map((m) => {
         const provider = m.provider ?? 'chatgpt';
         const key = modelKey({ provider, id: m.id });
         const badge = isAiProviderId(provider)
@@ -288,7 +330,16 @@ export function installBlockAi(deps: BlockAiDeps) {
         const hint = badge ? `${providerLabel} · ${badge}` : providerLabel;
         return { value: key, label: modelLabelFor(provider, m.id, m.label), hint, selected: key === curKey };
       });
-      if (items.length === 0) items.push({ value: curKey, label: modelLabelFor('chatgpt', 'gpt-5.4-mini'), hint: '', selected: true });
+      const hasCurrentSelection = items.some((item) => item.selected);
+      if (items.length === 0) items.push({ value: 'chatgpt:gpt-5.4-mini', label: modelLabelFor('chatgpt', 'gpt-5.4-mini'), hint: '', selected: true });
+      else if (!hasCurrentSelection) items[0].selected = true;
+      const lastCompletedSelectionPresent = lastCompletedInventory?.some((model) =>
+        modelKey({ provider: model.provider ?? 'chatgpt', id: model.id }) === curKey,
+      ) ?? false;
+      if (
+        (!result.fresh && curKey === 'grok:grok-composer-2.5-fast' && !await grokKeyStatus)
+        || (result.fresh && lastCompletedInventory && !lastCompletedSelectionPresent && !hasCurrentSelection && items[0].value !== curKey)
+      ) deps.onBlockModelChange(items[0].value);
       openMenu({
         anchor: modelBtn,
         items,
@@ -403,12 +454,15 @@ export function installBlockAi(deps: BlockAiDeps) {
         inflightCleanup = null;
         inflightId = null;
       } else if (e.kind === 'error') {
+        const message = e.errorCode ? aiChatErrorMessage(e) : undefined;
         if (e.errorKind === 'auth') {
-          // Classified auth failure (e.g. expired ChatGPT session): show a fixed,
-          // DOM-constructed sign-in affordance. Never surface the raw provider body.
-          renderAuthAffordance(optionsEl, deps.openAiSettings);
+          // Coded auth errors can supply provider-specific remediation and action;
+          // uncoded auth errors retain the fixed ChatGPT copy.
+          renderAuthAffordance(optionsEl, deps.openAiSettings, e.errorCode, message);
+        } else if (message) {
+          optionsEl.innerHTML = `<div class="ba-error">${escapeHtml(message)}</div>`;
         } else {
-          optionsEl.innerHTML = `<div class="ba-error">${escapeHtml(e.message ?? 'Error')}</div>`;
+          optionsEl.innerHTML = `<div class="ba-error">${escapeHtml(aiChatErrorMessage(e))}</div>`;
         }
         generateBtn.disabled = false;
         generateBtn.textContent = t('block.generate');
@@ -525,19 +579,35 @@ const AUTH_AFFORDANCE_COPY: Record<'ko' | 'en', { message: string; button: strin
  * surfaced (no innerHTML / interpolation), so a hostile error body cannot inject
  * markup. The button routes to the AI settings / login modal via `onSignIn`.
  */
-function renderAuthAffordance(optionsEl: HTMLElement, onSignIn?: () => void): void {
+function renderAuthAffordance(
+  optionsEl: HTMLElement,
+  onSignIn?: () => void,
+  errorCode?: string,
+  codedMessage?: string,
+): void {
+  const actionKey = errorCode === 'grok_composer_requires_api_key'
+    ? 'error.grokComposerOpenSettings'
+    : undefined;
   const copy = AUTH_AFFORDANCE_COPY[getLocale() === 'ko' ? 'ko' : 'en'];
   const wrap = document.createElement('div');
   wrap.className = 'ba-error ba-auth-error';
-  const msg = document.createElement('div');
-  msg.className = 'ba-auth-msg';
-  msg.textContent = copy.message;
+  if (codedMessage) {
+    const codedMsg = document.createElement('div');
+    codedMsg.className = 'ba-auth-code';
+    codedMsg.textContent = codedMessage;
+    wrap.appendChild(codedMsg);
+  }
+  if (!actionKey) {
+    const msg = document.createElement('div');
+    msg.className = 'ba-auth-msg';
+    msg.textContent = copy.message;
+    wrap.appendChild(msg);
+  }
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'ba-primary ba-signin';
-  btn.textContent = copy.button;
+  btn.textContent = actionKey ? t(actionKey) : copy.button;
   btn.addEventListener('click', () => onSignIn?.());
-  wrap.appendChild(msg);
   wrap.appendChild(btn);
   optionsEl.textContent = '';
   optionsEl.appendChild(wrap);

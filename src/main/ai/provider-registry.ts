@@ -14,7 +14,7 @@ import { ApiKeyStore, type KeyStoreBackend } from './api-key-store';
 import type { ChatGptProvider } from './chatgpt-provider';
 import { atomicWrite, nodeAtomicBackend } from '../atomic-write';
 import { ComposedClaudeProvider } from './claude-composed';
-import { ComposedGrokProvider } from './grok-composed';
+import { API_ONLY_MODEL_IDS, ComposedGrokProvider } from './grok-composed';
 import { nodeCliSpawn } from './cli-runner';
 import { OpenRouterProvider } from './openrouter-provider';
 import { applyModelDisplayPolicy } from './model-display-policy';
@@ -140,6 +140,10 @@ export class ProviderRegistry {
     return Promise.all(providers.map((p) => p.getAuthStatus()));
   }
 
+  async hasGrokApiKey(): Promise<boolean> {
+    return (await this.keys.getKeyStatus('grok')).connected;
+  }
+
   async hasAnyAuth(): Promise<boolean> {
     const statuses = await this.getAuthStatuses();
     // A cloud provider reporting connected or an installed CLI with unverified auth may be usable.
@@ -149,7 +153,13 @@ export class ProviderRegistry {
     // actually up AND has discovered models (mirrors the renderer's zero-auth notice).
     return this.localCache.snapshot().length > 0;
   }
-
+  private routeAwareCuratedModels(grokApiConnected: boolean): ModelRef[] {
+    return applyModelDisplayPolicy(getCuratedModels()).filter(
+      (model) => model.provider !== 'grok'
+        || !API_ONLY_MODEL_IDS.has(model.id)
+        || grokApiConnected,
+    );
+  }
   /**
    * Curated catalog merged with every registered cloud provider's model list and
    * the local model-cache snapshot (deduped by `provider:id`). Local discovery is
@@ -157,7 +167,6 @@ export class ProviderRegistry {
    */
   async getAvailableModels(force = false): Promise<ModelRef[]> {
     if (force) this.bumpReasoningSnapshot();
-    const curated = applyModelDisplayPolicy(getCuratedModels());
     const cloudProviders = Object.values(this.providers).filter(
       (provider): provider is AiProvider => provider != null && provider.authKind !== 'local',
     );
@@ -170,6 +179,13 @@ export class ProviderRegistry {
         }
       }))
     ).flat();
+    const grokApiConnected = this.providers.grok !== undefined && await this.hasGrokApiKey();
+    const curated = this.routeAwareCuratedModels(grokApiConnected);
+    const routeAwareLive = live.filter(
+      (model) => model.provider !== 'grok'
+        || !API_ONLY_MODEL_IDS.has(model.id)
+        || grokApiConnected,
+    );
     const locals = this.localProviders();
     if (locals.length > 0 && (force || this.localCache.isStale())) {
       // Fire-and-forget: must not block the cloud model list.
@@ -178,7 +194,7 @@ export class ProviderRegistry {
     const localModels = applyModelDisplayPolicy(this.localCache.snapshot());
     const seen = new Set<string>();
     const merged: ModelRef[] = [];
-    for (const model of [...curated, ...live, ...localModels]) {
+    for (const model of [...curated, ...routeAwareLive, ...localModels]) {
       const key = `${model.provider}:${model.id}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -204,7 +220,6 @@ export class ProviderRegistry {
    */
   async getAvailableModelsForHtmlExport(force = false): Promise<ModelRef[]> {
     if (force) this.bumpReasoningSnapshot();
-    const curated = applyModelDisplayPolicy(getCuratedModels());
     const cloudProviders = Object.values(this.providers).filter(
       (provider): provider is AiProvider => provider != null && provider.authKind !== 'local',
     );
@@ -240,9 +255,16 @@ export class ProviderRegistry {
         setTimeout(() => resolve([]), HTML_CLOUD_INVENTORY_TIMEOUT_MS);
       }),
     ]);
+    const grokApiConnected = this.providers.grok !== undefined && await this.hasGrokApiKey();
+    const curated = this.routeAwareCuratedModels(grokApiConnected);
+    const routeAwareLive = live.filter(
+      (model) => model.provider !== 'grok'
+        || !API_ONLY_MODEL_IDS.has(model.id)
+        || grokApiConnected,
+    );
     const seen = new Set<string>();
     const merged: ModelRef[] = [];
-    for (const model of [...curated, ...live, ...this.localCache.snapshot()]) {
+    for (const model of [...curated, ...routeAwareLive, ...this.localCache.snapshot()]) {
       const key = `${model.provider}:${model.id}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -309,6 +331,19 @@ export class ProviderRegistry {
         kind: 'error',
         message: `${req.model.provider} is not available yet. Pick another model in AI settings.`,
         errorKind: 'provider',
+      });
+      return;
+    }
+    if (
+      req.model.provider === 'grok'
+      && API_ONLY_MODEL_IDS.has(req.model.id)
+      && !await this.hasGrokApiKey()
+    ) {
+      onEvent({
+        kind: 'error',
+        message: `${req.model.id} requires an xAI API key.`,
+        errorKind: 'auth',
+        errorCode: 'grok_composer_requires_api_key',
       });
       return;
     }

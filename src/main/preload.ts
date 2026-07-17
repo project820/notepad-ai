@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { AiProviderErrorKind, AiProviderId, ModelRef, ProviderAuthStatus, ReasoningEffort } from './ai/types';
+import type { AiChatErrorCode, AiProviderErrorKind, AiProviderId, ModelRef, ProviderAuthStatus, ReasoningEffort } from './ai/types';
 import type { FileTreeEntry } from '../shared/file-types';
 import type { AuthSnapshot, LoginUpdate, SubscriptionLoginUpdate, SubscriptionProvider } from '../shared/auth-protocol';
 import type {
@@ -148,7 +148,7 @@ const api = {
   aiCancel: (id: string): Promise<void> => ipcRenderer.invoke('ai:cancel', id),
   onAiChatEvent: (
     id: string,
-    cb: (e: { kind: 'delta' | 'done' | 'error'; text?: string; message?: string; errorKind?: AiProviderErrorKind }) => void,
+    cb: (e: { kind: 'delta' | 'done' | 'error'; text?: string; message?: string; errorKind?: AiProviderErrorKind; errorCode?: AiChatErrorCode }) => void,
   ) => {
     const channel = `ai:chat:${id}`;
     const listener = (_e: any, evt: any) => cb(evt);
@@ -165,6 +165,7 @@ const api = {
   aiProvidersStatus: (): Promise<ProviderAuthStatus[]> =>
     ipcRenderer.invoke('auth:providers-status'),
   aiHasAnyAuth: (): Promise<boolean> => ipcRenderer.invoke('auth:has-any'),
+  aiGrokKeyStatus: (): Promise<boolean> => ipcRenderer.invoke('ai:key-status'),
   aiSetApiKey: (provider: AiProviderId, key: string): Promise<{ persisted: boolean }> =>
     ipcRenderer.invoke('auth:set-api-key', { provider, key }),
   aiDeleteProviderKey: (provider: AiProviderId): Promise<void> =>

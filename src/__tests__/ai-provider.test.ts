@@ -373,6 +373,20 @@ describe('ProviderRegistry routing', () => {
     expect(chatgptIds).toContain('gpt-5.6-sol');
     expect(chatgptIds.filter((id) => id === 'gpt-5.6')).toHaveLength(1); // deduped
   });
+  it('does not reintroduce API-only Grok composer in the HTML catalog for CLI auth', async () => {
+    const cliGrokModels: ModelRef[] = [
+      { provider: 'grok', id: 'grok-4.5', label: 'Grok 4.5', humanizeEngineId: 'openai', requiresAuth: true },
+    ];
+    const reg = new ProviderRegistry(fakeKeyStore(), {
+      grok: fakeProvider('grok', true, () => {}, cliGrokModels),
+    });
+
+    const grokIds = (await reg.getAvailableModelsForHtmlExport())
+      .filter((model) => model.provider === 'grok')
+      .map((model) => model.id);
+
+    expect(grokIds).toEqual(['grok-4.5']);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -827,6 +841,30 @@ describe('ProviderRegistry local discovery is non-blocking', () => {
         .toEqual(['local-despite-cloud-hang']);
       // Curated cloud ids still present even when live cloud hang times out.
       expect(models.some((model) => model.provider === 'chatgpt')).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it('keeps Grok Composer in HTML inventory when another cloud catalog hangs and xAI is connected', async () => {
+    vi.useFakeTimers();
+    try {
+      const keys = fakeKeyStore();
+      await keys.setApiKey('grok', 'xai-key-1234');
+      const chatgpt = {
+        ...fakeProvider('chatgpt', true, () => {}),
+        listModels: vi.fn(() => new Promise<ModelRef[]>(() => {})),
+      } as AiProvider & { listModels: ReturnType<typeof vi.fn> };
+      const grok = fakeProvider('grok', true, () => {});
+      const reg = new ProviderRegistry(keys, { chatgpt, grok }, new LocalModelCache());
+
+      const pending = reg.getAvailableModelsForHtmlExport(true);
+      await vi.advanceTimersByTimeAsync(1_500);
+      const models = await pending;
+
+      expect(models).toContainEqual(expect.objectContaining({
+        provider: 'grok',
+        id: 'grok-composer-2.5-fast',
+      }));
     } finally {
       vi.useRealTimers();
     }

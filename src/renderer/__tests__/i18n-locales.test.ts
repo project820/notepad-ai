@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, afterEach } from 'vitest';
 import { DICTS, t, setLocale, type Locale } from '../i18n';
+import { aiChatErrorMessage } from '../ai-error-message';
 
 afterEach(() => setLocale('en'));
 
@@ -141,6 +142,35 @@ describe('i18n — 5 locales (#3)', () => {
       setLocale(loc as Locale);
       expect(t('settings.prov.unverified'), `settings.prov.unverified @ ${loc}`).toBe(label);
       expect(label, `neutral status @ ${loc}`).not.toContain('grok login');
+    }
+  });
+  it('maps the Grok Composer API-key error in all five locales', () => {
+    const expected: Record<string, string> = {
+      en: 'Grok Composer requires an xAI API key. Add it in AI settings to use this model.',
+      ko: 'Grok Composer를 사용하려면 xAI API 키가 필요합니다. AI 설정에서 키를 추가하세요.',
+      'zh-Hans': 'Grok Composer 需要 xAI API 密钥。请在 AI 设置中添加密钥以使用此模型。',
+      'zh-Hant': 'Grok Composer 需要 xAI API 金鑰。請在 AI 設定中新增金鑰以使用此模型。',
+      ja: 'Grok Composer を使用するには xAI API キーが必要です。AI 設定でキーを追加してください。',
+    };
+    for (const [loc, message] of Object.entries(expected)) {
+      setLocale(loc as Locale);
+      expect(aiChatErrorMessage({
+        errorCode: 'grok_composer_requires_api_key',
+        message: 'grok-composer-2.5-fast requires an xAI API key.',
+      }), `Grok Composer error @ ${loc}`).toBe(message);
+    }
+  });
+  it('maps the Grok Composer settings action in all five locales', () => {
+    const expected: Record<string, string> = {
+      en: 'Open AI settings',
+      ko: 'AI 설정 열기',
+      'zh-Hans': '打开 AI 设置',
+      'zh-Hant': '開啟 AI 設定',
+      ja: 'AI 設定を開く',
+    };
+    for (const [loc, label] of Object.entries(expected)) {
+      setLocale(loc as Locale);
+      expect(t('error.grokComposerOpenSettings'), `Grok Composer settings action @ ${loc}`).toBe(label);
     }
   });
 

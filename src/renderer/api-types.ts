@@ -73,12 +73,13 @@ export type Api = HtmlExportPipelineApi & HtmlExportAssetApi & {
   onAuthLoginUpdate: (cb: (u: LoginUpdate) => void) => () => void;
   aiChat: (request: AiChatRequest) => Promise<void>;
   aiCancel: (id: string) => Promise<void>;
-  onAiChatEvent: (id: string, cb: (e: { kind: 'delta' | 'done' | 'error'; text?: string; message?: string; errorKind?: string }) => void) => () => void;
+  onAiChatEvent: (id: string, cb: (e: { kind: 'delta' | 'done' | 'error'; text?: string; message?: string; errorKind?: string; errorCode?: string }) => void) => () => void;
   aiModels: (force?: boolean) => Promise<ModelRef[]>;
   aiModelsHtml: (force?: boolean) => Promise<ModelRef[]>;
   aiReasoningCapabilities: () => Promise<ReasoningCapabilitiesSnapshot>;
   aiProvidersStatus: () => Promise<ProviderAuthStatus[]>;
   aiHasAnyAuth: () => Promise<boolean>;
+  aiGrokKeyStatus: () => Promise<boolean>;
   aiSetApiKey: (provider: AiProviderId, key: string) => Promise<{ persisted: boolean }>;
   aiDeleteProviderKey: (provider: AiProviderId) => Promise<void>;
   subscriptionLogin: (provider: SubscriptionProvider) => Promise<void>;

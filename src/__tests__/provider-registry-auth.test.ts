@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { ProviderRegistry, type ProviderMap } from '../main/ai/provider-registry';
+import { applyModelDisplayPolicy } from '../main/ai/model-display-policy';
 import { GrokCliProvider, type PromptFileWriter } from '../main/ai/grok-cli-provider';
 import {
   __resetCliSpawnPathForTests,
@@ -36,7 +37,12 @@ function cacheWith(models: ModelRef[]): LocalModelCache {
   } as unknown as LocalModelCache;
 }
 
-const noKeys = {} as unknown as ApiKeyStore;
+const noKeys = {
+  getKeyStatus: async () => ({ connected: false, persisted: false }),
+} as unknown as ApiKeyStore;
+const grokApiKeys = {
+  getKeyStatus: async () => ({ connected: true, persisted: false }),
+} as unknown as ApiKeyStore;
 const localModel: ModelRef = { provider: 'ollama', id: 'llama3', label: 'llama3' } as ModelRef;
 
 describe('ProviderRegistry.hasAnyAuth — local is discovery, not auth', () => {
@@ -94,6 +100,75 @@ describe('ProviderRegistry model aggregation', () => {
     await expect(registry.getAvailableModels()).resolves.toEqual(expect.arrayContaining([
       expect.objectContaining({ provider: 'grok', id: 'grok-4.5' }),
     ]));
+  });
+  it('keeps a stale composer selection out of CLI-only picker inventory but preserves it for API inventory', async () => {
+    const composer: ModelRef = {
+      provider: 'grok',
+      id: 'grok-composer-2.5-fast',
+      label: 'Grok Composer 2.5 Fast',
+      humanizeEngineId: 'openai',
+      requiresAuth: true,
+    };
+    const shared: ModelRef = {
+      provider: 'grok',
+      id: 'grok-4.5',
+      label: 'Grok 4.5',
+      humanizeEngineId: 'openai',
+      requiresAuth: true,
+    };
+    const cliOnly = provider('grok', 'api_key', true);
+    cliOnly.listModels = async () => [shared];
+    const api = provider('grok', 'api_key', true);
+    api.listModels = async () => [shared, composer];
+    const currentSelection = { provider: 'grok' as const, id: composer.id };
+
+    const cliPicker = applyModelDisplayPolicy(
+      await new ProviderRegistry(noKeys, { grok: cliOnly }, cacheWith([])).getAvailableModels(),
+      { currentSelection },
+    );
+    const apiPicker = applyModelDisplayPolicy(
+      await new ProviderRegistry(grokApiKeys, { grok: api }, cacheWith([])).getAvailableModels(),
+      { currentSelection },
+    );
+
+    expect(cliPicker.map((entry) => entry.id)).toContain('grok-4.5');
+    expect(cliPicker.map((entry) => entry.id)).not.toContain(composer.id);
+    expect(apiPicker).toContainEqual(expect.objectContaining({ id: composer.id }));
+    expect(apiPicker.find((entry) => entry.id === composer.id)).not.toHaveProperty('custom');
+  });
+  it('filters stale live composer rows without a key in chat and HTML inventories', async () => {
+    const composer: ModelRef = {
+      provider: 'grok',
+      id: 'grok-composer-2.5-fast',
+      label: 'Grok Composer 2.5 Fast',
+      humanizeEngineId: 'openai',
+      requiresAuth: true,
+    };
+    const shared: ModelRef = {
+      provider: 'grok',
+      id: 'grok-4.5',
+      label: 'Grok 4.5',
+      humanizeEngineId: 'openai',
+      requiresAuth: true,
+    };
+    const grok = provider('grok', 'api_key', true);
+    grok.listModels = async () => [shared, composer];
+
+    const disconnected = new ProviderRegistry(noKeys, { grok }, cacheWith([]));
+    const connected = new ProviderRegistry(grokApiKeys, { grok }, cacheWith([]));
+
+    for (const inventory of [
+      disconnected.getAvailableModels(),
+      disconnected.getAvailableModelsForHtmlExport(),
+    ]) {
+      await expect(inventory).resolves.not.toContainEqual(expect.objectContaining({ id: composer.id }));
+    }
+    for (const inventory of [
+      connected.getAvailableModels(),
+      connected.getAvailableModelsForHtmlExport(),
+    ]) {
+      await expect(inventory).resolves.toContainEqual(expect.objectContaining({ id: composer.id }));
+    }
   });
 });
 class FakeChild implements CliProcess {
@@ -223,6 +298,30 @@ describe('ProviderRegistry — Grok CLI readiness', () => {
       kind: 'error',
       message: 'Grok CLI is unavailable. Install it and run `grok login` in a terminal.',
       errorKind: 'auth',
+    }]);
+  });
+  it('emits composer-specific key remediation before the unavailable CLI gate', async () => {
+    const grok = grokProvider({
+      provider: 'grok',
+      authKind: 'cli',
+      connected: false,
+      installed: false,
+      label: 'Grok (CLI)',
+      errorCode: 'grok_cli_setup_required',
+    });
+    const events: AiChatEvent[] = [];
+
+    await new ProviderRegistry(noKeys, { grok }, cacheWith([])).streamProviderChat({
+      ...grokRequest,
+      model: { provider: 'grok', id: 'grok-composer-2.5-fast' },
+    }, (event) => events.push(event));
+
+    expect(grok.streamCalls).toBe(0);
+    expect(events).toEqual([{
+      kind: 'error',
+      message: 'grok-composer-2.5-fast requires an xAI API key.',
+      errorKind: 'auth',
+      errorCode: 'grok_composer_requires_api_key',
     }]);
   });
 });

@@ -6,6 +6,10 @@ import { loadPrefs, savePrefs, migratePrefs } from '../prefs';
 import { t, setLocale } from '../i18n';
 import { closeOpenMenu } from '../dropdown';
 
+function setGrokKeyStatus(connected: boolean) {
+  (window as unknown as { api: unknown }).api = { aiGrokKeyStatus: vi.fn(async () => connected) };
+}
+
 function stubHandlers(over: Partial<ToolbarHandlers> = {}): ToolbarHandlers {
   return {
     onFormat: vi.fn(),
@@ -37,8 +41,11 @@ function mountToolbar(over: Partial<ToolbarHandlers> = {}) {
 }
 
 afterEach(() => {
+  closeOpenMenu();
   document.body.innerHTML = '';
   localStorage.clear();
+  vi.useRealTimers();
+  delete (window as unknown as { api?: unknown }).api;
 });
 
 describe('toolbar #4 — left-panel toggle moved into the toolbar (AC5)', () => {
@@ -213,6 +220,7 @@ describe('toolbar — model dropdown (G003 local providers)', () => {
     });
     await flush(); // model cache warmed by the startup loadModels()
     controls.querySelector<HTMLButtonElement>('#hdr-model')!.click();
+    await flush();
     const items = Array.from(document.querySelectorAll('.pm-item'));
     const llama = items.find((i) => i.getAttribute('data-value') === 'ollama:llama3:latest');
     expect(llama).toBeTruthy();
@@ -224,6 +232,193 @@ describe('toolbar — model dropdown (G003 local providers)', () => {
     expect(items.find((i) => i.getAttribute('data-value') === 'claude:claude-sonnet-4-6')).toBeUndefined();
     (llama as HTMLButtonElement).click();
     expect(onModelChange).toHaveBeenCalledWith('ollama:llama3:latest');
+  });
+  it('migrates a hidden persisted model to the first available model', async () => {
+    const onModelChange = vi.fn();
+    const { controls } = mountToolbar({
+      onModelChange,
+      getModel: () => ({ provider: 'grok', id: 'grok-composer-2.5-fast' }),
+      loadModels: async () => [{ id: 'gpt-5.6', provider: 'chatgpt' }],
+    });
+
+    await flush();
+    controls.querySelector<HTMLButtonElement>('#hdr-model')!.click();
+    await flush();
+
+    expect(onModelChange).toHaveBeenCalledTimes(1);
+    expect(onModelChange).toHaveBeenCalledWith('chatgpt:gpt-5.6');
+  });
+
+  it('does not migrate a visible persisted model', async () => {
+    const onModelChange = vi.fn();
+    const { controls } = mountToolbar({
+      onModelChange,
+      getModel: () => ({ provider: 'chatgpt', id: 'gpt-5.6' }),
+      loadModels: async () => [{ id: 'gpt-5.6', provider: 'chatgpt' }],
+    });
+
+    await flush();
+    controls.querySelector<HTMLButtonElement>('#hdr-model')!.click();
+    await flush();
+
+    expect(onModelChange).not.toHaveBeenCalled();
+  });
+  it('uses the fresh inventory to hide a newly unavailable composer selection', async () => {
+    const onModelChange = vi.fn();
+    let calls = 0;
+    const { controls } = mountToolbar({
+      onModelChange,
+      getModel: () => ({ provider: 'grok', id: 'grok-composer-2.5-fast' }),
+      loadModels: async () => {
+        calls += 1;
+        return calls === 1
+          ? [{ id: 'grok-composer-2.5-fast', provider: 'grok' }]
+          : [{ id: 'gpt-5.6', provider: 'chatgpt' }];
+      },
+    });
+
+    await flush();
+    controls.querySelector<HTMLButtonElement>('#hdr-model')!.click();
+    await flush();
+
+    expect(document.querySelector('[data-value="grok:grok-composer-2.5-fast"]')).toBeNull();
+    expect(onModelChange).toHaveBeenCalledTimes(1);
+    expect(onModelChange).toHaveBeenCalledWith('chatgpt:gpt-5.6');
+  });
+  it('opens from the cached inventory when a forced refresh stalls', async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const { controls } = mountToolbar({
+      loadModels: () => {
+        calls += 1;
+        if (calls === 1) return Promise.resolve([{ id: 'gpt-5.6', provider: 'chatgpt' }]);
+        return new Promise(() => {});
+      },
+    });
+
+    await Promise.resolve();
+    controls.querySelector<HTMLButtonElement>('#hdr-model')!.click();
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    expect(document.querySelector('[data-value="chatgpt:gpt-5.6"]')).not.toBeNull();
+  });
+  it('keeps a persisted composer selection when the Grok key is present and refresh stalls', async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const onModelChange = vi.fn();
+    setGrokKeyStatus(true);
+    const { controls } = mountToolbar({
+      onModelChange,
+      getModel: () => ({ provider: 'grok', id: 'grok-composer-2.5-fast' }),
+      loadModels: () => {
+        calls += 1;
+        return calls === 1
+          ? Promise.resolve([{ id: 'grok-composer-2.5-fast', provider: 'grok' }])
+          : new Promise(() => {});
+      },
+    });
+    await Promise.resolve();
+    controls.querySelector<HTMLButtonElement>('#hdr-model')!.click();
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    expect(document.querySelector('[data-value="grok:grok-composer-2.5-fast"]')).not.toBeNull();
+    expect(onModelChange).not.toHaveBeenCalled();
+  });
+  it('hides and migrates a cached composer selection when the Grok key was removed and refresh stalls', async () => {
+    vi.useFakeTimers();
+    setGrokKeyStatus(false);
+    let calls = 0;
+    const onModelChange = vi.fn();
+    const { controls } = mountToolbar({
+      onModelChange,
+      getModel: () => ({ provider: 'grok', id: 'grok-composer-2.5-fast' }),
+      loadModels: () => {
+        calls += 1;
+        return calls === 1
+          ? Promise.resolve([
+            { id: 'grok-composer-2.5-fast', provider: 'grok' },
+            { id: 'gpt-5.6', provider: 'chatgpt' },
+          ])
+          : new Promise(() => {});
+      },
+    });
+    await Promise.resolve();
+    controls.querySelector<HTMLButtonElement>('#hdr-model')!.click();
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    expect(document.querySelector('[data-value="grok:grok-composer-2.5-fast"]')).toBeNull();
+    expect(onModelChange).toHaveBeenCalledTimes(1);
+    expect(onModelChange).toHaveBeenCalledWith('chatgpt:gpt-5.6');
+  });
+  it('shows composer from a fresh inventory', async () => {
+    const { controls } = mountToolbar({
+      loadModels: async () => [{ id: 'grok-composer-2.5-fast', provider: 'grok' }],
+    });
+    await flush();
+    controls.querySelector<HTMLButtonElement>('#hdr-model')!.click();
+    await flush();
+
+    expect(document.querySelector('[data-value="grok:grok-composer-2.5-fast"]')).not.toBeNull();
+  });
+  it('migrates a stale persisted composer after the startup snapshot resolves and refresh stalls', async () => {
+    vi.useFakeTimers();
+    vi.resetModules();
+    document.body.innerHTML = `<div id="navbar-controls"></div><div id="toolbar"></div>`;
+    const { createToolbar } = await import('../toolbar');
+    const onModelChange = vi.fn();
+    let calls = 0;
+    createToolbar(document.getElementById('toolbar')!, stubHandlers({
+      getModel: () => ({ provider: 'grok', id: 'grok-composer-2.5-fast' }),
+      onModelChange,
+      loadModels: () => {
+        calls += 1;
+        return calls === 1
+          ? Promise.resolve([{ id: 'gpt-5.6', provider: 'chatgpt' }])
+          : new Promise(() => {});
+      },
+    }));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    document.querySelector<HTMLButtonElement>('#hdr-model')!.click();
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    expect(onModelChange).toHaveBeenCalledTimes(1);
+    expect(onModelChange).toHaveBeenCalledWith('chatgpt:gpt-5.6');
+  });
+
+  it('migrates a composer selection while the startup snapshot remains unresolved when the Grok key is absent', async () => {
+    vi.useFakeTimers();
+    vi.resetModules();
+    document.body.innerHTML = `<div id="navbar-controls"></div><div id="toolbar"></div>`;
+    const { createToolbar } = await import('../toolbar');
+    const onModelChange = vi.fn();
+    createToolbar(document.getElementById('toolbar')!, stubHandlers({
+      getModel: () => ({ provider: 'grok', id: 'grok-composer-2.5-fast' }),
+      onModelChange,
+      loadModels: () => new Promise(() => {}),
+    }));
+
+    document.querySelector<HTMLButtonElement>('#hdr-model')!.click();
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    expect(onModelChange).toHaveBeenCalledWith('chatgpt:gpt-5.4-mini');
+  });
+
+  it('does not migrate a visible selection while a transient empty inventory is reinjected', async () => {
+    const onModelChange = vi.fn();
+    const { controls } = mountToolbar({
+      onModelChange,
+      getModel: () => ({ provider: 'chatgpt', id: 'gpt-5.6' }),
+      loadModels: async () => [],
+    });
+
+    await flush();
+    controls.querySelector<HTMLButtonElement>('#hdr-model')!.click();
+    await flush();
+
+    expect(document.querySelector('[data-value="chatgpt:gpt-5.6"]')).not.toBeNull();
+    expect(onModelChange).not.toHaveBeenCalled();
   });
 });
 

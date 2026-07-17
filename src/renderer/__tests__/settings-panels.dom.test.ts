@@ -35,14 +35,15 @@ afterEach(() => {
 });
 
 describe('mountProviderSettingsPanel', () => {
-  it('keeps account sign-in controls and removes legacy provider configuration controls', () => {
+  it('keeps account sign-in controls, adds the Grok key control, and removes legacy configuration controls', () => {
     const { parent, handlers } = mountProviders();
     parent.querySelector<HTMLButtonElement>('[data-prov-action="signout"]')!.click();
 
     expect(handlers.onChatgptSignOut).toHaveBeenCalledOnce();
     expect(parent.querySelector('[data-prov-action="subscription-login"][data-prov="claude"]')).not.toBeNull();
     expect(parent.querySelector('[data-prov-action="subscription-login"][data-prov="grok"]')).not.toBeNull();
-    expect(parent.querySelector('[data-prov-key], [data-prov-custom], [data-prov-advanced]')).toBeNull();
+    expect(parent.querySelector('[data-prov-key="grok"]')).not.toBeNull();
+    expect(parent.querySelector('[data-prov-custom], [data-prov-advanced]')).toBeNull();
     expect(parent.querySelector('[data-prov-action="select-cli-override"], [data-prov-action="clear-cli-override"]')).toBeNull();
     expect(parent.querySelector('.prov-onboarding')).toBeNull();
   });

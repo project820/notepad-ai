@@ -278,6 +278,16 @@ export function openSettingsModal(deps: SettingsModalDeps): void {
       deps.onAfterAuthChange?.();
       await loadProviders();
     },
+    onSetApiKey: async (provider, key) => {
+      await window.api.aiSetApiKey(provider, key);
+      deps.onAfterAuthChange?.();
+      await loadProviders();
+    },
+    onDeleteProviderKey: async (provider) => {
+      await window.api.aiDeleteProviderKey(provider);
+      deps.onAfterAuthChange?.();
+      await loadProviders();
+    },
     onSubscriptionLogin: (provider) => window.api.subscriptionLogin(provider),
     onSubscriptionLogout: async (provider) => {
       await window.api.subscriptionLogout(provider);

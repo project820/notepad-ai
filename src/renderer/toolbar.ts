@@ -4,7 +4,7 @@ import { t, getLocale, setLocale, onLocaleChange, type Locale } from './i18n';
 import { modelKey, parseModelKey } from './model-key';
 import { stepTypography, type TypographyPref } from './typography';
 import { formatContextWindow, modelContextWindowTokens } from '../main/ai/output-budget';
-import { applyModelDisplayPolicy } from '../main/ai/model-display-policy';
+import { applyModelDisplayPolicy, isRouteHiddenModel } from '../main/ai/model-display-policy';
 import { isAiProviderId, type AiProviderId, type ModelRef, type ReasoningEffort } from '../main/ai/types';
 
 export type Theme = 'system' | 'light' | 'dark';
@@ -115,7 +115,10 @@ const BUTTONS: ButtonSpec[] = [
   { kind: 'action', id: 'fmt-hr', html: ICONS.hr, tipKey: 'tip.hr', action: 'hr' },
 ];
 
+const MODEL_MENU_REFRESH_TIMEOUT_MS = 1_500;
+
 let cachedModels: { id: string; label?: string; provider?: string; contextWindow?: number }[] = [];
+let lastCompletedInventory: typeof cachedModels | undefined;
 
 let reasoningCapabilities: {
   featureEnabled: boolean;
@@ -246,10 +249,38 @@ export function createToolbar(parent: HTMLElement, h: ToolbarHandlers) {
     const accountBtn = controls.querySelector<HTMLButtonElement>('#hdr-account')!;
     const langBtn = controls.querySelector<HTMLButtonElement>('#hdr-lang')!;
 
-    modelBtn.addEventListener('click', () => {
-      // Kick a non-blocking background refresh so newly started local servers
-      // appear on the next open; the menu below renders the current snapshot.
-      void h.loadModels(true).then((m) => { cachedModels = m; void refreshReasoningCapabilities(); });
+    modelBtn.addEventListener('click', async () => {
+      const refresh = h.loadModels(true);
+      const grokKeyStatus = window.api?.aiGrokKeyStatus?.().catch(() => false) ?? Promise.resolve(false);
+      let refreshTimeout: ReturnType<typeof setTimeout> | undefined;
+      const result = await Promise.race([
+        refresh.then(
+          (models) => ({ models, fresh: true }),
+          () => ({ models: cachedModels, fresh: false }),
+        ),
+        new Promise<{ models: typeof cachedModels; fresh: false }>((resolve) => {
+          refreshTimeout = setTimeout(
+            () => resolve({ models: cachedModels, fresh: false }),
+            MODEL_MENU_REFRESH_TIMEOUT_MS,
+          );
+        }),
+      ]);
+      if (refreshTimeout !== undefined) clearTimeout(refreshTimeout);
+      if (result.fresh) {
+        cachedModels = result.models;
+        lastCompletedInventory = result.models;
+      }
+      else {
+        void refresh.then(
+          (models) => {
+            cachedModels = models;
+            lastCompletedInventory = models;
+          },
+          () => {},
+        );
+      }
+      const models = result.models;
+      void refreshReasoningCapabilities();
       const PROVIDER_LABELS: Record<string, string> = {
         chatgpt: 'ChatGPT', claude: 'Claude', openrouter: 'OpenRouter', ollama: 'Ollama', lmstudio: 'LM Studio', grok: 'Grok',
       };
@@ -259,13 +290,18 @@ export function createToolbar(parent: HTMLElement, h: ToolbarHandlers) {
           ? modelKey({ provider: isAiProviderId(cur.provider) ? cur.provider : 'chatgpt', id: cur.id })
           : modelKey({
               provider:
-                (cachedModels.find((m) => m.id === ((typeof cur === 'string' ? cur : '') || 'gpt-5.4-mini'))
+                (models.find((m) => m.id === ((typeof cur === 'string' ? cur : '') || 'gpt-5.4-mini'))
                   ?.provider as AiProviderId | undefined) ?? 'chatgpt',
               id: (typeof cur === 'string' ? cur : '') || 'gpt-5.4-mini',
             });
-      const sorted = applyModelDisplayPolicy(cachedModels as ModelRef[], {
-        currentSelection: parseModelKey(currentKey),
-      }).sort(
+      const modelsForMenu =
+        !result.fresh && !(await grokKeyStatus)
+          ? (models as ModelRef[]).filter((model) => !isRouteHiddenModel(model))
+          : models as ModelRef[];
+      const sorted = applyModelDisplayPolicy(
+        modelsForMenu,
+        { currentSelection: parseModelKey(currentKey) },
+      ).sort(
         (a, b) =>
           (a.provider ?? '').localeCompare(b.provider ?? '') ||
           (a.label ?? a.id).localeCompare(b.label ?? b.id),
@@ -280,7 +316,16 @@ export function createToolbar(parent: HTMLElement, h: ToolbarHandlers) {
         const hint = badge ? `${providerLabel} · ${badge}` : providerLabel;
         return { value: key, label: m.label ?? m.id, hint, selected: key === currentKey };
       });
+      const hasCurrentSelection = items.some((item) => item.selected);
       if (items.length === 0) items.push({ value: 'chatgpt:gpt-5.4-mini', label: 'gpt-5.4-mini', hint: 'ChatGPT', selected: true });
+      else if (!hasCurrentSelection) items[0].selected = true;
+      const lastCompletedSelectionPresent = lastCompletedInventory?.some((model) =>
+        modelKey({ provider: model.provider ?? 'chatgpt', id: model.id }) === currentKey,
+      ) ?? false;
+      if (
+        (!result.fresh && currentKey === 'grok:grok-composer-2.5-fast' && !await grokKeyStatus)
+        || (result.fresh && lastCompletedInventory && !lastCompletedSelectionPresent && !hasCurrentSelection && items[0].value !== currentKey)
+      ) h.onModelChange(items[0].value);
       if (h.onOpenSettings) items.push({ value: '__settings__', label: 'Manage providers & custom model…' });
       openMenu({
         anchor: modelBtn,
@@ -380,6 +425,7 @@ export function createToolbar(parent: HTMLElement, h: ToolbarHandlers) {
   // ===== Model list — load once =====
   void (async () => {
     cachedModels = await h.loadModels();
+    lastCompletedInventory = cachedModels;
     if (!h.getModel() && cachedModels[0]) {
       const first = cachedModels[0];
       h.onModelChange(modelKey({ provider: (first.provider as AiProviderId | undefined) ?? 'chatgpt', id: first.id }));

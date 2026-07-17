@@ -17,6 +17,8 @@ import type { AiChatEvent, AiChatRequest, AiProvider, ModelRef, ProviderAuthStat
 
 /** Only this model is verified on both the xAI API and the local Grok CLI. */
 const SHARED_TRANSPORT_MODEL_IDS = new Set(['grok-4.5']);
+/** These models are available only through the xAI API, never the local CLI. */
+export const API_ONLY_MODEL_IDS = new Set(['grok-composer-2.5-fast']);
 const CLI_AUTH_PROBE_CACHE_MS = 30_000;
 const CLI_AUTH_PROBE_TIMEOUT_MS = 5_000;
 const CLI_AUTH_PROBE_OUTPUT_CAP = 64 * 1024;
@@ -198,7 +200,8 @@ export class ComposedGrokProvider implements AiProvider {
   }
 
   async listModels(): Promise<ModelRef[]> {
-    return this.api.listModels();
+    const [apiStatus, models] = await Promise.all([this.api.getAuthStatus(), this.api.listModels()]);
+    return apiStatus.connected ? models : models.filter((model) => SHARED_TRANSPORT_MODEL_IDS.has(model.id));
   }
 
   /**
@@ -213,6 +216,15 @@ export class ComposedGrokProvider implements AiProvider {
 
   async streamChat(req: AiChatRequest, onEvent: (event: AiChatEvent) => void): Promise<void> {
     const apiStatus = await this.api.getAuthStatus();
+    if (!apiStatus.connected && API_ONLY_MODEL_IDS.has(req.model.id)) {
+      onEvent({
+        kind: 'error',
+        message: `${req.model.id} requires an xAI API key.`,
+        errorKind: 'auth',
+        errorCode: 'grok_composer_requires_api_key',
+      });
+      return;
+    }
     if (req.surfaceMode === 'html') {
       // §5.3: the HTML export surface pins ONE transport — no API↔CLI fallback.
       if (apiStatus.connected) await this.api.streamChat(req, onEvent);

@@ -63,4 +63,20 @@ describe('applyModelDisplayPolicy', () => {
     expect(visible).toHaveLength(1);
     expect(visible[0]).toMatchObject({ provider: 'claude', id: 'claude-sonnet-4-6', custom: true });
   });
+  it('reinjects an allowed cloud selection when the inventory is transiently empty', () => {
+    const visible = applyModelDisplayPolicy([], {
+      currentSelection: { provider: 'chatgpt', id: 'gpt-5.6' },
+    });
+
+    expect(visible).toEqual([
+      expect.objectContaining({ provider: 'chatgpt', id: 'gpt-5.6', custom: true }),
+    ]);
+  });
+  it('does not reinject a curated model omitted by the route-honest inventory', () => {
+    const visible = applyModelDisplayPolicy([
+      model('grok', 'grok-4.5'),
+    ], { currentSelection: { provider: 'grok', id: 'grok-composer-2.5-fast' } });
+
+    expect(visible.map((entry) => `${entry.provider}:${entry.id}`)).toEqual(['grok:grok-4.5']);
+  });
 });
