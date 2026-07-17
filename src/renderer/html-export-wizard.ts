@@ -41,6 +41,7 @@ import type { FinalizedArtifactId, HtmlExportAttemptId } from '../shared/html-ex
 
 import { formatContextWindow } from '../main/ai/output-budget';
 import { isAiProviderId, type AiProviderId } from '../main/ai/types';
+import { HTML_EXPORT_CHATGPT_MODEL_IDS } from '../main/ai/html-export-model-allowlist';
 import { modelKey, parseModelKey } from './model-key';
 import { defaultHtmlFileName } from './html-export-prompt';
 
@@ -220,7 +221,7 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
     return `<div class="he-model-note" data-he-note="model"${small ? '' : ' hidden'}>${small ? esc(t('he.smallContext')) : ''}</div>`;
   }
   function isFastModel(model: HtmlModelChoice | undefined): boolean {
-    return model?.provider === 'chatgpt' && /^gpt-5\.6-(sol|terra|luna)$/.test(model.id);
+    return model?.provider === 'chatgpt' && HTML_EXPORT_CHATGPT_MODEL_IDS.includes(model.id as typeof HTML_EXPORT_CHATGPT_MODEL_IDS[number]);
   }
   function fastModeHtml(selectedKey: string | undefined): string {
     const selected = htmlModels.find((model) => modelKey(model) === selectedKey);
@@ -283,11 +284,6 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
       deps.onModelChosen?.(selected);
     }
     render();
-    const note = host.querySelector<HTMLElement>('[data-he-note="model"]');
-    if (!note) return;
-    const small = isSmallContext(htmlModels.find((m) => modelKey(m) === (el as HTMLSelectElement).value));
-    note.hidden = !small;
-    note.textContent = small ? t('he.smallContext') : '';
   }
   /** Keep free-text fields in state so re-renders (A/B/C/D, mode toggle) don't wipe them. */
   function onInput(event: Event) {

@@ -41,6 +41,7 @@ import {
   extractOllamaContextLength,
 } from '../main/ai/ollama-provider';
 import { LocalModelCache } from '../main/ai/local-model-cache';
+import { filterHtmlExportModels } from '../main/ai/html-export-model-allowlist';
 import {
   normalizeLocalBaseUrl,
   parseLocalConfig,
@@ -248,9 +249,9 @@ describe('model catalog', () => {
     const m = makeCustomModel('openrouter', '  vendor/new-model  ');
     expect(m).toMatchObject({ provider: 'openrouter', id: 'vendor/new-model', custom: true, humanizeEngineId: 'openrouter' });
   });
-  it('resolveModelRef falls back to a custom ref for unknown ids (no lockout)', () => {
+  it('resolves curated models and falls back to custom refs for unknown ids', () => {
     const catalog = getCuratedModels();
-    expect(isKnownModel(catalog, 'claude', 'claude-sonnet-4-6')).toBe(false);
+    expect(isKnownModel(catalog, 'claude', 'claude-sonnet-4-6')).toBe(true);
     const resolved = resolveModelRef(catalog, 'claude', 'claude-future-99');
     expect(resolved.custom).toBe(true);
     expect(resolved.id).toBe('claude-future-99');
@@ -373,6 +374,23 @@ describe('ProviderRegistry routing', () => {
     expect(chatgptIds).toContain('gpt-5.6-sol');
     expect(chatgptIds.filter((id) => id === 'gpt-5.6')).toHaveLength(1); // deduped
   });
+  it('exposes the exact HTML export cloud lineup through the live inventory path', async () => {
+    const reg = new ProviderRegistry(fakeKeyStore(), {
+      chatgpt: fakeProvider('chatgpt', true, () => {}),
+      claude: fakeProvider('claude', true, () => {}),
+      grok: fakeProvider('grok', true, () => {}),
+    });
+
+    expect(filterHtmlExportModels(await reg.getAvailableModelsForHtmlExport()).map((model) => `${model.provider}:${model.id}`))
+      .toEqual([
+        'chatgpt:gpt-5.6-sol',
+        'chatgpt:gpt-5.6-terra',
+        'chatgpt:gpt-5.6-luna',
+        'claude:claude-sonnet-5',
+        'claude:claude-sonnet-4-6',
+        'grok:grok-4.5',
+      ]);
+  });
   it('does not reintroduce API-only Grok composer in the HTML catalog for CLI auth', async () => {
     const cliGrokModels: ModelRef[] = [
       { provider: 'grok', id: 'grok-4.5', label: 'Grok 4.5', humanizeEngineId: 'openai', requiresAuth: true },
@@ -424,6 +442,7 @@ describe('BYO-key listModels derives from the curated catalog', () => {
     expect(models.map((m) => m.id)).toEqual([
       'claude-opus-4-8',
       'claude-sonnet-5',
+      'claude-sonnet-4-6',
       'claude-haiku-4-5',
     ]);
     expect(models.every((m) => m.provider === 'claude' && m.requiresAuth === true)).toBe(true);

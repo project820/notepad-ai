@@ -25,7 +25,7 @@ import {
 import { atomicWrite, nodeAtomicBackend, type AtomicWriteBackend } from '../atomic-write';
 import type { GenerationAttemptResult } from '../html-export-generation-orchestrator';
 import { isAiProviderId, type AiProviderId } from '../ai/types';
-import { isHtmlExportModelProviderAllowed } from '../ai/html-export-model-allowlist';
+import { HTML_EXPORT_CHATGPT_MODEL_IDS, isHtmlExportModelProviderAllowed } from '../ai/html-export-model-allowlist';
 import { VIEWPORT_MAX, VIEWPORT_MIN } from '../html-export-quarantine';
 import {
   designListContentsUrl,
@@ -270,7 +270,7 @@ function isGenerateRequest(
   }
   if ('viewport' in input && input.viewport !== undefined && !isValidGenerateViewport(input.viewport)) return false;
   if ('reasoningEffort' in input && input.reasoningEffort !== undefined) {
-    if (input.reasoningEffort !== 'low' || model.provider !== 'chatgpt' || !/^gpt-5\.6-(sol|terra|luna)$/.test(model.id)) {
+    if (input.reasoningEffort !== 'low' || model.provider !== 'chatgpt' || !HTML_EXPORT_CHATGPT_MODEL_IDS.includes(model.id as typeof HTML_EXPORT_CHATGPT_MODEL_IDS[number])) {
       return false;
     }
   }

@@ -128,7 +128,7 @@ export type Api = HtmlExportPipelineApi & HtmlExportAssetApi & {
       model: { provider: AiProviderId; id: string };
       instructions?: string;
       viewport?: { width: number; height: number };
-      reasoningEffort?: ReasoningEffort;
+      reasoningEffort?: 'low';
     },
   ) => Promise<GenerationAttemptResult>;
   cancelHtmlGeneration: () => Promise<{ ok: boolean }>;

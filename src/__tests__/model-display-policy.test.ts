@@ -24,6 +24,7 @@ describe('applyModelDisplayPolicy', () => {
       'chatgpt:gpt-5.6',
       'chatgpt:gpt-5.3-codex-spark',
       'claude:claude-sonnet-5',
+      'claude:claude-sonnet-4-6',
       'grok:grok-4.5',
       'ollama:llama3:latest',
     ]);
@@ -54,14 +55,15 @@ describe('applyModelDisplayPolicy', () => {
     ]);
   });
 
-  it('reinjects a no-longer-allowed selected cloud model without restoring other stale IDs', () => {
+  it('keeps an allowed selected cloud model visible without marking it custom', () => {
     const visible = applyModelDisplayPolicy([
       model('chatgpt', 'gpt-5.4-mini'),
       model('claude', 'claude-sonnet-4-6'),
     ], { currentSelection: { provider: 'claude', id: 'claude-sonnet-4-6' } });
 
     expect(visible).toHaveLength(1);
-    expect(visible[0]).toMatchObject({ provider: 'claude', id: 'claude-sonnet-4-6', custom: true });
+    expect(visible[0]).toMatchObject({ provider: 'claude', id: 'claude-sonnet-4-6' });
+    expect(visible[0]?.custom).toBeUndefined();
   });
   it('reinjects an allowed cloud selection when the inventory is transiently empty', () => {
     const visible = applyModelDisplayPolicy([], {

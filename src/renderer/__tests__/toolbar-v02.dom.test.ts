@@ -229,7 +229,7 @@ describe('toolbar — model dropdown (G003 local providers)', () => {
     const grok = items.find((i) => i.getAttribute('data-value') === 'grok:grok-4.5');
     expect(grok).toBeTruthy();
     expect(grok!.textContent).toContain('Grok');
-    expect(items.find((i) => i.getAttribute('data-value') === 'claude:claude-sonnet-4-6')).toBeUndefined();
+    expect(items.find((i) => i.getAttribute('data-value') === 'claude:claude-sonnet-4-6')).toBeTruthy();
     (llama as HTMLButtonElement).click();
     expect(onModelChange).toHaveBeenCalledWith('ollama:llama3:latest');
   });

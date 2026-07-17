@@ -119,7 +119,7 @@ function sanitizeReasoningPrefs(prefs: Prefs): void {
 
 function sanitizeHtmlExportPrefs(prefs: Prefs): void {
   if (prefs.htmlModel && !isHtmlExportModelAllowed(prefs.htmlModel)) {
-    prefs.htmlModel = { provider: 'chatgpt', id: 'gpt-5.6-sol' };
+    delete prefs.htmlModel;
   }
   if (typeof prefs.htmlFastMode !== 'boolean') delete prefs.htmlFastMode;
 }

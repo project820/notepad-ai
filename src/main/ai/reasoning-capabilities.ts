@@ -25,7 +25,6 @@ export function sanitizeReasoning(req: AiChatRequest, ctx: ReasoningCapabilityCo
     && (ALLOWED_EFFORTS as readonly string[]).includes(effort)
     && effort !== 'max'
     && ctx.featureEnabled
-    && ctx.featureEnabled
     && req.model.provider === 'chatgpt'
     && ctx.accountAvailableModels.has(req.model.id)
     && (ctx.transportVerifiedEffortsByModel[req.model.id] ?? []).includes(effort as ReasoningEffort);

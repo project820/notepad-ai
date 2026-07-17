@@ -56,6 +56,12 @@ describe('migratePrefs reasoning fields', () => {
     }
     expect(migratePrefs({ reasoningMode: 'ultra' }).reasoningMode).toBeUndefined();
   });
+  it('drops an invalid HTML model so the wizard can select its first available model', () => {
+    const migrated = migratePrefs({ htmlModel: { provider: 'openrouter', id: 'vendor/model' } });
+
+    expect(migrated.htmlModel).toBeUndefined();
+    expect(migratePrefs(migrated)).toEqual(migrated);
+  });
 });
 
 function fakeChatGpt(captured: AiChatRequest[]): AiProvider {
@@ -88,6 +94,12 @@ describe('G5 request wiring', () => {
     await registry.streamProviderChat(request({ surfaceMode, reasoningEffort: 'high' }), () => {});
     expect(captured).toHaveLength(1);
     expect(JSON.stringify(captured[0])).not.toContain('reasoningEffort');
+  });
+  it('sends HTML Fast low through the production context but strips chat effort', async () => {
+    await registry.streamProviderChat(request({ surfaceMode: 'html', reasoningEffort: 'low' }), () => {});
+    await registry.streamProviderChat(request({ surfaceMode: 'write', reasoningEffort: 'low' }), () => {});
+
+    expect(captured.map((req) => req.reasoningEffort)).toEqual(['low', undefined]);
   });
   it('bumps the capability snapshot after a forced model refresh', async () => {
     const first = await registry.getReasoningCapabilities();

@@ -38,10 +38,16 @@ export function isHtmlExportModelProviderAllowed(
  * Hard-filter a model list to the HTML-export lineup. Local provider models are
  * retained; cloud models must match an explicitly curated provider/id pair.
  */
+export const HTML_EXPORT_CHATGPT_MODEL_IDS = [
+  'gpt-5.6-sol',
+  'gpt-5.6-terra',
+  'gpt-5.6-luna',
+] as const;
+
 const HTML_EXPORT_CLOUD_MODEL_IDS: Readonly<Record<string, ReadonlySet<string>>> = {
   grok: new Set(['grok-4.5']),
   claude: new Set(['claude-sonnet-5', 'claude-sonnet-4-6']),
-  chatgpt: new Set(['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']),
+  chatgpt: new Set(HTML_EXPORT_CHATGPT_MODEL_IDS),
 };
 
 export function isHtmlExportModelAllowed(model: { provider?: string; id?: string }): boolean {
