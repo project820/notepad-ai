@@ -27,51 +27,60 @@ function findBalancedClosingMarker(
   start: number,
   closingMarker: RegExp,
 ): RegExpExecArray | undefined {
-  const tag = /<!--|<(style|script)\b[^>]*>|<pre\b[^>]*>|<\/pre\s*>/gi;
-  tag.lastIndex = start;
-  closingMarker.lastIndex = start;
+  let cursor = start;
   let preBalance = 0;
-  let nextTag = tag.exec(source);
-  let closing: RegExpExecArray | null;
 
-  closing: while ((closing = closingMarker.exec(source))) {
-    while (nextTag && nextTag.index < closing.index) {
-      const rawTextElement = nextTag[1]?.toLowerCase();
-      if (nextTag[0] === '<!--') {
-        const commentEnd = source.indexOf('-->', tag.lastIndex);
-        if (commentEnd === -1) return undefined;
+  while (cursor < source.length) {
+    if (source.startsWith('<!--', cursor)) {
+      const commentEnd = source.indexOf('-->', cursor + 4);
+      if (commentEnd === -1) return undefined;
+      cursor = commentEnd + 3;
+      continue;
+    }
 
-        const afterComment = commentEnd + 3;
-        tag.lastIndex = afterComment;
-        nextTag = tag.exec(source);
-        if (commentEnd < closing.index) continue;
-
-        closingMarker.lastIndex = afterComment;
-        continue closing;
+    if (source[cursor] === '<' && /[A-Za-z!/]/.test(source[cursor + 1] ?? '')) {
+      let quote: '"' | "'" | undefined;
+      let tagEnd = cursor + 1;
+      for (; tagEnd < source.length; tagEnd += 1) {
+        const character = source[tagEnd];
+        if (quote) {
+          if (character === quote) quote = undefined;
+        } else if (character === '"' || character === "'") {
+          quote = character;
+        } else if (character === '>') {
+          break;
+        }
       }
+      if (tagEnd === source.length) return undefined;
+
+      const tag = source.slice(cursor, tagEnd + 1);
+      const rawTextElement = /^<(style|script)\b/i.exec(tag)?.[1]?.toLowerCase();
       if (rawTextElement) {
         const rawTextClose = new RegExp(`</${rawTextElement}\\s*>`, 'gi');
-        rawTextClose.lastIndex = tag.lastIndex;
+        rawTextClose.lastIndex = tagEnd + 1;
         const rawTextClosingTag = rawTextClose.exec(source);
         if (!rawTextClosingTag) return undefined;
-
-        const afterRawText = rawTextClosingTag.index + rawTextClosingTag[0].length;
-        tag.lastIndex = afterRawText;
-        nextTag = tag.exec(source);
-        if (rawTextClosingTag.index < closing.index) continue;
-
-        closingMarker.lastIndex = afterRawText;
-        continue closing;
+        cursor = rawTextClosingTag.index + rawTextClosingTag[0].length;
+        continue;
       }
 
-      if (/^<pre\b/i.test(nextTag[0])) {
+      if (/^<pre\b/i.test(tag) && !/\/\s*>$/.test(tag)) {
         preBalance += 1;
-      } else {
+      } else if (/^<\/pre\s*>$/i.test(tag)) {
         preBalance = Math.max(0, preBalance - 1);
       }
-      nextTag = tag.exec(source);
+
+      closingMarker.lastIndex = cursor;
+      const closing = closingMarker.exec(source);
+      if (closing?.index === cursor && preBalance === 0) return closing;
+      cursor = tagEnd + 1;
+      continue;
     }
-    if (preBalance === 0) return closing;
+
+    closingMarker.lastIndex = cursor;
+    const closing = closingMarker.exec(source);
+    if (closing?.index === cursor && preBalance === 0) return closing;
+    cursor += 1;
   }
 }
 
@@ -100,9 +109,16 @@ export function extractHtmlExportDocument(modelOutput: string): string {
     );
   };
 
-  for (const marker of [...documentMarkers].reverse()) {
-    const closingHtml = findBalancedClosingMarker(modelOutput, marker.index!, /<\/html\s*>/gi);
-    if (closingHtml) return modelOutput.slice(documentStart(marker), closingHtml.index + closingHtml[0].length);
+  const documentStarts = documentMarkers
+    .map(documentStart)
+    .filter((start, index, starts) => index === 0 || start !== starts[index - 1]);
+
+  for (const [index, start] of documentStarts.entries()) {
+    const closingHtml = findBalancedClosingMarker(modelOutput, start, /<\/html\s*>/gi);
+    const nextStart = documentStarts[index + 1] ?? modelOutput.length;
+    if (closingHtml && closingHtml.index < nextStart) {
+      return modelOutput.slice(start, closingHtml.index + closingHtml[0].length);
+    }
   }
 
   const unclosedHtml = [...htmlMarkers].reverse().find((marker) => isStructuralHtmlStart(modelOutput, marker.index!));

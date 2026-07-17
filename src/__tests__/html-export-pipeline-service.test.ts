@@ -253,6 +253,17 @@ describe('extractHtmlExportDocument', () => {
       '<!doctype html><html><body><p>kept</p></body></html>',
     );
   });
+  it('prefers the earliest complete document over a trailing complete example', () => {
+    const output =
+      '<!doctype html><html><body><p>real document</p></body></html>\nNote: minimal HTML is <html><body><p>example</p></body></html>';
+    expect(extractHtmlExportDocument(output)).toBe('<!doctype html><html><body><p>real document</p></body></html>');
+  });
+  it('ignores pre markers inside quoted tag attributes', () => {
+    const output = '<!doctype html><html><body><section title="<pre>"><p>kept</p></section></body></html>\nTrailing narration.';
+    expect(extractHtmlExportDocument(output)).toBe(
+      '<!doctype html><html><body><section title="<pre>"><p>kept</p></section></body></html>',
+    );
+  });
   it('keeps a narrated document when a pre contains a fenced sample', () => {
     const output = 'Here is your document:\n<!doctype html><html><body><pre>\n```html\n<p>sample</p>\n```\n</pre><p>kept</p></body></html>';
     expect(extractHtmlExportDocument(output)).toBe(
