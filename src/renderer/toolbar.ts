@@ -281,6 +281,7 @@ export function createToolbar(parent: HTMLElement, h: ToolbarHandlers) {
         return { value: key, label: m.label ?? m.id, hint, selected: key === currentKey };
       });
       if (items.length === 0) items.push({ value: 'chatgpt:gpt-5.4-mini', label: 'gpt-5.4-mini', hint: 'ChatGPT', selected: true });
+      else if (!items.some((item) => item.selected)) items[0].selected = true;
       if (h.onOpenSettings) items.push({ value: '__settings__', label: 'Manage providers & custom model…' });
       openMenu({
         anchor: modelBtn,

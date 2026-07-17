@@ -188,6 +188,23 @@ describe('ComposedGrokProvider restricted transport routing', () => {
     expect(cliOnly.map((model) => model.id)).toEqual(['grok-4.5']);
     await expect(harness(true, [], models).provider.listModels()).resolves.toEqual(models);
   });
+  it('surfaces a provider error instead of forwarding composer to the CLI-only route', async () => {
+    const h = harness(false, []);
+    const events: AiChatEvent[] = [];
+
+    await h.provider.streamChat({
+      ...request,
+      model: { provider: 'grok', id: 'grok-composer-2.5-fast' },
+    }, (event) => events.push(event));
+
+    expect(h.apiCalls()).toBe(0);
+    expect(h.cliCalls()).toBe(0);
+    expect(events).toEqual([{
+      kind: 'error',
+      message: 'grok-composer-2.5-fast requires an xAI API key.',
+      errorKind: 'provider',
+    }]);
+  });
   it('keeps a confirmed logout as an auth-failed cache entry instead of fresh unknown', async () => {
     const h = harness(false, []);
 

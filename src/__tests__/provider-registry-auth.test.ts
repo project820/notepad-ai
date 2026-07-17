@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { ProviderRegistry, type ProviderMap } from '../main/ai/provider-registry';
+import { applyModelDisplayPolicy } from '../main/ai/model-display-policy';
 import { GrokCliProvider, type PromptFileWriter } from '../main/ai/grok-cli-provider';
 import {
   __resetCliSpawnPathForTests,
@@ -94,6 +95,41 @@ describe('ProviderRegistry model aggregation', () => {
     await expect(registry.getAvailableModels()).resolves.toEqual(expect.arrayContaining([
       expect.objectContaining({ provider: 'grok', id: 'grok-4.5' }),
     ]));
+  });
+  it('keeps a stale composer selection out of CLI-only picker inventory but preserves it for API inventory', async () => {
+    const composer: ModelRef = {
+      provider: 'grok',
+      id: 'grok-composer-2.5-fast',
+      label: 'Grok Composer 2.5 Fast',
+      humanizeEngineId: 'openai',
+      requiresAuth: true,
+    };
+    const shared: ModelRef = {
+      provider: 'grok',
+      id: 'grok-4.5',
+      label: 'Grok 4.5',
+      humanizeEngineId: 'openai',
+      requiresAuth: true,
+    };
+    const cliOnly = provider('grok', 'api_key', true);
+    cliOnly.listModels = async () => [shared];
+    const api = provider('grok', 'api_key', true);
+    api.listModels = async () => [shared, composer];
+    const currentSelection = { provider: 'grok' as const, id: composer.id };
+
+    const cliPicker = applyModelDisplayPolicy(
+      await new ProviderRegistry(noKeys, { grok: cliOnly }, cacheWith([])).getAvailableModels(),
+      { currentSelection },
+    );
+    const apiPicker = applyModelDisplayPolicy(
+      await new ProviderRegistry(noKeys, { grok: api }, cacheWith([])).getAvailableModels(),
+      { currentSelection },
+    );
+
+    expect(cliPicker.map((entry) => entry.id)).toContain('grok-4.5');
+    expect(cliPicker.map((entry) => entry.id)).not.toContain(composer.id);
+    expect(apiPicker).toContainEqual(expect.objectContaining({ id: composer.id }));
+    expect(apiPicker.find((entry) => entry.id === composer.id)).not.toHaveProperty('custom');
   });
 });
 class FakeChild implements CliProcess {

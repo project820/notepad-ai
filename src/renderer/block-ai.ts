@@ -289,6 +289,7 @@ export function installBlockAi(deps: BlockAiDeps) {
         return { value: key, label: modelLabelFor(provider, m.id, m.label), hint, selected: key === curKey };
       });
       if (items.length === 0) items.push({ value: curKey, label: modelLabelFor('chatgpt', 'gpt-5.4-mini'), hint: '', selected: true });
+      else if (!items.some((item) => item.selected)) items[0].selected = true;
       openMenu({
         anchor: modelBtn,
         items,
