@@ -205,6 +205,41 @@ describe('ComposedGrokProvider restricted transport routing', () => {
       errorKind: 'provider',
     }]);
   });
+  it('forwards custom model IDs to the CLI-only route', async () => {
+    const h = harness(false, []);
+    const events: AiChatEvent[] = [];
+
+    await h.provider.streamChat({
+      ...request,
+      model: { provider: 'grok', id: 'my-fine-tune' },
+    }, (event) => events.push(event));
+
+    expect(h.apiCalls()).toBe(0);
+    expect(h.cliCalls()).toBe(1);
+    expect(events).toEqual([
+      { kind: 'delta', text: 'CLI' },
+      { kind: 'done', text: 'CLI' },
+    ]);
+  });
+  it('keeps the API route for composer when an xAI API key is connected', async () => {
+    const h = harness(true, [
+      { kind: 'delta', text: 'API' },
+      { kind: 'done', text: 'API' },
+    ]);
+    const events: AiChatEvent[] = [];
+
+    await h.provider.streamChat({
+      ...request,
+      model: { provider: 'grok', id: 'grok-composer-2.5-fast' },
+    }, (event) => events.push(event));
+
+    expect(h.apiCalls()).toBe(1);
+    expect(h.cliCalls()).toBe(0);
+    expect(events).toEqual([
+      { kind: 'delta', text: 'API' },
+      { kind: 'done', text: 'API' },
+    ]);
+  });
   it('keeps a confirmed logout as an auth-failed cache entry instead of fresh unknown', async () => {
     const h = harness(false, []);
 
