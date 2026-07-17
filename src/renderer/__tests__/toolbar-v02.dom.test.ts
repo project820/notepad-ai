@@ -225,6 +225,34 @@ describe('toolbar — model dropdown (G003 local providers)', () => {
     (llama as HTMLButtonElement).click();
     expect(onModelChange).toHaveBeenCalledWith('ollama:llama3:latest');
   });
+  it('migrates a hidden persisted model to the first available model', async () => {
+    const onModelChange = vi.fn();
+    const { controls } = mountToolbar({
+      onModelChange,
+      getModel: () => ({ provider: 'grok', id: 'grok-composer-2.5-fast' }),
+      loadModels: async () => [{ id: 'gpt-5.6', provider: 'chatgpt' }],
+    });
+
+    await flush();
+    controls.querySelector<HTMLButtonElement>('#hdr-model')!.click();
+
+    expect(onModelChange).toHaveBeenCalledTimes(1);
+    expect(onModelChange).toHaveBeenCalledWith('chatgpt:gpt-5.6');
+  });
+
+  it('does not migrate a visible persisted model', async () => {
+    const onModelChange = vi.fn();
+    const { controls } = mountToolbar({
+      onModelChange,
+      getModel: () => ({ provider: 'chatgpt', id: 'gpt-5.6' }),
+      loadModels: async () => [{ id: 'gpt-5.6', provider: 'chatgpt' }],
+    });
+
+    await flush();
+    controls.querySelector<HTMLButtonElement>('#hdr-model')!.click();
+
+    expect(onModelChange).not.toHaveBeenCalled();
+  });
 });
 
 describe('toolbar — AI consultant header button (AC1)', () => {

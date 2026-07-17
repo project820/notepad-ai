@@ -288,8 +288,10 @@ export function installBlockAi(deps: BlockAiDeps) {
         const hint = badge ? `${providerLabel} · ${badge}` : providerLabel;
         return { value: key, label: modelLabelFor(provider, m.id, m.label), hint, selected: key === curKey };
       });
-      if (items.length === 0) items.push({ value: curKey, label: modelLabelFor('chatgpt', 'gpt-5.4-mini'), hint: '', selected: true });
-      else if (!items.some((item) => item.selected)) items[0].selected = true;
+      const hasCurrentSelection = items.some((item) => item.selected);
+      if (items.length === 0) items.push({ value: 'chatgpt:gpt-5.4-mini', label: modelLabelFor('chatgpt', 'gpt-5.4-mini'), hint: '', selected: true });
+      else if (!hasCurrentSelection) items[0].selected = true;
+      if (!hasCurrentSelection && items[0].value !== curKey) deps.onBlockModelChange(items[0].value);
       openMenu({
         anchor: modelBtn,
         items,

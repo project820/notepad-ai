@@ -18,7 +18,10 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function mount() {
+function mount(over: {
+  getBlockModel?: () => string | { provider: import('../../main/ai/types').AiProviderId; id: string } | undefined;
+  loadModels?: () => Promise<{ id: string; label?: string; provider?: string; contextWindow?: number }[]>;
+} = {}) {
   const parent = document.createElement('div');
   document.body.appendChild(parent);
   const view = new EditorView({ state: EditorState.create({ doc: 'hello world' }), parent });
@@ -30,14 +33,14 @@ function mount() {
     view,
     previewEl,
     getModel: () => 'gpt-5.4-mini',
-    getBlockModel: () => ({ provider: 'chatgpt', id: 'gpt-5.4-mini' }),
+    getBlockModel: over.getBlockModel ?? (() => ({ provider: 'chatgpt', id: 'gpt-5.4-mini' })),
     onBlockModelChange,
-    loadModels: async () => [
+    loadModels: over.loadModels ?? (async () => [
       { id: 'gpt-5.4-mini', label: 'GPT-5.4 mini', provider: 'chatgpt', contextWindow: 400_000 },
       { id: 'llama3:latest', label: 'llama3:latest', provider: 'ollama', contextWindow: 32_000 },
       { id: 'grok-4.5', label: 'Grok 4.5', provider: 'grok', contextWindow: 256_000 },
       { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', provider: 'claude', contextWindow: 200_000 },
-    ],
+    ]),
     getQuality: () => 'college',
   });
   return { view, onBlockModelChange };
@@ -68,8 +71,35 @@ describe('block-ai model menu (G003 local providers)', () => {
     (llama as HTMLButtonElement).click();
     expect(onBlockModelChange).toHaveBeenCalledWith('ollama:llama3:latest');
   });
-});
+  it('migrates a hidden persisted model to the first available model', async () => {
+    const { view, onBlockModelChange } = mount({
+      getBlockModel: () => ({ provider: 'grok', id: 'grok-composer-2.5-fast' }),
+      loadModels: async () => [{ id: 'gpt-5.6', provider: 'chatgpt' }],
+    });
+    view.dispatch({ selection: { anchor: 0, head: 5 } });
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', metaKey: true, shiftKey: true }));
 
+    Array.from(document.querySelectorAll<HTMLButtonElement>('#ba-model')).at(-1)!.click();
+    await flush();
+
+    expect(onBlockModelChange).toHaveBeenCalledTimes(1);
+    expect(onBlockModelChange).toHaveBeenCalledWith('chatgpt:gpt-5.6');
+  });
+
+  it('does not migrate a visible persisted model', async () => {
+    const { view, onBlockModelChange } = mount({
+      getBlockModel: () => ({ provider: 'chatgpt', id: 'gpt-5.6' }),
+      loadModels: async () => [{ id: 'gpt-5.6', provider: 'chatgpt' }],
+    });
+    view.dispatch({ selection: { anchor: 0, head: 5 } });
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', metaKey: true, shiftKey: true }));
+
+    Array.from(document.querySelectorAll<HTMLButtonElement>('#ba-model')).at(-1)!.click();
+    await flush();
+
+    expect(onBlockModelChange).not.toHaveBeenCalled();
+  });
+});
 // PR-2 (Bug A): mount block-ai with an injected openAiSettings + a stubbed
 // window.api so we can drive the ai:chat error stream.
 function mountAuth(openAiSettings: () => void) {

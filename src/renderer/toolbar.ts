@@ -280,8 +280,10 @@ export function createToolbar(parent: HTMLElement, h: ToolbarHandlers) {
         const hint = badge ? `${providerLabel} · ${badge}` : providerLabel;
         return { value: key, label: m.label ?? m.id, hint, selected: key === currentKey };
       });
+      const hasCurrentSelection = items.some((item) => item.selected);
       if (items.length === 0) items.push({ value: 'chatgpt:gpt-5.4-mini', label: 'gpt-5.4-mini', hint: 'ChatGPT', selected: true });
-      else if (!items.some((item) => item.selected)) items[0].selected = true;
+      else if (!hasCurrentSelection) items[0].selected = true;
+      if (!hasCurrentSelection && items[0].value !== currentKey) h.onModelChange(items[0].value);
       if (h.onOpenSettings) items.push({ value: '__settings__', label: 'Manage providers & custom model…' });
       openMenu({
         anchor: modelBtn,
