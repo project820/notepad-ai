@@ -27,6 +27,8 @@ function mount(overrides: Partial<Parameters<typeof mountProviderSettingsPanel>[
     onSubscriptionCancel: vi.fn(),
     onSaveLocalUrl: vi.fn(),
     onResetLocalUrl: vi.fn(),
+    onSetApiKey: vi.fn(),
+    onDeleteProviderKey: vi.fn(),
     ...overrides,
   };
   const handle = mountProviderSettingsPanel(parent, handlers);
@@ -44,14 +46,11 @@ describe('renderProviderSettingsPanel', () => {
     expect(html.indexOf('prov-local-section')).toBeLessThan(order[3]);
   });
 
-  it('does not expose retired providers or API-key, executable, custom-model, or onboarding UI', () => {
+  it('does not expose retired providers, executable, custom-model, or onboarding UI', () => {
     const html = renderProviderSettingsPanel({ statuses });
 
     expect(html).not.toContain('OpenRouter');
     expect(html).not.toContain('LM Studio');
-    expect(html).not.toContain('data-prov-key=');
-    expect(html).not.toContain('save-key');
-    expect(html).not.toContain('delete-key');
     expect(html).not.toContain('data-prov-custom=');
     expect(html).not.toContain('set-custom');
     expect(html).not.toContain('cli-override');
@@ -65,6 +64,13 @@ describe('renderProviderSettingsPanel', () => {
     expect(html).toContain('data-prov-action="signin"');
     expect(html).toContain('data-prov-action="subscription-login" data-prov="claude"');
     expect(html).toContain('data-prov-action="subscription-login" data-prov="grok"');
+  });
+  it('renders a password input and save button for Grok’s xAI API key', () => {
+    const html = renderProviderSettingsPanel({ statuses });
+
+    expect(html).toContain('data-prov-key="grok"');
+    expect(html).toContain('type="password"');
+    expect(html).toContain('data-prov-action="save-key" data-prov="grok"');
   });
 
   it('does not surface a retained API-key identifier for a legacy connected provider', () => {
@@ -103,5 +109,36 @@ describe('mountProviderSettingsPanel', () => {
     expect(handlers.onSaveLocalUrl).toHaveBeenCalledWith('ollama', 'http://localhost:11500');
     expect(handlers.onResetLocalUrl).toHaveBeenCalledWith('ollama');
     expect(parent.querySelector('[data-prov-row="lmstudio"]')).toBeNull();
+  });
+  it('saves a trimmed Grok API key and clears the input', () => {
+    const { parent, handlers } = mount();
+    const input = parent.querySelector<HTMLInputElement>('[data-prov-key="grok"]')!;
+    input.value = '  xai-key  ';
+
+    parent.querySelector<HTMLButtonElement>('[data-prov-action="save-key"][data-prov="grok"]')!.click();
+
+    expect(handlers.onSetApiKey).toHaveBeenCalledWith('grok', 'xai-key');
+    expect(input.value).toBe('');
+  });
+
+  it('does not save an empty Grok API key', () => {
+    const { parent, handlers } = mount();
+    const input = parent.querySelector<HTMLInputElement>('[data-prov-key="grok"]')!;
+    input.value = '   ';
+
+    parent.querySelector<HTMLButtonElement>('[data-prov-action="save-key"][data-prov="grok"]')!.click();
+
+    expect(handlers.onSetApiKey).not.toHaveBeenCalled();
+  });
+
+  it('deletes a connected Grok API key', () => {
+    const connected = statuses.map((status) => status.provider === 'grok'
+      ? { ...status, connected: true, keyLast4: '1234' }
+      : status);
+    const { parent, handlers } = mount({ statuses: connected });
+
+    parent.querySelector<HTMLButtonElement>('[data-prov-action="delete-key"][data-prov="grok"]')!.click();
+
+    expect(handlers.onDeleteProviderKey).toHaveBeenCalledWith('grok');
   });
 });

@@ -65,6 +65,10 @@ export type ProviderSettingsOptions = ProviderSettingsRenderOptions & {
   onSaveLocalUrl?: (provider: 'ollama', url: string) => Promise<void> | void;
   /** Reset Ollama's server URL to its default. */
   onResetLocalUrl?: (provider: 'ollama') => Promise<void> | void;
+  /** Persist xAI's API key; the key is never retained by this panel. */
+  onSetApiKey?: (provider: 'grok', key: string) => Promise<void> | void;
+  /** Delete xAI's persisted API key. */
+  onDeleteProviderKey?: (provider: 'grok') => Promise<void> | void;
   onRetryStatus?: () => void;
   onSubscriptionLogin?: (provider: 'claude' | 'grok') => Promise<void> | void;
   onSubscriptionLogout?: (provider: 'claude' | 'grok') => Promise<void> | void;
@@ -119,11 +123,13 @@ function statusLine(s: ProviderStatusView): string {
         ? s.accountLabel
           ? escapeHTML(s.accountLabel)
           : escapeHTML(t('settings.prov.signedIn'))
-        : s.provider === 'claude' || s.provider === 'grok'
-          ? escapeHTML(t('settings.prov.signedIn'))
-        : s.keyLast4
+        : s.provider === 'grok' && s.keyLast4
           ? `${escapeHTML(t('settings.prov.apiKeyLabel'))} ••••${escapeHTML(s.keyLast4)}`
-          : escapeHTML(t('settings.prov.keySet'));
+          : s.provider === 'claude' || s.provider === 'grok'
+            ? escapeHTML(t('settings.prov.signedIn'))
+            : s.keyLast4
+              ? `${escapeHTML(t('settings.prov.apiKeyLabel'))} ••••${escapeHTML(s.keyLast4)}`
+              : escapeHTML(t('settings.prov.keySet'));
   return `<span class="prov-status prov-status-on">${t('settings.prov.connected').replace('{detail}', detail)}</span>`;
 }
 
@@ -146,13 +152,20 @@ function providerControls(s: ProviderStatusView): string {
   }
   if (s.provider === 'claude' || s.provider === 'grok') {
     const cliConnected = s.cliStatus?.authState === 'succeeded';
-    return cliConnected
+    const subscriptionControls = cliConnected
       ? `<button class="prov-btn" data-prov-action="subscription-logout" data-prov="${s.provider}" type="button"${disabled}>${escapeHTML(t('settings.prov.signOut'))}</button>`
       : `${s.provider === 'claude' && s.loginUpdate?.kind === 'awaiting-code'
         ? `<input class="prov-key-input" data-prov-login-code="claude" type="text" placeholder="${escapeHTML(t('settings.prov.pasteClaudeCode'))}" />
            <button class="prov-btn prov-btn-primary" data-prov-action="subscription-code" data-prov="claude" type="button">${escapeHTML(t('settings.prov.submitCode'))}</button>`
         : `<button class="prov-btn prov-btn-primary" data-prov-action="subscription-login" data-prov="${s.provider}" type="button"${disabled}>${escapeHTML(t('settings.prov.subscriptionLogin'))}</button>`}
          ${s.loginUpdate && s.loginUpdate.kind !== 'success' && s.loginUpdate.kind !== 'error' ? `<button class="prov-btn" data-prov-action="subscription-cancel" data-prov="${s.provider}" type="button">${escapeHTML(t('settings.prov.cancelLogin'))}</button>` : ''}`;
+    if (s.provider === 'claude') return subscriptionControls;
+    const keyControls = s.keyLast4
+      ? `<button class="prov-btn" data-prov-action="delete-key" data-prov="grok" type="button"${disabled}>${escapeHTML(t('settings.prov.deleteXaiApiKey'))}</button>`
+      : `<input class="prov-key-input" data-prov-key="grok" type="password" autocomplete="off"${disabled}
+           placeholder="${escapeHTML(t('settings.prov.xaiApiKeyPlaceholder'))}" aria-label="${escapeHTML(t('settings.prov.xaiApiKeyLabel'))}" />
+         <button class="prov-btn prov-btn-primary" data-prov-action="save-key" data-prov="grok" type="button"${disabled}>${escapeHTML(t('settings.prov.saveXaiApiKey'))}</button>`;
+    return `${keyControls} ${subscriptionControls}`;
   }
   return '';
 }
@@ -358,6 +371,16 @@ export function mountProviderSettingsPanel(
     }
     if (action === 'reset-url' && prov === 'ollama') {
       return runRowAction(prov, () => opts.onResetLocalUrl?.(prov));
+    }
+    if (action === 'save-key' && prov === 'grok') {
+      const input = parent.querySelector<HTMLInputElement>('input[data-prov-key="grok"]');
+      const key = input?.value.trim() ?? '';
+      if (!key) return;
+      input!.value = '';
+      return runRowAction(prov, () => opts.onSetApiKey?.(prov, key));
+    }
+    if (action === 'delete-key' && prov === 'grok') {
+      return runRowAction(prov, () => opts.onDeleteProviderKey?.(prov));
     }
   };
   parent.addEventListener('click', onClick);
