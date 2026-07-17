@@ -217,6 +217,12 @@ describe('extractHtmlExportDocument', () => {
       '<!doctype html><html><body><pre>\n```\ninner code\n```\n</pre><p>tail content</p></body></html>',
     );
   });
+  it('does not truncate a fenced document when a lang-tagged fence appears inside a pre block', () => {
+    const document = '```html\n<html><body><pre>\n```python\ncode\n```\n</pre><p>tail content</p></body></html>\n```';
+    expect(extractHtmlExportDocument(document)).toBe(
+      '<html><body><pre>\n```python\ncode\n```\n</pre><p>tail content</p></body></html>',
+    );
+  });
 
   it('passes through an unfenced document containing literal fences inside a pre block', () => {
     const document = '<!doctype html><html><body><pre>\n```\ninner code\n```\n</pre><p>tail content</p></body></html>';

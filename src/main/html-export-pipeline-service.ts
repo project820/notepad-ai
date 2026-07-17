@@ -22,6 +22,12 @@ import { HTML_SANITIZER_LIMITS, sanitizeHtmlExport } from './html-export-sanitiz
 
 export const HTML_EXPORT_RAW_MODEL_OUTPUT_MAX_BYTES = HTML_EXPORT_RAW_ARTIFACT_MAX_BYTES;
 export const HTML_EXPORT_PIPELINE_STAGE_MAX_BYTES = HTML_EXPORT_STAGE_ARTIFACT_MAX_BYTES;
+function hasUnbalancedOpenPre(content: string): boolean {
+  const openingCount = content.match(/<pre\b/gi)?.length ?? 0;
+  const closingCount = content.match(/<\/pre\s*>/gi)?.length ?? 0;
+  return openingCount > closingCount;
+}
+
 export function extractHtmlExportDocument(modelOutput: string): string {
   if (/^\s*(?:<!doctype\b|<html\b)/i.test(modelOutput)) return modelOutput;
 
@@ -37,7 +43,7 @@ export function extractHtmlExportDocument(modelOutput: string): string {
     let end = boundary ? boundary.index : modelOutput.length;
     let content = modelOutput.slice(start, end);
     let preference = /<!doctype\b|<html\b/i.test(content) ? 2 : content.includes('<') ? 1 : 0;
-    if (preference === 2 && !/<\/html\s*>/i.test(content) && (!boundary || !boundary[1])) {
+    if (preference === 2 && !/<\/html\s*>/i.test(content) && (!boundary || !boundary[1] || hasUnbalancedOpenPre(content))) {
       const extension = /<\/html\s*>|^```(\S*)[ \t]*\r?$/gmi;
       extension.lastIndex = end;
       let lastClosing = boundary;
@@ -48,7 +54,7 @@ export function extractHtmlExportDocument(modelOutput: string): string {
           content = modelOutput.slice(start, end);
           break;
         }
-        if (candidate[1]) break;
+        if (candidate[1] && !hasUnbalancedOpenPre(modelOutput.slice(start, candidate.index))) break;
         lastClosing = candidate;
       }
       if (!/<\/html\s*>/i.test(content) && lastClosing) {
