@@ -689,9 +689,9 @@ export function sanitizeHtmlExport(options: HtmlExportSanitizeOptions): HtmlExpo
       const topLevelNodes = childNodes(outputBody);
       const firstElement = topLevelNodes.findIndex((child) => tagName(child) !== null);
       const lastElement = topLevelNodes.length - 1 - [...topLevelNodes].reverse().findIndex((child) => tagName(child) !== null);
-      const hasExplicitBody = /<body\b/i.test(options.html);
+      const hasDocumentMarkers = /<!doctype\b|<html\b/i.test(options.html);
       const topLevelNarration = new Set(
-        hasExplicitBody || firstElement === -1
+        hasDocumentMarkers || firstElement === -1
           ? []
           : topLevelNodes.filter(
             (child, index) =>
