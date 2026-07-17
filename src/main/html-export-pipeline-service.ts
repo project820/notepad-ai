@@ -26,10 +26,24 @@ export function extractHtmlExportDocument(modelOutput: string): string {
   const documentMarkers = [...modelOutput.matchAll(/<!doctype\b|<html\b/gi)];
   if (documentMarkers.length > 0) {
     const htmlMarkers = [...modelOutput.matchAll(/<html\b/gi)];
-    const start = htmlMarkers.length > 1
-      ? htmlMarkers[htmlMarkers.length - 1].index!
-      : documentMarkers[0].index!;
-    const closingHtml = [...modelOutput.matchAll(/<\/html\s*>/gi)].pop();
+    const closingHtmlMarkers = [...modelOutput.matchAll(/<\/html\s*>/gi)];
+    const selectedHtmlMarker = [...htmlMarkers]
+      .reverse()
+      .find((marker) => closingHtmlMarkers.some((closing) => closing.index! > marker.index!));
+    const precedingHtmlIndex = selectedHtmlMarker
+      ? htmlMarkers.findIndex((marker) => marker.index === selectedHtmlMarker.index) - 1
+      : -1;
+    const doctypeMarker = selectedHtmlMarker
+      ? documentMarkers
+          .filter(
+            (marker) =>
+              marker.index! < selectedHtmlMarker.index! &&
+              marker.index! > (htmlMarkers[precedingHtmlIndex]?.index ?? -1),
+          )
+          .pop()
+      : undefined;
+    const start = (doctypeMarker ?? selectedHtmlMarker ?? documentMarkers[0]).index!;
+    const closingHtml = [...closingHtmlMarkers].reverse().find((closing) => closing.index! > start);
     // Use the last close because literal </html> text inside <pre> must not
     // truncate the document. A fake close after the real close may over-extend,
     // which parse5 handles more safely than a truncated document.

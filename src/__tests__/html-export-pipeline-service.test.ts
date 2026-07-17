@@ -248,6 +248,11 @@ describe('extractHtmlExportDocument', () => {
     );
     expect(extractHtmlExportDocument('just prose')).toBe('just prose');
   });
+  it('ignores a trailing prose mention of an html tag when selecting a document', () => {
+    expect(extractHtmlExportDocument('<!doctype html><html><body><p>kept</p></body></html>\nNote: the <html> tag starts a document.')).toBe(
+      '<!doctype html><html><body><p>kept</p></body></html>',
+    );
+  });
   it('keeps a narrated document when a pre contains a fenced sample', () => {
     const output = 'Here is your document:\n<!doctype html><html><body><pre>\n```html\n<p>sample</p>\n```\n</pre><p>kept</p></body></html>';
     expect(extractHtmlExportDocument(output)).toBe(

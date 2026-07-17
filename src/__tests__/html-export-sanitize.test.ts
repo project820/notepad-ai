@@ -612,6 +612,17 @@ describe('sanitizeHtmlExport — fail-closed structural gate (issue #27)', () =>
     expect(result.bodyHtml).toContain('<section>x</section>');
     expect(result.stripped).toContain(HTML_VIOLATION_CODES.topLevelNarration);
   });
+  it('strips and records interior narration between fragment structural elements', () => {
+    const result = sanitize('Intro <section>a</section> Here is the second: <section>b</section> Done', structural);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bodyHtml).toContain('<section>a</section>');
+    expect(result.bodyHtml).toContain('<section>b</section>');
+    expect(result.bodyHtml).not.toContain('Intro');
+    expect(result.bodyHtml).not.toContain('Here is the second:');
+    expect(result.bodyHtml).not.toContain('Done');
+    expect(result.stripped.filter((code) => code === HTML_VIOLATION_CODES.topLevelNarration)).toHaveLength(1);
+  });
 
   it('accepts whitespace-only text between top-level structural elements', () => {
     const doc =

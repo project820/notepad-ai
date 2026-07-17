@@ -672,7 +672,8 @@ export function sanitizeHtmlExport(options: HtmlExportSanitizeOptions): HtmlExpo
 
     // Structural floor: a response that is not structural HTML — e.g. model
     // narration/prose — parses to a body with (near-)zero elements and is
-    // rejected. Top-level narration alongside structural content is stripped.
+    // rejected. Marker-free fragments discard top-level narration alongside
+    // structural content; complete documents preserve authored body text.
     if (options.requireStructuralDocument) {
       const bodyElementCount = countElementDescendants(outputBody);
       if (bodyElementCount < HTML_MIN_BODY_ELEMENT_NODES) {
@@ -686,26 +687,22 @@ export function sanitizeHtmlExport(options: HtmlExportSanitizeOptions): HtmlExpo
           ],
         };
       }
-      const topLevelNodes = childNodes(outputBody);
-      const firstElement = topLevelNodes.findIndex((child) => tagName(child) !== null);
-      const lastElement = topLevelNodes.length - 1 - [...topLevelNodes].reverse().findIndex((child) => tagName(child) !== null);
       const hasDocumentMarkers = /<!doctype\b|<html\b/i.test(options.html);
       const topLevelNarration = new Set(
-        hasDocumentMarkers || firstElement === -1
+        hasDocumentMarkers
           ? []
-          : topLevelNodes.filter(
-            (child, index) =>
-              (index < firstElement || index > lastElement) &&
-              (child as { nodeName?: string }).nodeName === '#text' &&
-              !isHtmlAsciiWhitespaceOnly(textValue(child)),
-          ),
+          : childNodes(outputBody).filter(
+              (child) =>
+                (child as { nodeName?: string }).nodeName === '#text' &&
+                !isHtmlAsciiWhitespaceOnly(textValue(child)),
+            ),
       );
       if (topLevelNarration.size > 0) {
         outputBody.childNodes = childNodes(outputBody).filter((child) => !topLevelNarration.has(child)) as DefaultTreeAdapterTypes.ChildNode[];
         for (const child of outputBody.childNodes) child.parentNode = outputBody;
         context.stripped.push({
           code: HTML_VIOLATION_CODES.topLevelNarration,
-          detail: 'stripped leading/trailing top-level narration/prose text',
+          detail: 'stripped top-level narration/prose text',
         });
       }
     }
