@@ -220,7 +220,7 @@ export class ComposedGrokProvider implements AiProvider {
       onEvent({
         kind: 'error',
         message: `${req.model.id} requires an xAI API key.`,
-        errorKind: 'provider',
+        errorKind: 'auth',
       });
       return;
     }

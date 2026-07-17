@@ -139,7 +139,10 @@ describe('block-ai model menu (G003 local providers)', () => {
 });
 // PR-2 (Bug A): mount block-ai with an injected openAiSettings + a stubbed
 // window.api so we can drive the ai:chat error stream.
-function mountAuth(openAiSettings: () => void) {
+function mountAuth(
+  openAiSettings: () => void,
+  blockModel: { provider: import('../../main/ai/types').AiProviderId; id: string } = { provider: 'chatgpt', id: 'gpt-5.4-mini' },
+) {
   const parent = document.createElement('div');
   document.body.appendChild(parent);
   const view = new EditorView({ state: EditorState.create({ doc: 'hello world' }), parent });
@@ -157,7 +160,7 @@ function mountAuth(openAiSettings: () => void) {
     view,
     previewEl,
     getModel: () => 'gpt-5.4-mini',
-    getBlockModel: () => ({ provider: 'chatgpt', id: 'gpt-5.4-mini' }),
+    getBlockModel: () => blockModel,
     onBlockModelChange: vi.fn(),
     loadModels: async () => [],
     getQuality: () => 'college',
@@ -211,6 +214,29 @@ describe('block-ai auth affordance (PR-2 Bug A)', () => {
     // (b) the raw message text is NOT in the DOM.
     expect(document.body.textContent).not.toContain('RAW_AUTH_LEAK');
     // (c) clicking the button invokes the injected openAiSettings.
+    signInBtn!.click();
+    expect(openAiSettings).toHaveBeenCalledTimes(1);
+  });
+  it('renders the add-key affordance for the composer API-key requirement', async () => {
+    const openAiSettings = vi.fn();
+    const { view, aiChat, emit } = mountAuth(
+      openAiSettings,
+      { provider: 'grok', id: 'grok-composer-2.5-fast' },
+    );
+    await openAndGenerate(view);
+
+    expect(aiChat.mock.calls[0][0]).toMatchObject({
+      model: { provider: 'grok', id: 'grok-composer-2.5-fast' },
+      surfaceMode: 'block',
+    });
+    emit({
+      kind: 'error',
+      errorKind: 'auth',
+      message: 'grok-composer-2.5-fast requires an xAI API key.',
+    });
+
+    const signInBtn = document.querySelector<HTMLButtonElement>('#ba-options .ba-signin');
+    expect(signInBtn).toBeTruthy();
     signInBtn!.click();
     expect(openAiSettings).toHaveBeenCalledTimes(1);
   });
