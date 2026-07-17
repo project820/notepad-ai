@@ -203,6 +203,7 @@ describe('ComposedGrokProvider restricted transport routing', () => {
       kind: 'error',
       message: 'grok-composer-2.5-fast requires an xAI API key.',
       errorKind: 'auth',
+      errorCode: 'grok_composer_requires_api_key',
     }]);
   });
   it('forwards custom model IDs to the CLI-only route', async () => {

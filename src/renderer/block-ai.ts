@@ -2,6 +2,7 @@ import { EditorView, ViewUpdate } from '@codemirror/view';
 import { StateEffect } from '@codemirror/state';
 import MarkdownIt from 'markdown-it';
 import { t, getLocale } from './i18n';
+import { aiChatErrorMessage } from './ai-error-message';
 import { type Quality } from './quality';
 import { openMenu } from './dropdown';
 import { buildBlockAiInstructions } from './block-ai-prompt-handler';
@@ -452,12 +453,15 @@ export function installBlockAi(deps: BlockAiDeps) {
         inflightCleanup = null;
         inflightId = null;
       } else if (e.kind === 'error') {
-        if (e.errorKind === 'auth') {
+        const message = e.errorCode ? aiChatErrorMessage(e) : undefined;
+        if (message) {
+          optionsEl.innerHTML = `<div class="ba-error">${escapeHtml(message)}</div>`;
+        } else if (e.errorKind === 'auth') {
           // Classified auth failure (e.g. expired ChatGPT session): show a fixed,
           // DOM-constructed sign-in affordance. Never surface the raw provider body.
           renderAuthAffordance(optionsEl, deps.openAiSettings);
         } else {
-          optionsEl.innerHTML = `<div class="ba-error">${escapeHtml(e.message ?? 'Error')}</div>`;
+          optionsEl.innerHTML = `<div class="ba-error">${escapeHtml(aiChatErrorMessage(e))}</div>`;
         }
         generateBtn.disabled = false;
         generateBtn.textContent = t('block.generate');

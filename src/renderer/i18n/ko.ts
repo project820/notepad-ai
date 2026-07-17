@@ -104,6 +104,7 @@ export const ko: Dict = {
     'status.style': '문체 · {difficulty} · {naturalness}',
     'status.connectProvider': 'AI를 사용하려면 AI 제공자를 연결하세요.',
     'status.aiError': 'AI 오류',
+    'error.grokComposerRequiresApiKey': 'Grok Composer를 사용하려면 xAI API 키가 필요합니다. AI 설정에서 키를 추가하세요.',
     'status.replaceCanceled': '교체를 취소했습니다 — 의미 보존 확인.',
     'status.heavyRewrite': '적용했습니다 — 크게 고친 부분의 의미가 달라지지 않았는지 확인하세요.',
     'status.htmlExportCanceled': 'HTML 내보내기를 취소했습니다.',

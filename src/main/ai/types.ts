@@ -253,12 +253,14 @@ export type AiChatRequest = {
   reasoningEffort?: ReasoningEffort;
 };
 
+export type AiChatErrorCode = 'grok_composer_requires_api_key';
+
+export type AiProviderErrorKind = 'auth' | 'rate_limit' | 'network' | 'provider' | 'cancelled';
+
 export type AiChatEvent =
   | { kind: 'delta'; text: string }
   | { kind: 'done'; text: string }
-  | { kind: 'error'; message: string; errorKind?: AiProviderErrorKind };
-
-export type AiProviderErrorKind = 'auth' | 'rate_limit' | 'network' | 'provider' | 'cancelled';
+  | { kind: 'error'; message: string; errorKind?: AiProviderErrorKind; errorCode?: AiChatErrorCode };
 
 /** Carries a classified error so the renderer can show actionable inline messages. */
 export class AiProviderError extends Error {

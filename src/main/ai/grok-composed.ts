@@ -221,6 +221,7 @@ export class ComposedGrokProvider implements AiProvider {
         kind: 'error',
         message: `${req.model.id} requires an xAI API key.`,
         errorKind: 'auth',
+        errorCode: 'grok_composer_requires_api_key',
       });
       return;
     }
