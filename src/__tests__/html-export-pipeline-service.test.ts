@@ -263,6 +263,16 @@ describe('extractHtmlExportDocument', () => {
     const output = 'Narration\n<html><body><pre>example </html> still text<p>tail</p></body></html>';
     expect(extractHtmlExportDocument(output)).toBe('<html><body><pre>example </html> still text<p>tail</p></body></html>');
   });
+  it('ignores HTML closing markers and pre tags inside comments', () => {
+    const document = '<!doctype html><html><body><p>kept</p><!-- literal </html> marker --><p>tail</p></body></html>';
+    expect(extractHtmlExportDocument(document)).toBe(document);
+    expect(
+      extractHtmlExportDocument('<html><body><!-- <pre>literal </html> marker --><p>tail</p></body></html>'),
+    ).toBe('<html><body><!-- <pre>literal </html> marker --><p>tail</p></body></html>');
+    expect(extractHtmlExportDocument('<html><body><p>kept</p><!-- literal </html> marker')).toBe(
+      '<html><body><p>kept</p><!-- literal </html> marker',
+    );
+  });
   it('falls back to a fenced fragment when an html mention is only prose', () => {
     const output = 'This is not a full <html> document:\n```html\n<section><p>kept</p></section>\n```';
     expect(extractHtmlExportDocument(output)).toBe('<section><p>kept</p></section>\n');

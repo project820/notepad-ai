@@ -27,7 +27,7 @@ function findBalancedClosingMarker(
   start: number,
   closingMarker: RegExp,
 ): RegExpExecArray | undefined {
-  const tag = /<(style|script)\b[^>]*>|<pre\b[^>]*>|<\/pre\s*>/gi;
+  const tag = /<!--|<(style|script)\b[^>]*>|<pre\b[^>]*>|<\/pre\s*>/gi;
   tag.lastIndex = start;
   closingMarker.lastIndex = start;
   let preBalance = 0;
@@ -37,6 +37,18 @@ function findBalancedClosingMarker(
   closing: while ((closing = closingMarker.exec(source))) {
     while (nextTag && nextTag.index < closing.index) {
       const rawTextElement = nextTag[1]?.toLowerCase();
+      if (nextTag[0] === '<!--') {
+        const commentEnd = source.indexOf('-->', tag.lastIndex);
+        if (commentEnd === -1) return undefined;
+
+        const afterComment = commentEnd + 3;
+        tag.lastIndex = afterComment;
+        nextTag = tag.exec(source);
+        if (commentEnd < closing.index) continue;
+
+        closingMarker.lastIndex = afterComment;
+        continue closing;
+      }
       if (rawTextElement) {
         const rawTextClose = new RegExp(`</${rawTextElement}\\s*>`, 'gi');
         rawTextClose.lastIndex = tag.lastIndex;
