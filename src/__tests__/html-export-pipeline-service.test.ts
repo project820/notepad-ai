@@ -271,6 +271,16 @@ describe('extractHtmlExportDocument', () => {
     const output = '<!doctype html><html><body><p>kept</p></body></html>\nNote: close with </html>';
     expect(extractHtmlExportDocument(output)).toBe('<!doctype html><html><body><p>kept</p></body></html>');
   });
+  it('ignores pre and html markers inside raw-text elements', () => {
+    const output = '<!doctype html><html><head><style>.x::before{content:"<pre>"}</style></head><body><p>kept</p></body></html>\nTrailing prose.';
+    expect(extractHtmlExportDocument(output)).toBe(
+      '<!doctype html><html><head><style>.x::before{content:"<pre>"}</style></head><body><p>kept</p></body></html>',
+    );
+  });
+  it('prefers html-labeled fragments over larger unlabeled markup fences', () => {
+    const output = '```html\n<section><p>kept</p></section>\n```\n```\nconst template = `<section><p>This is a much larger JavaScript template literal.</p></section>`;\n```';
+    expect(extractHtmlExportDocument(output)).toBe('<section><p>kept</p></section>\n');
+  });
   it('does not close a fenced fragment at a fence displayed inside pre', () => {
     const output = '```html\n<section><pre>\n```\nexample\n```\n</pre><p>kept</p></section>\n```';
     expect(extractHtmlExportDocument(output)).toBe('<section><pre>\n```\nexample\n```\n</pre><p>kept</p></section>\n');

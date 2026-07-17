@@ -27,21 +27,37 @@ function findBalancedClosingMarker(
   start: number,
   closingMarker: RegExp,
 ): RegExpExecArray | undefined {
-  const preTag = /<pre\b[^>]*>|<\/pre\s*>/gi;
-  preTag.lastIndex = start;
+  const tag = /<(style|script)\b[^>]*>|<pre\b[^>]*>|<\/pre\s*>/gi;
+  tag.lastIndex = start;
   closingMarker.lastIndex = start;
   let preBalance = 0;
-  let nextPreTag = preTag.exec(source);
+  let nextTag = tag.exec(source);
   let closing: RegExpExecArray | null;
 
-  while ((closing = closingMarker.exec(source))) {
-    while (nextPreTag && nextPreTag.index < closing.index) {
-      if (/^<pre\b/i.test(nextPreTag[0]) && !/\/\s*>$/.test(nextPreTag[0])) {
+  closing: while ((closing = closingMarker.exec(source))) {
+    while (nextTag && nextTag.index < closing.index) {
+      const rawTextElement = nextTag[1]?.toLowerCase();
+      if (rawTextElement) {
+        const rawTextClose = new RegExp(`</${rawTextElement}\\s*>`, 'gi');
+        rawTextClose.lastIndex = tag.lastIndex;
+        const rawTextClosingTag = rawTextClose.exec(source);
+        if (!rawTextClosingTag) return undefined;
+
+        const afterRawText = rawTextClosingTag.index + rawTextClosingTag[0].length;
+        tag.lastIndex = afterRawText;
+        nextTag = tag.exec(source);
+        if (rawTextClosingTag.index < closing.index) continue;
+
+        closingMarker.lastIndex = afterRawText;
+        continue closing;
+      }
+
+      if (/^<pre\b/i.test(nextTag[0])) {
         preBalance += 1;
       } else {
         preBalance = Math.max(0, preBalance - 1);
       }
-      nextPreTag = preTag.exec(source);
+      nextTag = tag.exec(source);
     }
     if (preBalance === 0) return closing;
   }
@@ -80,7 +96,7 @@ export function extractHtmlExportDocument(modelOutput: string): string {
   const unclosedHtml = [...htmlMarkers].reverse().find((marker) => isStructuralHtmlStart(modelOutput, marker.index!));
   if (unclosedHtml) return modelOutput.slice(documentStart(unclosedHtml));
 
-  const fence = /^```\S*[ \t]*\r?$/gm;
+  const fence = /^```(\S*)[ \t]*\r?$/gm;
   let best: { start: number; end: number; preference: number } | undefined;
   let opening: RegExpExecArray | null;
   while ((opening = fence.exec(modelOutput))) {
@@ -89,7 +105,11 @@ export function extractHtmlExportDocument(modelOutput: string): string {
     const boundary = findBalancedClosingMarker(modelOutput, start, /^```(\S*)[ \t]*\r?$/gm);
     const end = boundary ? boundary.index : modelOutput.length;
     const content = modelOutput.slice(start, end);
-    const preference = content.includes('<') ? 1 : 0;
+    const hasMarkup = content.includes('<');
+    const hasCompleteDocument = [...content.matchAll(/<!doctype\b|<html\b/gi)].some((marker) =>
+      Boolean(findBalancedClosingMarker(content, marker.index!, /<\/html\s*>/gi)),
+    );
+    const preference = hasCompleteDocument ? 3 : opening[1].toLowerCase() === 'html' && hasMarkup ? 2 : hasMarkup ? 1 : 0;
     if (!best || preference > best.preference || (preference === best.preference && end - start > best.end - best.start)) {
       best = { start, end, preference };
     }
