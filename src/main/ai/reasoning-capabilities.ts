@@ -24,7 +24,7 @@ export function sanitizeReasoning(req: AiChatRequest, ctx: ReasoningCapabilityCo
   const allowed = typeof effort === 'string'
     && (ALLOWED_EFFORTS as readonly string[]).includes(effort)
     && effort !== 'max'
-    && req.surfaceMode !== 'html'
+    && ctx.featureEnabled
     && ctx.featureEnabled
     && req.model.provider === 'chatgpt'
     && ctx.accountAvailableModels.has(req.model.id)

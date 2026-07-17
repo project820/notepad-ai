@@ -249,10 +249,11 @@ function isGenerateRequest(
   model: { provider: AiProviderId; id: string };
   instructions?: string;
   viewport?: { width: number; height: number };
+  reasoningEffort?: 'low';
 } {
   if (!isExactPlainObject(input) || Object.getOwnPropertySymbols(input).length !== 0) return false;
   const keys = Object.keys(input);
-  if (!keys.every((key) => key === 'prompt' || key === 'model' || key === 'instructions' || key === 'viewport')) {
+  if (!keys.every((key) => key === 'prompt' || key === 'model' || key === 'instructions' || key === 'viewport' || key === 'reasoningEffort')) {
     return false;
   }
   if (!Object.hasOwn(input, 'prompt') || typeof input.prompt !== 'string') return false;
@@ -268,6 +269,11 @@ function isGenerateRequest(
     if (typeof input.instructions !== 'string' || input.instructions.length > 65_536) return false;
   }
   if ('viewport' in input && input.viewport !== undefined && !isValidGenerateViewport(input.viewport)) return false;
+  if ('reasoningEffort' in input && input.reasoningEffort !== undefined) {
+    if (input.reasoningEffort !== 'low' || model.provider !== 'chatgpt' || !/^gpt-5\.6-(sol|terra|luna)$/.test(model.id)) {
+      return false;
+    }
+  }
   return true;
 }
 
@@ -454,6 +460,7 @@ export function registerHtmlExportIpc({
         model: input.model,
         ...(input.instructions !== undefined ? { instructions: input.instructions } : {}),
         ...(input.viewport !== undefined ? { viewport: input.viewport } : {}),
+        ...(input.reasoningEffort !== undefined ? { reasoningEffort: input.reasoningEffort } : {}),
       });
     } catch {
       return { state: 'failed', stage: 'generate', kind: 'pipeline-reject' };

@@ -107,6 +107,7 @@ export const ja: Dict = {
     'he.layout.title': 'レイアウト', 'he.layout.scroll': 'スクロール型', 'he.layout.slides': 'PPT スライド型',
     'he.design.title': 'デザイン', 'he.design.galleryHint': 'getdesign.md からデザインを選び、名前または URL を貼り付けてください。', 'he.design.input': 'デザイン名または URL',
     'he.model': 'モデル',
+    'he.fast': '高速',
     'he.tokenWarning': '文書が長いため、一部が切り捨てられる場合があります。', 'he.generating': '生成中…', 'he.regenerate': '再生成',
     'he.error.fetch': 'デザインを取得できませんでした。名前または URL を確認するか、既定のデザインを使用してください。', 'he.error.generate': '生成に失敗しました。もう一度お試しください。', 'he.error.sanitize': '生成された HTML/CSS を受け入れられませんでした。もう一度試し、フォントサイズには rem/em ではなく px を使い、外部リンクや画像を含めないでください。', 'he.error.tooLongSinglePass': '文書が長すぎて単一パスの HTML エクスポートができません（30,000 文字超）。短縮してからもう一度お試しください。',
     'he.back': '戻る', 'he.cancel': 'キャンセル', 'he.continue': '続ける', 'he.generate': '生成', 'he.fetching': 'デザインを取得中…', 'he.entry.loading': 'HTML エクスポートを準備中…',

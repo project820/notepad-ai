@@ -28,7 +28,7 @@ const request = (overrides: Partial<AiChatRequest> = {}): AiChatRequest => ({
 const verifiedContext = (): ReasoningCapabilityContext => ({
   featureEnabled: true,
   accountAvailableModels: new Set(['gpt-5.6-sol']),
-  transportVerifiedEffortsByModel: { 'gpt-5.6-sol': ['high', 'max'] },
+  transportVerifiedEffortsByModel: { 'gpt-5.6-sol': ['low', 'high', 'max'] },
   snapshotGeneration: 1,
 });
 
@@ -41,8 +41,9 @@ describe('sanitizeReasoning', () => {
   it('strips unknown model, non-ChatGPT provider, unverified effort, and max', () => {
     expect(sanitizeReasoning(request({ model: { provider: 'chatgpt', id: 'other' }, reasoningEffort: 'low' }), verifiedContext()).reasoningEffort).toBeUndefined();
     expect(sanitizeReasoning(request({ model: { provider: 'claude', id: 'gpt-5.6-sol' }, reasoningEffort: 'low' }), verifiedContext()).reasoningEffort).toBeUndefined();
-    expect(sanitizeReasoning(request({ reasoningEffort: 'low' }), verifiedContext()).reasoningEffort).toBeUndefined();
-    expect(sanitizeReasoning(request({ surfaceMode: 'html', reasoningEffort: 'high' }), verifiedContext()).reasoningEffort).toBeUndefined();
+    expect(sanitizeReasoning(request({ model: { provider: 'chatgpt', id: 'unverified' }, reasoningEffort: 'low' }), verifiedContext()).reasoningEffort).toBeUndefined();
+    expect(sanitizeReasoning(request({ surfaceMode: 'html', reasoningEffort: 'high' }), verifiedContext()).reasoningEffort).toBe('high');
+    expect(sanitizeReasoning(request({ surfaceMode: 'html', reasoningEffort: 'low' }), verifiedContext()).reasoningEffort).toBe('low');
     expect(sanitizeReasoning(request({ reasoningEffort: 'max' }), verifiedContext()).reasoningEffort).toBeUndefined();
   });
 });
@@ -154,9 +155,9 @@ describe('ChatGPT exact request body after sanitization', () => {
       .toEqual(expectedBody('high', 'block'));
   });
 
-  it('keeps HTML export at the server default even with a verified capability', async () => {
+  it('forwards HTML export effort only when the capability snapshot verifies it', async () => {
     expect(await streamBody(request({ surfaceMode: 'html', reasoningEffort: 'high' }), verifiedContext()))
-      .toEqual(expectedBody(undefined, 'html'));
+      .toEqual(expectedBody('high', 'html'));
   });
 
   it('strips max and never transmits a pro mode', async () => {

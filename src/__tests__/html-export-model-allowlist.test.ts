@@ -26,16 +26,31 @@ describe('HTML export model allowlist (§5.3 / AC-M1d)', () => {
     }
   });
 
-  it('filterHtmlExportModels drops OpenRouter without re-injecting it', () => {
+  it('keeps only the exact cloud lineup and every local model', () => {
     const models = [
-      { provider: 'claude', id: 'claude-sonnet' },
-      { provider: 'openrouter', id: 'anthropic/claude-sonnet-4.5' },
       { provider: 'grok', id: 'grok-4.5' },
-      { provider: 'openrouter', id: 'meta/llama' },
+      { provider: 'grok', id: 'grok-composer-2.5-fast' },
+      { provider: 'claude', id: 'claude-sonnet-5' },
+      { provider: 'claude', id: 'claude-sonnet-4-6' },
+      { provider: 'claude', id: 'claude-haiku-4-5' },
+      { provider: 'chatgpt', id: 'gpt-5.6-sol' },
+      { provider: 'chatgpt', id: 'gpt-5.6-terra' },
+      { provider: 'chatgpt', id: 'gpt-5.6-luna' },
+      { provider: 'chatgpt', id: 'gpt-5.6' },
+      { provider: 'ollama', id: 'llama3' },
+      { provider: 'lmstudio', id: 'local-model' },
+      { provider: 'openrouter', id: 'anthropic/claude-sonnet-4.5' },
     ];
-    const filtered = filterHtmlExportModels(models);
-    expect(filtered.map((m) => m.id)).toEqual(['claude-sonnet', 'grok-4.5']);
-    expect(filtered.some((m) => m.provider === 'openrouter')).toBe(false);
+    expect(filterHtmlExportModels(models).map((m) => `${m.provider}:${m.id}`)).toEqual([
+      'grok:grok-4.5',
+      'claude:claude-sonnet-5',
+      'claude:claude-sonnet-4-6',
+      'chatgpt:gpt-5.6-sol',
+      'chatgpt:gpt-5.6-terra',
+      'chatgpt:gpt-5.6-luna',
+      'ollama:llama3',
+      'lmstudio:local-model',
+    ]);
   });
 
   it('fail-closed drops a model with a missing or blank provider', () => {

@@ -35,12 +35,23 @@ export function isHtmlExportModelProviderAllowed(
 }
 
 /**
- * Hard-filter a model list to the HTML-export-allowed providers. A model with a
- * missing/blank provider is dropped (fail-closed) rather than defaulted, and
- * OpenRouter entries are never retained.
+ * Hard-filter a model list to the HTML-export lineup. Local provider models are
+ * retained; cloud models must match an explicitly curated provider/id pair.
  */
-export function filterHtmlExportModels<T extends { provider?: string }>(models: readonly T[]): T[] {
-  return models.filter((model) => isHtmlExportModelProviderAllowed(model.provider));
+const HTML_EXPORT_CLOUD_MODEL_IDS: Readonly<Record<string, ReadonlySet<string>>> = {
+  grok: new Set(['grok-4.5']),
+  claude: new Set(['claude-sonnet-5', 'claude-sonnet-4-6']),
+  chatgpt: new Set(['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']),
+};
+
+export function isHtmlExportModelAllowed(model: { provider?: string; id?: string }): boolean {
+  if (!isHtmlExportModelProviderAllowed(model.provider) || typeof model.id !== 'string') return false;
+  if (model.provider === 'ollama' || model.provider === 'lmstudio') return true;
+  return HTML_EXPORT_CLOUD_MODEL_IDS[model.provider]?.has(model.id) === true;
+}
+
+export function filterHtmlExportModels<T extends { provider?: string; id?: string }>(models: readonly T[]): T[] {
+  return models.filter(isHtmlExportModelAllowed);
 }
 
 /**

@@ -3,6 +3,7 @@ import type { Quality } from './quality';
 import type { Naturalness } from './humanize-engine';
 import { clampTypography, type TypographyPref } from './typography';
 import type { AiProviderId } from '../main/ai/types';
+import { isHtmlExportModelAllowed } from '../main/ai/html-export-model-allowlist';
 
 type SelectedModel = { provider: AiProviderId; id: string };
 type StylePref = { difficulty: Quality; naturalness: Naturalness };
@@ -32,6 +33,8 @@ export type Prefs = {
   /** v0.3.5 HTML-export model override (picked in the HTML wizard). Falls back to
    *  the main `selectedModel`/`model` when unset. */
   htmlModel?: SelectedModel;
+  /** HTML wizard GPT Fast preference. */
+  htmlFastMode?: boolean;
   /** v0.4 workspace root path for the file-tree panel (back-filled lazily; no default). */
   workspaceRoot?: string;
   /** Capability-gated reasoning tier. Persisted while transport verification remains off. */
@@ -114,6 +117,13 @@ function sanitizeReasoningPrefs(prefs: Prefs): void {
   delete prefs.reasoningMode;
 }
 
+function sanitizeHtmlExportPrefs(prefs: Prefs): void {
+  if (prefs.htmlModel && !isHtmlExportModelAllowed(prefs.htmlModel)) {
+    prefs.htmlModel = { provider: 'chatgpt', id: 'gpt-5.6-sol' };
+  }
+  if (typeof prefs.htmlFastMode !== 'boolean') delete prefs.htmlFastMode;
+}
+
 
 /**
  * Pure prefs migration: merges defaults + stored prefs, then back-fills the v1
@@ -138,6 +148,7 @@ export function migratePrefs(parsed: Partial<Prefs> | null | undefined): Prefs {
   merged.blockSelectedModel = remapStaleClaudeModel(merged.blockSelectedModel);
   merged.htmlModel = remapStaleClaudeModel(merged.htmlModel);
   merged.typography = clampTypography(merged.typography);
+  sanitizeHtmlExportPrefs(merged);
   sanitizeReasoningPrefs(merged);
   return merged;
 }

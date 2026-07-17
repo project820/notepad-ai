@@ -115,6 +115,17 @@ describe('createHtmlExportTransport — happy path + pinned route', () => {
     expect(req.maxOutputTokens).toBe(32_000);
     expect(req.history).toEqual([]);
   });
+  it('forwards GPT Fast reasoningEffort to the pinned provider request', async () => {
+    const stream = scriptedStream([{ kind: 'done', text: 'x' }]);
+    await run(transport({
+      stream,
+      model: { provider: 'chatgpt', id: 'gpt-5.6-sol' },
+      transport: 'api',
+      reasoningEffort: 'low',
+    }));
+
+    expect(stream.requests[0]!.reasoningEffort).toBe('low');
+  });
 
   it('omits maxOutputTokens when not provided', async () => {
     const stream = scriptedStream([{ kind: 'done', text: 'x' }]);

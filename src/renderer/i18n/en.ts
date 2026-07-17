@@ -232,6 +232,7 @@ export const en: Dict = {
     'he.design.galleryHint': 'Pick a design from getdesign.md and paste its name or URL.',
     'he.design.input': 'Design name or URL',
     'he.model': 'Model',
+    'he.fast': 'Fast',
     'he.tokenWarning': 'This document is long and may be truncated.',
     'he.generating': 'Generating…',
     'he.regenerate': 'Regenerate',

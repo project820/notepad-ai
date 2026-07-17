@@ -63,6 +63,10 @@ export type HtmlExportDeps = {
   getDefaultModel?: () => HtmlModelChoice | string | undefined;
   /** Persist the user's HTML-model choice. */
   onModelChosen?: (model: HtmlModelChoice) => void;
+  /** Read the persisted HTML wizard GPT Fast preference. */
+  getFastMode?: () => boolean;
+  /** Persist the HTML wizard GPT Fast preference. */
+  onFastModeChange?: (enabled: boolean) => void;
   fetchDesignMd: (input: string) => Promise<{ ok: boolean; designMd?: string; rawUrl?: string; error?: string }>;
   /** List available getdesign designs (the catalog index). Omitted → text input only. */
   listDesigns?: () => Promise<{ ok: boolean; designs?: { slug: string; name: string; pageUrl: string }[]; error?: string }>;
@@ -76,6 +80,7 @@ export type HtmlExportDeps = {
     model: { provider: AiProviderId; id: string };
     instructions?: string;
     viewport?: { width: number; height: number };
+    reasoningEffort?: 'low';
   }) => Promise<GenerationAttemptResult>;
   /** Cancel/abandon the in-flight or finalized main-owned generation for this window. */
   cancelHtmlGeneration?: () => void;
@@ -149,6 +154,7 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
   let saving = false;
   let saveError: string | null = null;
   let savedPath: string | null = null;
+  let fastMode = deps.getFastMode?.() === true;
 
   // Load the model list once; re-render the (summary-requirement) step when it arrives.
   if (deps.listHtmlModels) {
@@ -213,6 +219,14 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
     const small = isSmallContext(htmlModels.find((m) => modelKey(m) === selectedKey));
     return `<div class="he-model-note" data-he-note="model"${small ? '' : ' hidden'}>${small ? esc(t('he.smallContext')) : ''}</div>`;
   }
+  function isFastModel(model: HtmlModelChoice | undefined): boolean {
+    return model?.provider === 'chatgpt' && /^gpt-5\.6-(sol|terra|luna)$/.test(model.id);
+  }
+  function fastModeHtml(selectedKey: string | undefined): string {
+    const selected = htmlModels.find((model) => modelKey(model) === selectedKey);
+    if (!isFastModel(selected)) return '';
+    return `<label class="he-row he-check"><input type="checkbox" data-he-field="fast"${fastMode ? ' checked' : ''}/> <span>${esc(t('he.fast'))}</span></label>`;
+  }
   function modelPickerHtml(): string {
     if (!htmlModels.length) return '';
     const preferred = preferredModelKey();
@@ -230,7 +244,8 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
       .join('');
     return `<label class="he-model-label" for="he-model">${esc(t('he.model'))}</label>
           <select class="he-select" id="he-model" data-he-field="model">${opts}</select>
-          ${modelNoteHtml(sel)}`;
+          ${modelNoteHtml(sel)}
+          ${fastModeHtml(sel)}`;
   }
   /** Persist model / purpose / detail knobs on change so re-renders keep them. */
   function onModelChange(event: Event) {
@@ -256,12 +271,18 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
       state = { ...state, interactive: (el as HTMLInputElement).checked };
       return;
     }
+    if (fieldName === 'fast') {
+      fastMode = (el as HTMLInputElement).checked;
+      deps.onFastModeChange?.(fastMode);
+      return;
+    }
     if (fieldName !== 'model') return;
     const selected = parseModelKey((el as HTMLSelectElement).value);
     if (selected) {
       pendingModel = selected;
       deps.onModelChosen?.(selected);
     }
+    render();
     const note = host.querySelector<HTMLElement>('[data-he-note="model"]');
     if (!note) return;
     const small = isSmallContext(htmlModels.find((m) => modelKey(m) === (el as HTMLSelectElement).value));
@@ -480,8 +501,14 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
       state.orientation === 'horizontal'
         ? { width: 1280, height: 720 }
         : { width: 720, height: 1280 };
+    const reasoningEffort = fastMode && isFastModel(model) ? 'low' : undefined;
     deps
-      .generateHtmlExport({ prompt: pendingPrompt, model: { provider, id: model.id }, viewport })
+      .generateHtmlExport({
+        prompt: pendingPrompt,
+        model: { provider, id: model.id },
+        viewport,
+        ...(reasoningEffort ? { reasoningEffort } : {}),
+      })
       .then((result) => {
         if (disposed || token !== generationToken) return;
         generating = false;

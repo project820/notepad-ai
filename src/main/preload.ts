@@ -319,6 +319,7 @@ const api = {
       model: { provider: AiProviderId; id: string };
       instructions?: string;
       viewport?: { width: number; height: number };
+      reasoningEffort?: ReasoningEffort;
     },
   ): Promise<GenerationAttemptResult> => ipcRenderer.invoke('html:generate', request),
   cancelHtmlGeneration: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('html:generate:cancel'),

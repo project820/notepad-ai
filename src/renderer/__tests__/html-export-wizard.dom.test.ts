@@ -109,6 +109,7 @@ function lastRequest(deps: HtmlExportDeps): {
   prompt: string;
   model: { provider: string; id: string };
   viewport?: { width: number; height: number };
+  reasoningEffort?: 'low';
 } {
   const calls = (deps.generateHtmlExport as ReturnType<typeof vi.fn>).mock.calls;
   return calls[calls.length - 1][0];
@@ -356,6 +357,41 @@ describe('mountHtmlExportWizard — HTML-only model picker', () => {
     expect(values).toContain('chatgpt:gpt-5.4-mini');
   });
 });
+describe('mountHtmlExportWizard — GPT Fast mode', () => {
+  it('shows only for the exact GPT lineup, persists its value, and sends low effort', async () => {
+    const onFastModeChange = vi.fn();
+    const { host, deps } = setup({
+      listHtmlModels: async () => [
+        { provider: 'chatgpt', id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol' },
+        { provider: 'grok', id: 'grok-4.5', label: 'Grok 4.5' },
+        { provider: 'chatgpt', id: 'gpt-5.6', label: 'GPT-5.6' },
+      ],
+      getDefaultModel: () => ({ provider: 'chatgpt', id: 'gpt-5.6-sol' }),
+      onFastModeChange,
+    });
+    click(host, 'orient-vertical');
+    click(host, 'layout-scroll');
+    click(host, 'design-default');
+    await flush();
+
+    const fast = host.querySelector<HTMLInputElement>('[data-he-field="fast"]');
+    expect(fast).toBeTruthy();
+    fast!.checked = true;
+    fast!.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(onFastModeChange).toHaveBeenCalledWith(true);
+
+    click(host, 'generate-submit');
+    await flush();
+    expect(lastRequest(deps).reasoningEffort).toBe('low');
+
+    click(host, 'back');
+    const select = host.querySelector<HTMLSelectElement>('[data-he-field="model"]')!;
+    select.value = 'grok:grok-4.5';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(host.querySelector('[data-he-field="fast"]')).toBeNull();
+  });
+});
+
 describe('mountHtmlExportWizard — sticky model selection survives re-renders', () => {
   it('keeps the chosen model after A/B/C/D and Auto/Detail toggles', async () => {
     const chosen: string[] = [];

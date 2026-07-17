@@ -388,6 +388,11 @@ export function initUnifiedChatWiring(ctx: AppContext, deps: UnifiedChatWiringDe
           savePrefs(deps.prefs);
         }
       },
+      getFastMode: () => deps.prefs.htmlFastMode === true,
+      onFastModeChange: (enabled) => {
+        deps.prefs.htmlFastMode = enabled;
+        savePrefs(deps.prefs);
+      },
       getCurrentPath: () => ctx.currentPath,
       getPendingTitle: () => ctx.pendingTitle,
       fetchDesignMd: (input) => window.api.fetchDesignMd(input),
