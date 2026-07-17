@@ -133,7 +133,7 @@ export function extractHtmlExportDocumentWithVerdict(modelOutput: string): Extra
   }
 
   const unclosedHtml = [...htmlMarkers].reverse().find((marker) => isStructuralHtmlStart(modelOutput, marker.index));
-  if (unclosedHtml) return { html: modelOutput.slice(documentStart(unclosedHtml)), extractedDocument: false };
+  if (unclosedHtml) return { html: modelOutput.slice(documentStart(unclosedHtml)), extractedDocument: true };
 
   const fence = /^```(\S*)[ \t]*\r?$/gm;
   let best: { start: number; end: number; preference: number } | undefined;

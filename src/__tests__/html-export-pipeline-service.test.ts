@@ -372,6 +372,19 @@ describe('HtmlExportPipelineService', () => {
     expect(result.ok).toBe(true);
     expect(parseHost.inputs).toEqual(['<!doctype html><html><body><h1>Title</h1><p>Body</p></body></html>']);
   });
+  it('preserves authored text in an unclosed structural document', async () => {
+    const { service, registry, parseHost } = serviceFor();
+    const attemptId = start(service);
+    const document = '<!doctype html><html><body>Intro <section><p>Body copy.</p></section>';
+    const raw = valueOf(service.storeRawModelOutput(1, attemptId, document));
+
+    const result = await service.sanitize(1, attemptId, raw.id);
+
+    expect(result.ok).toBe(true);
+    expect(extractHtmlExportDocumentWithVerdict(document)).toEqual({ html: document, extractedDocument: true });
+    expect(parseHost.inputs).toEqual([document]);
+    expect(JSON.parse(registry.transitions[0].bytes.toString('utf8')).bodyHtml).toContain('Intro <section>');
+  });
   it('strips narration from a fragment despite a bare html prose mention', async () => {
     const { service, registry } = serviceFor();
     const attemptId = start(service);
