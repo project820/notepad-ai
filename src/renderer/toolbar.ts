@@ -413,6 +413,7 @@ export function createToolbar(parent: HTMLElement, h: ToolbarHandlers) {
   // ===== Model list — load once =====
   void (async () => {
     cachedModels = await h.loadModels();
+    hasFreshModelSnapshot = true;
     if (!h.getModel() && cachedModels[0]) {
       const first = cachedModels[0];
       h.onModelChange(modelKey({ provider: (first.provider as AiProviderId | undefined) ?? 'chatgpt', id: first.id }));

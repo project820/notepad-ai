@@ -102,7 +102,10 @@ export function installBlockAi(deps: BlockAiDeps) {
   let cachedModels: Awaited<ReturnType<BlockAiDeps['loadModels']>> = [];
   let hasFreshModelSnapshot = false;
   void deps.loadModels().then(
-    (models) => { cachedModels = models; },
+    (models) => {
+      cachedModels = models;
+      hasFreshModelSnapshot = true;
+    },
     () => {},
   );
 

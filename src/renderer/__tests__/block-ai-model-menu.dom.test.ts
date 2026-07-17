@@ -120,7 +120,8 @@ describe('block-ai model menu (G003 local providers)', () => {
   it('opens from the cached inventory when a forced refresh stalls', async () => {
     vi.useFakeTimers();
     let calls = 0;
-    const { view } = mount({
+    const { view, onBlockModelChange } = mount({
+      getBlockModel: () => ({ provider: 'grok', id: 'grok-composer-2.5-fast' }),
       loadModels: () => {
         calls += 1;
         if (calls === 1) return Promise.resolve([{ id: 'gpt-5.6', provider: 'chatgpt' }]);
@@ -135,6 +136,21 @@ describe('block-ai model menu (G003 local providers)', () => {
     await vi.advanceTimersByTimeAsync(1_500);
 
     expect(document.querySelector('[data-value="chatgpt:gpt-5.6"]')).not.toBeNull();
+    expect(onBlockModelChange).toHaveBeenCalledTimes(1);
+    expect(onBlockModelChange).toHaveBeenCalledWith('chatgpt:gpt-5.6');
+  });
+  it('does not migrate while the startup snapshot remains unresolved', async () => {
+    vi.useFakeTimers();
+    const { view, onBlockModelChange } = mount({
+      getBlockModel: () => ({ provider: 'grok', id: 'grok-composer-2.5-fast' }),
+      loadModels: () => new Promise(() => {}),
+    });
+    view.dispatch({ selection: { anchor: 0, head: 5 } });
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', metaKey: true, shiftKey: true }));
+    Array.from(document.querySelectorAll<HTMLButtonElement>('#ba-model')).at(-1)!.click();
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    expect(onBlockModelChange).not.toHaveBeenCalled();
   });
 });
 // PR-2 (Bug A): mount block-ai with an injected openAiSettings + a stubbed

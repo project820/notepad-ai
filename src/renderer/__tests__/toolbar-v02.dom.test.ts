@@ -297,6 +297,50 @@ describe('toolbar — model dropdown (G003 local providers)', () => {
 
     expect(document.querySelector('[data-value="chatgpt:gpt-5.6"]')).not.toBeNull();
   });
+  it('migrates a stale persisted composer after the startup snapshot resolves and refresh stalls', async () => {
+    vi.useFakeTimers();
+    vi.resetModules();
+    document.body.innerHTML = `<div id="navbar-controls"></div><div id="toolbar"></div>`;
+    const { createToolbar } = await import('../toolbar');
+    const onModelChange = vi.fn();
+    let calls = 0;
+    createToolbar(document.getElementById('toolbar')!, stubHandlers({
+      getModel: () => ({ provider: 'grok', id: 'grok-composer-2.5-fast' }),
+      onModelChange,
+      loadModels: () => {
+        calls += 1;
+        return calls === 1
+          ? Promise.resolve([{ id: 'gpt-5.6', provider: 'chatgpt' }])
+          : new Promise(() => {});
+      },
+    }));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    document.querySelector<HTMLButtonElement>('#hdr-model')!.click();
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    expect(onModelChange).toHaveBeenCalledTimes(1);
+    expect(onModelChange).toHaveBeenCalledWith('chatgpt:gpt-5.6');
+  });
+
+  it('does not migrate while the startup snapshot remains unresolved', async () => {
+    vi.useFakeTimers();
+    vi.resetModules();
+    document.body.innerHTML = `<div id="navbar-controls"></div><div id="toolbar"></div>`;
+    const { createToolbar } = await import('../toolbar');
+    const onModelChange = vi.fn();
+    createToolbar(document.getElementById('toolbar')!, stubHandlers({
+      getModel: () => ({ provider: 'grok', id: 'grok-composer-2.5-fast' }),
+      onModelChange,
+      loadModels: () => new Promise(() => {}),
+    }));
+
+    document.querySelector<HTMLButtonElement>('#hdr-model')!.click();
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    expect(onModelChange).not.toHaveBeenCalled();
+  });
 
   it('does not migrate a visible selection while a transient empty inventory is reinjected', async () => {
     const onModelChange = vi.fn();
