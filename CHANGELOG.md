@@ -28,5 +28,5 @@
 
 - [v0.6.1 이하 릴리스](https://github.com/project820/notepad-ai/releases)
 
-[0.8.0]: https://github.com/project820/notepad-ai/compare/dc0aa00...815ff53
+[0.8.0]: https://github.com/project820/notepad-ai/compare/dc0aa00...main
 [0.7.0]: https://github.com/project820/notepad-ai/compare/v0.6.1...dc0aa00
