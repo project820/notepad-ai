@@ -10,7 +10,7 @@ import { isAiProviderId, type AiProviderId, type ProviderAuthStatus } from '../m
 import {
   filterHtmlExportModels,
   htmlCapableProviderIds,
-  isHtmlExportModelProviderAllowed,
+  isHtmlExportModelAllowed,
 } from '../main/ai/html-export-model-allowlist';
 import { isProviderAuthAttemptable } from '../shared/provider-auth-status';
 import { openSettingsModal, triggerCliOnboarding } from './settings-modal';
@@ -50,6 +50,14 @@ export function resolveHtmlCapableProviderIds(
   }
   return { capable: cache, nextCache: cache };
 }
+export function resolveHtmlExportDefaultModel(
+  model: string | { provider: AiProviderId; id: string } | undefined,
+): string | { provider: AiProviderId; id: string } | undefined {
+  if (!model) return undefined;
+  const pair = typeof model === 'string' ? { provider: 'chatgpt', id: model } : model;
+  return isHtmlExportModelAllowed(pair) ? model : undefined;
+}
+
 
 function htmlLocalProvidersWithModels(models: readonly { provider?: string }[]): Set<AiProviderId> {
   const providers = new Set<AiProviderId>();
@@ -369,10 +377,9 @@ export function initUnifiedChatWiring(ctx: AppContext, deps: UnifiedChatWiringDe
       // that only fails at the CLI/main rejection. Cold (no cache) keeps
       // allowlist-only, matching the picker/entry continuity policy.
       getDefaultModel: () => {
-        const d = deps.prefs.htmlModel ?? currentModelArg();
+        const d = resolveHtmlExportDefaultModel(deps.prefs.htmlModel ?? currentModelArg());
         if (!d) return undefined;
         const provider = typeof d === 'string' ? 'chatgpt' : d.provider;
-        if (!isHtmlExportModelProviderAllowed(provider)) return undefined;
         if (
           lastHtmlCapableProviderIds &&
           isAiProviderId(provider) &&
