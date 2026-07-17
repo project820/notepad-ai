@@ -8,6 +8,7 @@ import {
   type CssViolation,
   cssRejectedCode,
 } from './html-export-css-sanitize';
+import { findHtmlExportDocumentMarkers } from './html-export-document-markers';
 import {
   preflightSvgSubtrees,
   reconstructSvgRoot,
@@ -687,7 +688,7 @@ export function sanitizeHtmlExport(options: HtmlExportSanitizeOptions): HtmlExpo
           ],
         };
       }
-      const hasDocumentMarkers = /<!doctype\b|<html\b/i.test(options.html);
+      const hasDocumentMarkers = findHtmlExportDocumentMarkers(options.html).length > 0;
       const topLevelNarration = new Set(
         hasDocumentMarkers
           ? []

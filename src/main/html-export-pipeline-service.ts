@@ -18,6 +18,7 @@ import {
 } from '../shared/html-export-pipeline';
 import { HtmlExportAttemptRegistry } from './html-export-attempt-registry';
 import { HtmlExportParseHost, type HtmlExportParseValue } from './html-export-parse-host';
+import { findHtmlExportDocumentMarkers } from './html-export-document-markers';
 import { HTML_SANITIZER_LIMITS, sanitizeHtmlExport } from './html-export-sanitize';
 
 export const HTML_EXPORT_RAW_MODEL_OUTPUT_MAX_BYTES = HTML_EXPORT_RAW_ARTIFACT_MAX_BYTES;
@@ -92,20 +93,20 @@ function isStructuralHtmlStart(source: string, start: number): boolean {
 }
 
 export function extractHtmlExportDocument(modelOutput: string): string {
-  const documentMarkers = [...modelOutput.matchAll(/<!doctype\b|<html\b/gi)];
-  const htmlMarkers = [...modelOutput.matchAll(/<html\b/gi)];
-  const documentStart = (marker: RegExpMatchArray): number => {
-    if (!/^<html\b/i.test(marker[0])) return marker.index!;
-    const precedingHtml = [...htmlMarkers].reverse().find((html) => html.index! < marker.index!);
+  const documentMarkers = findHtmlExportDocumentMarkers(modelOutput);
+  const htmlMarkers = documentMarkers.filter((marker) => marker.kind === 'html');
+  const documentStart = (marker: (typeof documentMarkers)[number]): number => {
+    if (marker.kind !== 'html') return marker.index;
+    const precedingHtml = [...htmlMarkers].reverse().find((html) => html.index < marker.index);
     return (
       [...documentMarkers]
         .reverse()
         .find(
           (candidate) =>
-            /^<!doctype\b/i.test(candidate[0]) &&
-            candidate.index! < marker.index! &&
-            candidate.index! > (precedingHtml?.index ?? -1),
-        )?.index ?? marker.index!
+            candidate.kind === 'doctype' &&
+            candidate.index < marker.index &&
+            candidate.index > (precedingHtml?.index ?? -1),
+        )?.index ?? marker.index
     );
   };
 
@@ -121,7 +122,7 @@ export function extractHtmlExportDocument(modelOutput: string): string {
     }
   }
 
-  const unclosedHtml = [...htmlMarkers].reverse().find((marker) => isStructuralHtmlStart(modelOutput, marker.index!));
+  const unclosedHtml = [...htmlMarkers].reverse().find((marker) => isStructuralHtmlStart(modelOutput, marker.index));
   if (unclosedHtml) return modelOutput.slice(documentStart(unclosedHtml));
 
   const fence = /^```(\S*)[ \t]*\r?$/gm;
@@ -134,8 +135,8 @@ export function extractHtmlExportDocument(modelOutput: string): string {
     const end = boundary ? boundary.index : modelOutput.length;
     const content = modelOutput.slice(start, end);
     const hasMarkup = content.includes('<');
-    const hasCompleteDocument = [...content.matchAll(/<!doctype\b|<html\b/gi)].some((marker) =>
-      Boolean(findBalancedClosingMarker(content, marker.index!, /<\/html\s*>/gi)),
+    const hasCompleteDocument = findHtmlExportDocumentMarkers(content).some((marker) =>
+      Boolean(findBalancedClosingMarker(content, marker.index, /<\/html\s*>/gi)),
     );
     const preference = hasCompleteDocument ? 3 : opening[1].toLowerCase() === 'html' && hasMarkup ? 2 : hasMarkup ? 1 : 0;
     if (!best || preference > best.preference || (preference === best.preference && end - start > best.end - best.start)) {

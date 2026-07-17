@@ -612,6 +612,15 @@ describe('sanitizeHtmlExport — fail-closed structural gate (issue #27)', () =>
     expect(result.bodyHtml).toContain('<section>x</section>');
     expect(result.stripped).toContain(HTML_VIOLATION_CODES.topLevelNarration);
   });
+  it('strips narration around a fragment with a marker-like quoted attribute', () => {
+    const result = sanitize('Here: <section title="<html>"><p>x</p></section> Done', structural);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bodyHtml).toContain('<section title="<html>"><p>x</p></section>');
+    expect(result.bodyHtml).not.toContain('Here:');
+    expect(result.bodyHtml).not.toContain('Done');
+    expect(result.stripped).toContain(HTML_VIOLATION_CODES.topLevelNarration);
+  });
   it('strips and records interior narration between fragment structural elements', () => {
     const result = sanitize('Intro <section>a</section> Here is the second: <section>b</section> Done', structural);
     expect(result.ok).toBe(true);
