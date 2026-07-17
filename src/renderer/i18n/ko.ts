@@ -221,6 +221,7 @@ export const ko: Dict = {
     'he.design.galleryHint': 'getdesign.md에서 디자인을 골라 이름이나 URL을 붙여넣으세요.',
     'he.design.input': '디자인 이름 또는 URL',
     'he.model': '모델',
+    'he.fast': '빠르게',
     'he.tokenWarning': '문서가 길어 일부가 잘릴 수 있습니다.',
     'he.generating': '생성 중…',
     'he.regenerate': '다시 생성',

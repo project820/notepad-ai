@@ -28,7 +28,7 @@ const request = (overrides: Partial<AiChatRequest> = {}): AiChatRequest => ({
 const verifiedContext = (): ReasoningCapabilityContext => ({
   featureEnabled: true,
   accountAvailableModels: new Set(['gpt-5.6-sol']),
-  transportVerifiedEffortsByModel: { 'gpt-5.6-sol': ['high', 'max'] },
+  transportVerifiedEffortsByModel: { 'gpt-5.6-sol': ['low', 'high', 'max'] },
   snapshotGeneration: 1,
 });
 
@@ -41,8 +41,9 @@ describe('sanitizeReasoning', () => {
   it('strips unknown model, non-ChatGPT provider, unverified effort, and max', () => {
     expect(sanitizeReasoning(request({ model: { provider: 'chatgpt', id: 'other' }, reasoningEffort: 'low' }), verifiedContext()).reasoningEffort).toBeUndefined();
     expect(sanitizeReasoning(request({ model: { provider: 'claude', id: 'gpt-5.6-sol' }, reasoningEffort: 'low' }), verifiedContext()).reasoningEffort).toBeUndefined();
-    expect(sanitizeReasoning(request({ reasoningEffort: 'low' }), verifiedContext()).reasoningEffort).toBeUndefined();
-    expect(sanitizeReasoning(request({ surfaceMode: 'html', reasoningEffort: 'high' }), verifiedContext()).reasoningEffort).toBeUndefined();
+    expect(sanitizeReasoning(request({ model: { provider: 'chatgpt', id: 'unverified' }, reasoningEffort: 'low' }), verifiedContext()).reasoningEffort).toBeUndefined();
+    expect(sanitizeReasoning(request({ surfaceMode: 'html', reasoningEffort: 'high' }), verifiedContext()).reasoningEffort).toBe('high');
+    expect(sanitizeReasoning(request({ surfaceMode: 'html', reasoningEffort: 'low' }), verifiedContext()).reasoningEffort).toBe('low');
     expect(sanitizeReasoning(request({ reasoningEffort: 'max' }), verifiedContext()).reasoningEffort).toBeUndefined();
   });
 });
@@ -54,6 +55,12 @@ describe('migratePrefs reasoning fields', () => {
       expect(migratePrefs({ reasoningEffort: effort as never }).reasoningEffort).toBeUndefined();
     }
     expect(migratePrefs({ reasoningMode: 'ultra' }).reasoningMode).toBeUndefined();
+  });
+  it('drops an invalid HTML model so the wizard can select its first available model', () => {
+    const migrated = migratePrefs({ htmlModel: { provider: 'openrouter', id: 'vendor/model' } });
+
+    expect(migrated.htmlModel).toBeUndefined();
+    expect(migratePrefs(migrated)).toEqual(migrated);
   });
 });
 
@@ -87,6 +94,12 @@ describe('G5 request wiring', () => {
     await registry.streamProviderChat(request({ surfaceMode, reasoningEffort: 'high' }), () => {});
     expect(captured).toHaveLength(1);
     expect(JSON.stringify(captured[0])).not.toContain('reasoningEffort');
+  });
+  it('sends HTML Fast low through the production context but strips chat effort', async () => {
+    await registry.streamProviderChat(request({ surfaceMode: 'html', reasoningEffort: 'low' }), () => {});
+    await registry.streamProviderChat(request({ surfaceMode: 'write', reasoningEffort: 'low' }), () => {});
+
+    expect(captured.map((req) => req.reasoningEffort)).toEqual(['low', undefined]);
   });
   it('bumps the capability snapshot after a forced model refresh', async () => {
     const first = await registry.getReasoningCapabilities();
@@ -154,9 +167,9 @@ describe('ChatGPT exact request body after sanitization', () => {
       .toEqual(expectedBody('high', 'block'));
   });
 
-  it('keeps HTML export at the server default even with a verified capability', async () => {
+  it('forwards HTML export effort only when the capability snapshot verifies it', async () => {
     expect(await streamBody(request({ surfaceMode: 'html', reasoningEffort: 'high' }), verifiedContext()))
-      .toEqual(expectedBody(undefined, 'html'));
+      .toEqual(expectedBody('high', 'html'));
   });
 
   it('strips max and never transmits a pro mode', async () => {

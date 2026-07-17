@@ -25,7 +25,7 @@ import {
 import { atomicWrite, nodeAtomicBackend, type AtomicWriteBackend } from '../atomic-write';
 import type { GenerationAttemptResult } from '../html-export-generation-orchestrator';
 import { isAiProviderId, type AiProviderId } from '../ai/types';
-import { isHtmlExportModelProviderAllowed } from '../ai/html-export-model-allowlist';
+import { HTML_EXPORT_CHATGPT_MODEL_IDS, isHtmlExportModelAllowed } from '../ai/html-export-model-allowlist';
 import { VIEWPORT_MAX, VIEWPORT_MIN } from '../html-export-quarantine';
 import {
   designListContentsUrl,
@@ -249,25 +249,31 @@ function isGenerateRequest(
   model: { provider: AiProviderId; id: string };
   instructions?: string;
   viewport?: { width: number; height: number };
+  reasoningEffort?: 'low';
 } {
   if (!isExactPlainObject(input) || Object.getOwnPropertySymbols(input).length !== 0) return false;
   const keys = Object.keys(input);
-  if (!keys.every((key) => key === 'prompt' || key === 'model' || key === 'instructions' || key === 'viewport')) {
+  if (!keys.every((key) => key === 'prompt' || key === 'model' || key === 'instructions' || key === 'viewport' || key === 'reasoningEffort')) {
     return false;
   }
   if (!Object.hasOwn(input, 'prompt') || typeof input.prompt !== 'string') return false;
   if (input.prompt.length === 0 || input.prompt.length > HTML_GENERATE_PROMPT_MAX) return false;
   if (!Object.hasOwn(input, 'model') || !isExactPlainObject(input.model)) return false;
   const model = input.model as Record<string, unknown>;
-  // Fail-closed HTML-export provider allowlist (§5.3 / AC-M1c-d): the HTML surface
-  // pins ONE no-fallback transport, so OpenRouter (opaque multi-vendor routing) and
-  // any non-allowlisted provider are rejected here even if the renderer offers them.
-  if (!isAiProviderId(model.provider) || !isHtmlExportModelProviderAllowed(model.provider)) return false;
+  // The HTML surface pins one no-fallback transport, so every cloud request must
+  // match the curated provider/id lineup; local provider model ids remain allowed.
+  if (!isAiProviderId(model.provider)) return false;
   if (typeof model.id !== 'string' || model.id.length === 0 || model.id.length > 256) return false;
+  if (!isHtmlExportModelAllowed({ provider: model.provider, id: model.id })) return false;
   if ('instructions' in input && input.instructions !== undefined) {
     if (typeof input.instructions !== 'string' || input.instructions.length > 65_536) return false;
   }
   if ('viewport' in input && input.viewport !== undefined && !isValidGenerateViewport(input.viewport)) return false;
+  if ('reasoningEffort' in input && input.reasoningEffort !== undefined) {
+    if (input.reasoningEffort !== 'low' || model.provider !== 'chatgpt' || !HTML_EXPORT_CHATGPT_MODEL_IDS.includes(model.id as typeof HTML_EXPORT_CHATGPT_MODEL_IDS[number])) {
+      return false;
+    }
+  }
   return true;
 }
 
@@ -454,6 +460,7 @@ export function registerHtmlExportIpc({
         model: input.model,
         ...(input.instructions !== undefined ? { instructions: input.instructions } : {}),
         ...(input.viewport !== undefined ? { viewport: input.viewport } : {}),
+        ...(input.reasoningEffort !== undefined ? { reasoningEffort: input.reasoningEffort } : {}),
       });
     } catch {
       return { state: 'failed', stage: 'generate', kind: 'pipeline-reject' };

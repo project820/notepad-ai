@@ -15,6 +15,7 @@ import type { ChatGptProvider } from './chatgpt-provider';
 import { atomicWrite, nodeAtomicBackend } from '../atomic-write';
 import { ComposedClaudeProvider } from './claude-composed';
 import { API_ONLY_MODEL_IDS, ComposedGrokProvider } from './grok-composed';
+import { HTML_EXPORT_CHATGPT_MODEL_IDS } from './html-export-model-allowlist';
 import { nodeCliSpawn } from './cli-runner';
 import { OpenRouterProvider } from './openrouter-provider';
 import { applyModelDisplayPolicy } from './model-display-policy';
@@ -63,7 +64,7 @@ export class ProviderRegistry {
     private localConfig?: LocalConfigStore,
     /** OCR runner for the non-vision image fallback (injectable for tests). */
     private ocr: OcrRunner = runOcr,
-    /** Explicit capability seam for focused transport tests. Production leaves this unset. */
+    /** Explicit capability seam for focused transport tests. */
     private reasoningContextOverride?: ReasoningCapabilityContext,
   ) {}
   private reasoningSnapshotGeneration = 0;
@@ -79,11 +80,15 @@ export class ProviderRegistry {
     this.reasoningSnapshotGeneration++;
   }
 
-  private reasoningContext(): ReasoningCapabilityContext {
-    return this.reasoningContextOverride ?? {
-      featureEnabled: false,
-      accountAvailableModels: new Set(),
-      transportVerifiedEffortsByModel: {},
+  private reasoningContext(req: AiChatRequest): ReasoningCapabilityContext {
+    if (this.reasoningContextOverride) return this.reasoningContextOverride;
+    const htmlFastModel = req.surfaceMode === 'html'
+      && req.model.provider === 'chatgpt'
+      && HTML_EXPORT_CHATGPT_MODEL_IDS.includes(req.model.id as typeof HTML_EXPORT_CHATGPT_MODEL_IDS[number]);
+    return {
+      featureEnabled: htmlFastModel,
+      accountAvailableModels: htmlFastModel ? new Set([req.model.id]) : new Set(),
+      transportVerifiedEffortsByModel: htmlFastModel ? { [req.model.id]: ['low'] } : {},
       snapshotGeneration: this.reasoningSnapshotGeneration,
     };
   }
@@ -387,7 +392,7 @@ export class ProviderRegistry {
         return;
       }
     }
-    outgoing = sanitizeReasoning(outgoing, this.reasoningContext());
+    outgoing = sanitizeReasoning(outgoing, this.reasoningContext(outgoing));
     await provider.streamChat(outgoing, onEvent);
   }
 }

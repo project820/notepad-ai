@@ -16,7 +16,7 @@ const ALLOWED_CLOUD_MODEL_IDS: Readonly<Record<'chatgpt' | 'claude' | 'grok', re
     'gpt-5.5',
     'gpt-5.3-codex-spark',
   ],
-  claude: ['claude-haiku-4-5', 'claude-sonnet-5', 'claude-opus-4-8'],
+  claude: ['claude-haiku-4-5', 'claude-sonnet-4-6', 'claude-sonnet-5', 'claude-opus-4-8'],
   grok: ['grok-4.5', 'grok-composer-2.5-fast'],
 };
 

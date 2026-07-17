@@ -67,6 +67,8 @@ export type HtmlExportTransportDeps = {
   instructions?: string;
   /** Escalated output-token cap (HTML export). Omitted → provider default. */
   maxOutputTokens?: number;
+  /** Capability-gated reasoning effort for GPT Fast mode. */
+  reasoningEffort?: 'low';
   /** Override the frozen completeness limits (tests only). */
   caps?: { outputCapBytes?: number; firstByteMs?: number };
   /** Timer seam (tests only). */
@@ -176,6 +178,7 @@ export function createHtmlExportTransport(deps: HtmlExportTransportDeps): Genera
       surfaceMode: 'html',
       signal: controller.signal,
       ...(deps.maxOutputTokens !== undefined ? { maxOutputTokens: deps.maxOutputTokens } : {}),
+      ...(deps.reasoningEffort !== undefined ? { reasoningEffort: deps.reasoningEffort } : {}),
     };
 
     try {

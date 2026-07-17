@@ -42,6 +42,7 @@ const CURATED: ReadonlyArray<Omit<ModelRef, 'humanizeEngineId'>> = [
   // Claude — CLI-first (claude -p) with API-key fallback.
   { provider: 'claude', id: 'claude-opus-4-8', label: 'Claude Opus 4.8', requiresAuth: true },
   { provider: 'claude', id: 'claude-sonnet-5', label: 'Claude Sonnet 5', requiresAuth: true },
+  { provider: 'claude', id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', requiresAuth: true },
   { provider: 'claude', id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', requiresAuth: true },
   // Grok — xAI API primary with a local CLI fallback.
   { provider: 'grok', id: 'grok-4.5', label: 'Grok 4.5', requiresAuth: true },

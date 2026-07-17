@@ -33,6 +33,7 @@ type HtmlGenerateInput = {
   prompt: string;
   model: HtmlGenerateModel;
   instructions?: string;
+  reasoningEffort?: 'low';
   /** Selected export viewport for the quarantine overflow gate only. */
   viewport?: HtmlGenerateViewport;
 };
@@ -96,6 +97,7 @@ export function createHtmlExportGenerator(deps: HtmlExportGeneratorDeps): HtmlEx
         stream: deps.stream,
         instructions: input.instructions,
         maxOutputTokens: deps.maxOutputTokens?.(input.model),
+        reasoningEffort: input.reasoningEffort,
       });
       // Close over this run's viewport without changing the orchestrator seam.
       const quarantine: QuarantineMeasureFn = async (args) =>

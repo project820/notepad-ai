@@ -122,13 +122,14 @@ describe('migratePrefs — stale Claude id remap (PR-1 Bug B)', () => {
     expect(p.selectedModel).toEqual({ provider: 'claude', id: 'claude-experimental-9' });
   });
 
-  it('never remaps OpenRouter selections (incl. the anthropic/claude-sonnet-4.5 slug)', () => {
+  it('migrates an out-of-lineup HTML selection once without changing chat selection', () => {
     const p = migratePrefs({
       selectedModel: { provider: 'openrouter', id: 'anthropic/claude-sonnet-4.5' },
       htmlModel: { provider: 'openrouter', id: 'anthropic/claude-sonnet-4.5' },
     });
     expect(p.selectedModel).toEqual({ provider: 'openrouter', id: 'anthropic/claude-sonnet-4.5' });
-    expect(p.htmlModel).toEqual({ provider: 'openrouter', id: 'anthropic/claude-sonnet-4.5' });
+    expect(p.htmlModel).toBeUndefined();
+    expect(migratePrefs(p).htmlModel).toBeUndefined();
   });
 
   it('leaves non-claude (chatgpt) selections untouched', () => {

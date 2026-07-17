@@ -107,6 +107,7 @@ export const zhHant: Dict = {
     'he.layout.title': '版面', 'he.layout.scroll': '捲動式', 'he.layout.slides': 'PPT 投影片式',
     'he.design.title': '設計', 'he.design.galleryHint': '從 getdesign.md 選擇一個設計，貼上其名稱或網址。', 'he.design.input': '設計名稱或網址',
     'he.model': '模型',
+    'he.fast': '快速',
     'he.tokenWarning': '文件較長，可能會被截斷。', 'he.generating': '產生中…', 'he.regenerate': '重新產生',
     'he.error.fetch': '無法取得設計。請檢查名稱或網址，或使用預設設計。', 'he.error.generate': '產生失敗。請重試。', 'he.error.sanitize': '產生的 HTML/CSS 無法被接受。請重試，並以 px 而非 rem/em 設定字型大小，且不要包含外部連結或圖片。', 'he.error.tooLongSinglePass': '文件過長，無法進行單次 HTML 匯出（超過 30,000 個字元）。請縮短後重試。',
     'he.back': '返回', 'he.cancel': '取消', 'he.continue': '繼續', 'he.generate': '產生', 'he.fetching': '正在取得設計…', 'he.entry.loading': '正在準備 HTML 匯出…',

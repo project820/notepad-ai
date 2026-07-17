@@ -1070,7 +1070,7 @@ describe('HTML export pipeline IPC', () => {
       expect(ipc.handler('html:save-finalized')).toBeDefined();
     });
 
-    it('html:generate hard-excludes OpenRouter (and non-allowlisted providers) but forwards an allowed provider', async () => {
+    it('html:generate enforces the exact cloud lineup while retaining local models', async () => {
       const service = createService();
       const generateHtml = vi.fn(async () => ({
         state: 'final' as const,
@@ -1078,7 +1078,7 @@ describe('HTML export pipeline IPC', () => {
         finalizedArtifactId: 'finalized-1',
         resolvedArtifactId: 'resolved-1',
         sanitizedArtifactId: 'sanitized-1',
-        route: { provider: 'chatgpt', model: 'gpt-5.4-mini', transport: 'api' as const },
+        route: { provider: 'chatgpt', model: 'gpt-5.6-sol', transport: 'api' as const },
       }));
       const sender: Sender = { id: 91, once: vi.fn() };
       registerHtmlExportIpc({
@@ -1088,13 +1088,18 @@ describe('HTML export pipeline IPC', () => {
         generateHtml: generateHtml as never,
       });
 
-      // OpenRouter is opaque multi-vendor routing → rejected before reaching the generator.
-      const rejected = await ipc.handler('html:generate')!(eventFor(sender), {
-        prompt: 'make it',
-        model: { provider: 'openrouter', id: 'anthropic/claude-sonnet-4.5' },
-      });
-      expect(rejected).toStrictEqual({ state: 'failed', stage: 'begin', kind: 'pipeline-reject' });
+      for (const model of [
+        { provider: 'openrouter', id: 'anthropic/claude-sonnet-4.5' },
+        { provider: 'chatgpt', id: 'gpt-5.4-mini' },
+      ]) {
+        const rejected = await ipc.handler('html:generate')!(eventFor(sender), {
+          prompt: 'make it',
+          model,
+        });
+        expect(rejected).toStrictEqual({ state: 'failed', stage: 'begin', kind: 'pipeline-reject' });
+      }
       expect(generateHtml).not.toHaveBeenCalled();
+
       const invalidViewports = [
         { width: 'x'.repeat(1_000_000), height: [] },
         { width: -1, height: 720 },
@@ -1105,45 +1110,38 @@ describe('HTML export pipeline IPC', () => {
         { width: 4097, height: 720 },
         { width: 10_000, height: 720 },
       ];
-
       for (const viewport of invalidViewports) {
         const result = await ipc.handler('html:generate')!(eventFor(sender), {
           prompt: 'make it',
-          model: { provider: 'chatgpt', id: 'gpt-5.4-mini' },
+          model: { provider: 'chatgpt', id: 'gpt-5.6-sol' },
           viewport,
         });
         expect(result).toStrictEqual({ state: 'failed', stage: 'begin', kind: 'pipeline-reject' });
       }
-
       expect(generateHtml).not.toHaveBeenCalled();
-      for (const viewport of [
-        { width: 320, height: 720 },
-        { width: 4096, height: 720 },
-        { width: 1280, height: 720 },
-        { width: 720, height: 1280 },
-      ]) {
-        const result = await ipc.handler('html:generate')!(eventFor(sender), {
-          prompt: 'make it',
-          model: { provider: 'chatgpt', id: 'gpt-5.4-mini' },
-          viewport,
-        });
-        expect(result).toMatchObject({ state: 'final', finalizedArtifactId: 'finalized-1' });
-      }
-      expect(generateHtml).toHaveBeenCalledTimes(4);
 
-      // An allowlisted provider is forwarded to the main-owned generator.
-      const ok = await ipc.handler('html:generate')!(eventFor(sender), {
+      const cloud = await ipc.handler('html:generate')!(eventFor(sender), {
         prompt: 'make it',
-        model: { provider: 'chatgpt', id: 'gpt-5.4-mini' },
+        model: { provider: 'chatgpt', id: 'gpt-5.6-sol' },
         viewport: { width: 1280, height: 720 },
       });
-      expect(generateHtml).toHaveBeenCalledTimes(5);
-      expect(generateHtml).toHaveBeenCalledWith(91, {
+      expect(cloud).toMatchObject({ state: 'final', finalizedArtifactId: 'finalized-1' });
+      expect(generateHtml).toHaveBeenLastCalledWith(91, {
         prompt: 'make it',
-        model: { provider: 'chatgpt', id: 'gpt-5.4-mini' },
+        model: { provider: 'chatgpt', id: 'gpt-5.6-sol' },
         viewport: { width: 1280, height: 720 },
       });
-      expect(ok).toMatchObject({ state: 'final', finalizedArtifactId: 'finalized-1' });
+
+      const local = await ipc.handler('html:generate')!(eventFor(sender), {
+        prompt: 'make it',
+        model: { provider: 'ollama', id: 'llama3:latest' },
+      });
+      expect(local).toMatchObject({ state: 'final', finalizedArtifactId: 'finalized-1' });
+      expect(generateHtml).toHaveBeenCalledTimes(2);
+      expect(generateHtml).toHaveBeenLastCalledWith(91, {
+        prompt: 'make it',
+        model: { provider: 'ollama', id: 'llama3:latest' },
+      });
     });
   });
 });
