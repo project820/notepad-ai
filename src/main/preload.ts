@@ -165,6 +165,7 @@ const api = {
   aiProvidersStatus: (): Promise<ProviderAuthStatus[]> =>
     ipcRenderer.invoke('auth:providers-status'),
   aiHasAnyAuth: (): Promise<boolean> => ipcRenderer.invoke('auth:has-any'),
+  aiGrokKeyStatus: (): Promise<boolean> => ipcRenderer.invoke('ai:key-status'),
   aiSetApiKey: (provider: AiProviderId, key: string): Promise<{ persisted: boolean }> =>
     ipcRenderer.invoke('auth:set-api-key', { provider, key }),
   aiDeleteProviderKey: (provider: AiProviderId): Promise<void> =>

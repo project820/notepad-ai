@@ -140,6 +140,10 @@ export class ProviderRegistry {
     return Promise.all(providers.map((p) => p.getAuthStatus()));
   }
 
+  async hasGrokApiKey(): Promise<boolean> {
+    return (await this.keys.getKeyStatus('grok')).connected;
+  }
+
   async hasAnyAuth(): Promise<boolean> {
     const statuses = await this.getAuthStatuses();
     // A cloud provider reporting connected or an installed CLI with unverified auth may be usable.
@@ -150,8 +154,7 @@ export class ProviderRegistry {
     return this.localCache.snapshot().length > 0;
   }
   private async routeAwareCuratedModels(): Promise<ModelRef[]> {
-    const grokApiConnected = this.providers.grok !== undefined
-      && (await this.keys.getKeyStatus('grok')).connected;
+    const grokApiConnected = this.providers.grok !== undefined && await this.hasGrokApiKey();
     return applyModelDisplayPolicy(getCuratedModels()).filter(
       (model) => model.provider !== 'grok'
         || model.id !== 'grok-composer-2.5-fast'

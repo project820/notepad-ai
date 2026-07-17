@@ -6,6 +6,10 @@ import { loadPrefs, savePrefs, migratePrefs } from '../prefs';
 import { t, setLocale } from '../i18n';
 import { closeOpenMenu } from '../dropdown';
 
+function setGrokKeyStatus(connected: boolean) {
+  (window as unknown as { api: unknown }).api = { aiGrokKeyStatus: vi.fn(async () => connected) };
+}
+
 function stubHandlers(over: Partial<ToolbarHandlers> = {}): ToolbarHandlers {
   return {
     onFormat: vi.fn(),
@@ -41,6 +45,7 @@ afterEach(() => {
   document.body.innerHTML = '';
   localStorage.clear();
   vi.useRealTimers();
+  delete (window as unknown as { api?: unknown }).api;
 });
 
 describe('toolbar #4 — left-panel toggle moved into the toolbar (AC5)', () => {
@@ -297,10 +302,11 @@ describe('toolbar — model dropdown (G003 local providers)', () => {
 
     expect(document.querySelector('[data-value="chatgpt:gpt-5.6"]')).not.toBeNull();
   });
-  it('keeps a persisted composer selection when its last completed inventory contains it and refresh stalls', async () => {
+  it('keeps a persisted composer selection when the Grok key is present and refresh stalls', async () => {
     vi.useFakeTimers();
     let calls = 0;
     const onModelChange = vi.fn();
+    setGrokKeyStatus(true);
     const { controls } = mountToolbar({
       onModelChange,
       getModel: () => ({ provider: 'grok', id: 'grok-composer-2.5-fast' }),
@@ -317,6 +323,32 @@ describe('toolbar — model dropdown (G003 local providers)', () => {
 
     expect(document.querySelector('[data-value="grok:grok-composer-2.5-fast"]')).not.toBeNull();
     expect(onModelChange).not.toHaveBeenCalled();
+  });
+  it('hides and migrates a cached composer selection when the Grok key was removed and refresh stalls', async () => {
+    vi.useFakeTimers();
+    setGrokKeyStatus(false);
+    let calls = 0;
+    const onModelChange = vi.fn();
+    const { controls } = mountToolbar({
+      onModelChange,
+      getModel: () => ({ provider: 'grok', id: 'grok-composer-2.5-fast' }),
+      loadModels: () => {
+        calls += 1;
+        return calls === 1
+          ? Promise.resolve([
+            { id: 'grok-composer-2.5-fast', provider: 'grok' },
+            { id: 'gpt-5.6', provider: 'chatgpt' },
+          ])
+          : new Promise(() => {});
+      },
+    });
+    await Promise.resolve();
+    controls.querySelector<HTMLButtonElement>('#hdr-model')!.click();
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    expect(document.querySelector('[data-value="grok:grok-composer-2.5-fast"]')).toBeNull();
+    expect(onModelChange).toHaveBeenCalledTimes(1);
+    expect(onModelChange).toHaveBeenCalledWith('chatgpt:gpt-5.6');
   });
   it('shows composer from a fresh inventory', async () => {
     const { controls } = mountToolbar({
@@ -355,7 +387,7 @@ describe('toolbar — model dropdown (G003 local providers)', () => {
     expect(onModelChange).toHaveBeenCalledWith('chatgpt:gpt-5.6');
   });
 
-  it('does not migrate while the startup snapshot remains unresolved', async () => {
+  it('migrates a composer selection while the startup snapshot remains unresolved when the Grok key is absent', async () => {
     vi.useFakeTimers();
     vi.resetModules();
     document.body.innerHTML = `<div id="navbar-controls"></div><div id="toolbar"></div>`;
@@ -370,7 +402,7 @@ describe('toolbar — model dropdown (G003 local providers)', () => {
     document.querySelector<HTMLButtonElement>('#hdr-model')!.click();
     await vi.advanceTimersByTimeAsync(1_500);
 
-    expect(onModelChange).not.toHaveBeenCalled();
+    expect(onModelChange).toHaveBeenCalledWith('chatgpt:gpt-5.4-mini');
   });
 
   it('does not migrate a visible selection while a transient empty inventory is reinjected', async () => {

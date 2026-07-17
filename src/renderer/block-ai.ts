@@ -277,6 +277,7 @@ export function installBlockAi(deps: BlockAiDeps) {
     const modelBtn = root.querySelector<HTMLButtonElement>('#ba-model')!;
     modelBtn.addEventListener('click', async () => {
       const refresh = deps.loadModels(true);
+      const grokKeyStatus = window.api?.aiGrokKeyStatus?.().catch(() => false) ?? Promise.resolve(false);
       let refreshTimeout: ReturnType<typeof setTimeout> | undefined;
       const result = await Promise.race([
         refresh.then(
@@ -312,11 +313,8 @@ export function installBlockAi(deps: BlockAiDeps) {
           : curRaw
             ? modelKey(curRaw)
             : 'chatgpt:gpt-5.4-mini';
-      const inventoryContainsComposer = lastCompletedInventory?.some(
-        (model) => model.provider === 'grok' && model.id === 'grok-composer-2.5-fast',
-      ) ?? false;
       const modelsForMenu =
-        !result.fresh && !inventoryContainsComposer
+        !result.fresh && !(await grokKeyStatus)
           ? (models as ModelRef[]).filter((model) => !isRouteHiddenModel(model))
           : models as ModelRef[];
       const items = applyModelDisplayPolicy(
@@ -338,7 +336,10 @@ export function installBlockAi(deps: BlockAiDeps) {
       const lastCompletedSelectionPresent = lastCompletedInventory?.some((model) =>
         modelKey({ provider: model.provider ?? 'chatgpt', id: model.id }) === curKey,
       ) ?? false;
-      if (lastCompletedInventory && !lastCompletedSelectionPresent && !hasCurrentSelection && items[0].value !== curKey) deps.onBlockModelChange(items[0].value);
+      if (
+        (!result.fresh && curKey === 'grok:grok-composer-2.5-fast' && !await grokKeyStatus)
+        || (result.fresh && lastCompletedInventory && !lastCompletedSelectionPresent && !hasCurrentSelection && items[0].value !== curKey)
+      ) deps.onBlockModelChange(items[0].value);
       openMenu({
         anchor: modelBtn,
         items,

@@ -251,6 +251,7 @@ export function createToolbar(parent: HTMLElement, h: ToolbarHandlers) {
 
     modelBtn.addEventListener('click', async () => {
       const refresh = h.loadModels(true);
+      const grokKeyStatus = window.api?.aiGrokKeyStatus?.().catch(() => false) ?? Promise.resolve(false);
       let refreshTimeout: ReturnType<typeof setTimeout> | undefined;
       const result = await Promise.race([
         refresh.then(
@@ -293,11 +294,8 @@ export function createToolbar(parent: HTMLElement, h: ToolbarHandlers) {
                   ?.provider as AiProviderId | undefined) ?? 'chatgpt',
               id: (typeof cur === 'string' ? cur : '') || 'gpt-5.4-mini',
             });
-      const inventoryContainsComposer = lastCompletedInventory?.some(
-        (model) => model.provider === 'grok' && model.id === 'grok-composer-2.5-fast',
-      ) ?? false;
       const modelsForMenu =
-        !result.fresh && !inventoryContainsComposer
+        !result.fresh && !(await grokKeyStatus)
           ? (models as ModelRef[]).filter((model) => !isRouteHiddenModel(model))
           : models as ModelRef[];
       const sorted = applyModelDisplayPolicy(
@@ -324,7 +322,10 @@ export function createToolbar(parent: HTMLElement, h: ToolbarHandlers) {
       const lastCompletedSelectionPresent = lastCompletedInventory?.some((model) =>
         modelKey({ provider: model.provider ?? 'chatgpt', id: model.id }) === currentKey,
       ) ?? false;
-      if (lastCompletedInventory && !lastCompletedSelectionPresent && !hasCurrentSelection && items[0].value !== currentKey) h.onModelChange(items[0].value);
+      if (
+        (!result.fresh && currentKey === 'grok:grok-composer-2.5-fast' && !await grokKeyStatus)
+        || (result.fresh && lastCompletedInventory && !lastCompletedSelectionPresent && !hasCurrentSelection && items[0].value !== currentKey)
+      ) h.onModelChange(items[0].value);
       if (h.onOpenSettings) items.push({ value: '__settings__', label: 'Manage providers & custom model…' });
       openMenu({
         anchor: modelBtn,

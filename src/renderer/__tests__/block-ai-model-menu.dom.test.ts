@@ -8,6 +8,10 @@ import { setLocale } from '../i18n';
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
+function setGrokKeyStatus(connected: boolean) {
+  (window as unknown as { api: unknown }).api = { aiGrokKeyStatus: vi.fn(async () => connected) };
+}
+
 const openViews: EditorView[] = [];
 
 afterEach(() => {
@@ -19,6 +23,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.useRealTimers();
   setLocale('en');
+  delete (window as unknown as { api?: unknown }).api;
 });
 
 function mount(over: {
@@ -141,9 +146,10 @@ describe('block-ai model menu (G003 local providers)', () => {
     expect(onBlockModelChange).toHaveBeenCalledTimes(1);
     expect(onBlockModelChange).toHaveBeenCalledWith('chatgpt:gpt-5.6');
   });
-  it('keeps a persisted composer selection when its last completed inventory contains it and refresh stalls', async () => {
+  it('keeps a persisted composer selection when the Grok key is present and refresh stalls', async () => {
     vi.useFakeTimers();
     let calls = 0;
+    setGrokKeyStatus(true);
     const { view, onBlockModelChange } = mount({
       getBlockModel: () => ({ provider: 'grok', id: 'grok-composer-2.5-fast' }),
       loadModels: () => {
@@ -162,6 +168,32 @@ describe('block-ai model menu (G003 local providers)', () => {
     expect(document.querySelector('[data-value="grok:grok-composer-2.5-fast"]')).not.toBeNull();
     expect(onBlockModelChange).not.toHaveBeenCalled();
   });
+  it('hides and migrates a cached composer selection when the Grok key was removed and refresh stalls', async () => {
+    vi.useFakeTimers();
+    setGrokKeyStatus(false);
+    let calls = 0;
+    const { view, onBlockModelChange } = mount({
+      getBlockModel: () => ({ provider: 'grok', id: 'grok-composer-2.5-fast' }),
+      loadModels: () => {
+        calls += 1;
+        return calls === 1
+          ? Promise.resolve([
+            { id: 'grok-composer-2.5-fast', provider: 'grok' },
+            { id: 'gpt-5.6', provider: 'chatgpt' },
+          ])
+          : new Promise(() => {});
+      },
+    });
+    await Promise.resolve();
+    view.dispatch({ selection: { anchor: 0, head: 5 } });
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', metaKey: true, shiftKey: true }));
+    Array.from(document.querySelectorAll<HTMLButtonElement>('#ba-model')).at(-1)!.click();
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    expect(document.querySelector('[data-value="grok:grok-composer-2.5-fast"]')).toBeNull();
+    expect(onBlockModelChange).toHaveBeenCalledTimes(1);
+    expect(onBlockModelChange).toHaveBeenCalledWith('chatgpt:gpt-5.6');
+  });
   it('shows composer from a fresh inventory', async () => {
     const { view } = mount({
       loadModels: async () => [{ id: 'grok-composer-2.5-fast', provider: 'grok' }],
@@ -173,7 +205,7 @@ describe('block-ai model menu (G003 local providers)', () => {
 
     expect(document.querySelector('[data-value="grok:grok-composer-2.5-fast"]')).not.toBeNull();
   });
-  it('does not migrate while the startup snapshot remains unresolved', async () => {
+  it('migrates a composer selection while the startup snapshot remains unresolved when the Grok key is absent', async () => {
     vi.useFakeTimers();
     const { view, onBlockModelChange } = mount({
       getBlockModel: () => ({ provider: 'grok', id: 'grok-composer-2.5-fast' }),
@@ -184,7 +216,7 @@ describe('block-ai model menu (G003 local providers)', () => {
     Array.from(document.querySelectorAll<HTMLButtonElement>('#ba-model')).at(-1)!.click();
     await vi.advanceTimersByTimeAsync(1_500);
 
-    expect(onBlockModelChange).not.toHaveBeenCalled();
+    expect(onBlockModelChange).toHaveBeenCalledWith('chatgpt:gpt-5.4-mini');
   });
 });
 // PR-2 (Bug A): mount block-ai with an injected openAiSettings + a stubbed

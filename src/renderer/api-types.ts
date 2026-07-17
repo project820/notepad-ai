@@ -79,6 +79,7 @@ export type Api = HtmlExportPipelineApi & HtmlExportAssetApi & {
   aiReasoningCapabilities: () => Promise<ReasoningCapabilitiesSnapshot>;
   aiProvidersStatus: () => Promise<ProviderAuthStatus[]>;
   aiHasAnyAuth: () => Promise<boolean>;
+  aiGrokKeyStatus: () => Promise<boolean>;
   aiSetApiKey: (provider: AiProviderId, key: string) => Promise<{ persisted: boolean }>;
   aiDeleteProviderKey: (provider: AiProviderId) => Promise<void>;
   subscriptionLogin: (provider: SubscriptionProvider) => Promise<void>;
