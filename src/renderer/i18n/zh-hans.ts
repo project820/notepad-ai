@@ -42,6 +42,7 @@ export const zhHans: Dict = {
     'status.connectProvider': '请连接 AI 提供商以使用 AI。',
     'status.aiError': 'AI 错误',
     'error.grokComposerRequiresApiKey': 'Grok Composer 需要 xAI API 密钥。请在 AI 设置中添加密钥以使用此模型。',
+    'error.grokComposerOpenSettings': '打开 AI 设置',
     'status.replaceCanceled': '已取消替换 — 内容保护检查。',
     'status.heavyRewrite': '已应用 — 大幅改写，请检查内容是否偏离原意。',
     'status.htmlExportCanceled': '已取消导出 HTML。',

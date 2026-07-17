@@ -455,9 +455,9 @@ export function installBlockAi(deps: BlockAiDeps) {
       } else if (e.kind === 'error') {
         const message = e.errorCode ? aiChatErrorMessage(e) : undefined;
         if (e.errorKind === 'auth') {
-          // A coded auth error needs both its localized remediation copy and the
-          // settings affordance; uncoded auth errors retain the fixed copy only.
-          renderAuthAffordance(optionsEl, deps.openAiSettings, message);
+          // Coded auth errors can supply provider-specific remediation and action;
+          // uncoded auth errors retain the fixed ChatGPT copy.
+          renderAuthAffordance(optionsEl, deps.openAiSettings, e.errorCode, message);
         } else if (message) {
           optionsEl.innerHTML = `<div class="ba-error">${escapeHtml(message)}</div>`;
         } else {
@@ -581,8 +581,12 @@ const AUTH_AFFORDANCE_COPY: Record<'ko' | 'en', { message: string; button: strin
 function renderAuthAffordance(
   optionsEl: HTMLElement,
   onSignIn?: () => void,
+  errorCode?: string,
   codedMessage?: string,
 ): void {
+  const actionKey = errorCode === 'grok_composer_requires_api_key'
+    ? 'error.grokComposerOpenSettings'
+    : undefined;
   const copy = AUTH_AFFORDANCE_COPY[getLocale() === 'ko' ? 'ko' : 'en'];
   const wrap = document.createElement('div');
   wrap.className = 'ba-error ba-auth-error';
@@ -592,15 +596,17 @@ function renderAuthAffordance(
     codedMsg.textContent = codedMessage;
     wrap.appendChild(codedMsg);
   }
-  const msg = document.createElement('div');
-  msg.className = 'ba-auth-msg';
-  msg.textContent = copy.message;
+  if (!actionKey) {
+    const msg = document.createElement('div');
+    msg.className = 'ba-auth-msg';
+    msg.textContent = copy.message;
+    wrap.appendChild(msg);
+  }
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'ba-primary ba-signin';
-  btn.textContent = copy.button;
+  btn.textContent = actionKey ? t(actionKey) : copy.button;
   btn.addEventListener('click', () => onSignIn?.());
-  wrap.appendChild(msg);
   wrap.appendChild(btn);
   optionsEl.textContent = '';
   optionsEl.appendChild(wrap);

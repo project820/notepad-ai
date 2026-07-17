@@ -42,6 +42,7 @@ export const ja: Dict = {
     'status.connectProvider': 'AI を使用するには AI プロバイダーに接続してください。',
     'status.aiError': 'AI エラー',
     'error.grokComposerRequiresApiKey': 'Grok Composer を使用するには xAI API キーが必要です。AI 設定でキーを追加してください。',
+    'error.grokComposerOpenSettings': 'AI 設定を開く',
     'status.replaceCanceled': '置換をキャンセルしました — 内容保護チェック。',
     'status.heavyRewrite': '適用しました — 大幅に書き換えたため、意味が変わっていないか確認してください。',
     'status.htmlExportCanceled': 'HTML のエクスポートをキャンセルしました。',

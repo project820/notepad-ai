@@ -112,6 +112,7 @@ export const en: Dict = {
     'status.connectProvider': 'Connect an AI provider to use AI.',
     'status.aiError': 'AI error',
     'error.grokComposerRequiresApiKey': 'Grok Composer requires an xAI API key. Add it in AI settings to use this model.',
+    'error.grokComposerOpenSettings': 'Open AI settings',
     'status.replaceCanceled': 'Replacement canceled — meaning guard.',
     'status.heavyRewrite': 'Applied — heavy rewrite, review for meaning drift.',
     'status.htmlExportCanceled': 'HTML export canceled.',

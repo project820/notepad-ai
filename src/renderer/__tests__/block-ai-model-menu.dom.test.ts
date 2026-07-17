@@ -292,6 +292,9 @@ describe('block-ai auth affordance (PR-2 Bug A)', () => {
       'Grok Composer requires an xAI API key. Add it in AI settings to use this model.',
     );
     expect(signInBtn).toBeTruthy();
+    expect(optionsEl.querySelector('.ba-auth-msg')).toBeNull();
+    expect(optionsEl.textContent).not.toContain('Your ChatGPT session expired. Sign in again.');
+    expect(signInBtn?.textContent).toBe('Open AI settings');
     signInBtn!.click();
     expect(openAiSettings).toHaveBeenCalledTimes(1);
   });

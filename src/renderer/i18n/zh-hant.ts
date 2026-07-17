@@ -42,6 +42,7 @@ export const zhHant: Dict = {
     'status.connectProvider': '請連線 AI 供應商以使用 AI。',
     'status.aiError': 'AI 錯誤',
     'error.grokComposerRequiresApiKey': 'Grok Composer 需要 xAI API 金鑰。請在 AI 設定中新增金鑰以使用此模型。',
+    'error.grokComposerOpenSettings': '開啟 AI 設定',
     'status.replaceCanceled': '已取消取代 — 內容保護檢查。',
     'status.heavyRewrite': '已套用 — 大幅改寫，請檢查內容是否偏離原意。',
     'status.htmlExportCanceled': '已取消匯出 HTML。',

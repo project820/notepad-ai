@@ -160,6 +160,19 @@ describe('i18n — 5 locales (#3)', () => {
       }), `Grok Composer error @ ${loc}`).toBe(message);
     }
   });
+  it('maps the Grok Composer settings action in all five locales', () => {
+    const expected: Record<string, string> = {
+      en: 'Open AI settings',
+      ko: 'AI 설정 열기',
+      'zh-Hans': '打开 AI 设置',
+      'zh-Hant': '開啟 AI 設定',
+      ja: 'AI 設定を開く',
+    };
+    for (const [loc, label] of Object.entries(expected)) {
+      setLocale(loc as Locale);
+      expect(t('error.grokComposerOpenSettings'), `Grok Composer settings action @ ${loc}`).toBe(label);
+    }
+  });
 
   it('exposes v0.4 file-tree panel keys in all five locales (G005)', () => {
     const expected: Record<string, Record<string, string>> = {
