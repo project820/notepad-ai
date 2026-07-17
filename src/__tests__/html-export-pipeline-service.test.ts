@@ -20,6 +20,7 @@ import {
   HTML_EXPORT_RAW_MODEL_OUTPUT_MAX_BYTES,
   HtmlExportPipelineService,
   extractHtmlExportDocument,
+  extractHtmlExportDocumentWithVerdict,
   type HtmlExportPipelineServiceOptions,
   type HtmlExportSanitizedPayload,
 } from '../main/html-export-pipeline-service';
@@ -274,6 +275,16 @@ describe('extractHtmlExportDocument', () => {
     const output = 'Narration\n<html><body><pre>example </html> still text<p>tail</p></body></html>';
     expect(extractHtmlExportDocument(output)).toBe('<html><body><pre>example </html> still text<p>tail</p></body></html>');
   });
+  it('does not treat an unescaped html sample in pre as a later document start', () => {
+    const document = '<!doctype html><html><body><pre>&lt;-less raw <html> sample</pre><p>tail</p></body></html> Trailing narration.';
+    expect(extractHtmlExportDocument(document)).toBe(
+      '<!doctype html><html><body><pre>&lt;-less raw <html> sample</pre><p>tail</p></body></html>',
+    );
+    expect(extractHtmlExportDocumentWithVerdict(document)).toEqual({
+      html: '<!doctype html><html><body><pre>&lt;-less raw <html> sample</pre><p>tail</p></body></html>',
+      extractedDocument: true,
+    });
+  });
   it('ignores HTML closing markers and pre tags inside comments', () => {
     const document = '<!doctype html><html><body><p>kept</p><!-- literal </html> marker --><p>tail</p></body></html>';
     expect(extractHtmlExportDocument(document)).toBe(document);
@@ -339,6 +350,18 @@ describe('HtmlExportPipelineService', () => {
 
     expect(result.ok).toBe(true);
     expect(parseHost.inputs).toEqual(['<!doctype html><html><body><h1>Title</h1><p>Body</p></body></html>']);
+  });
+  it('strips narration from a fragment despite a bare html prose mention', async () => {
+    const { service, registry } = serviceFor();
+    const attemptId = start(service);
+    const raw = valueOf(
+      service.storeRawModelOutput(1, attemptId, 'No full <html> needed: <section>x</section> Done'),
+    );
+
+    const result = await service.sanitize(1, attemptId, raw.id);
+
+    expect(result.ok).toBe(true);
+    expect(JSON.parse(registry.transitions[0].bytes.toString('utf8')).bodyHtml).toBe('<section>x</section>');
   });
 
   it('uses only the parse-host document rather than parsing raw HTML in main', async () => {

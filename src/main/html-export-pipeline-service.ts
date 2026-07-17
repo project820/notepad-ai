@@ -92,7 +92,12 @@ function isStructuralHtmlStart(source: string, start: number): boolean {
   return match?.index === start && /^\s*<(?:head|body|main|section|article|div|p)\b/i.test(source.slice(start + match[0].length));
 }
 
-export function extractHtmlExportDocument(modelOutput: string): string {
+type ExtractedHtmlExportDocument = {
+  html: string;
+  extractedDocument: boolean;
+};
+
+export function extractHtmlExportDocumentWithVerdict(modelOutput: string): ExtractedHtmlExportDocument {
   const documentMarkers = findHtmlExportDocumentMarkers(modelOutput);
   const htmlMarkers = documentMarkers.filter((marker) => marker.kind === 'html');
   const documentStart = (marker: (typeof documentMarkers)[number]): number => {
@@ -118,12 +123,12 @@ export function extractHtmlExportDocument(modelOutput: string): string {
     const closingHtml = findBalancedClosingMarker(modelOutput, start, /<\/html\s*>/gi);
     const nextStart = documentStarts[index + 1] ?? modelOutput.length;
     if (closingHtml && closingHtml.index < nextStart) {
-      return modelOutput.slice(start, closingHtml.index + closingHtml[0].length);
+      return { html: modelOutput.slice(start, closingHtml.index + closingHtml[0].length), extractedDocument: true };
     }
   }
 
   const unclosedHtml = [...htmlMarkers].reverse().find((marker) => isStructuralHtmlStart(modelOutput, marker.index));
-  if (unclosedHtml) return modelOutput.slice(documentStart(unclosedHtml));
+  if (unclosedHtml) return { html: modelOutput.slice(documentStart(unclosedHtml)), extractedDocument: false };
 
   const fence = /^```(\S*)[ \t]*\r?$/gm;
   let best: { start: number; end: number; preference: number } | undefined;
@@ -145,9 +150,13 @@ export function extractHtmlExportDocument(modelOutput: string): string {
     if (!boundary) break;
     fence.lastIndex = boundary[1] ? boundary.index : boundary.index + boundary[0].length;
   }
-  if (best && best.preference > 0) return modelOutput.slice(best.start, best.end);
+  if (best && best.preference > 0) return { html: modelOutput.slice(best.start, best.end), extractedDocument: false };
 
-  return modelOutput;
+  return { html: modelOutput, extractedDocument: false };
+}
+
+export function extractHtmlExportDocument(modelOutput: string): string {
+  return extractHtmlExportDocumentWithVerdict(modelOutput).html;
 }
 
 type HtmlExportCounts = {
@@ -317,7 +326,8 @@ export class HtmlExportPipelineService {
     } catch {
       return reject('Raw artifact is not valid UTF-8');
     }
-    html = extractHtmlExportDocument(html);
+    const extracted = extractHtmlExportDocumentWithVerdict(html);
+    html = extracted.html;
 
     let parsed: HtmlExportPipelineResult<HtmlExportParseValue>;
     try {
@@ -331,6 +341,7 @@ export class HtmlExportPipelineService {
     const sanitized = sanitizeHtmlExport({
       html,
       parse: () => parsed.value.document,
+      extractedDocument: extracted.extractedDocument,
       // Fail-closed (#27): a non-HTML answer (model narration) must be rejected here,
       // never sanitized→finalized→saved as an export.
       requireStructuralDocument: true,

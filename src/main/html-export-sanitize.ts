@@ -8,7 +8,6 @@ import {
   type CssViolation,
   cssRejectedCode,
 } from './html-export-css-sanitize';
-import { findHtmlExportDocumentMarkers } from './html-export-document-markers';
 import {
   preflightSvgSubtrees,
   reconstructSvgRoot,
@@ -87,10 +86,11 @@ export type HtmlExportSanitizeOptions = {
   parse?: HtmlExportParse;
   isAllowedAssetId: (src: string) => boolean;
   /**
-   * When true, require the sanitized body to contain at least
-   * `HTML_MIN_BODY_ELEMENT_NODES` element nodes. Top-level narration alongside
-   * structural content is stripped; prose-only responses remain rejected.
+   * True when the extractor found and sliced a balanced HTML document.
+   * Marker-free fragments strip top-level narration.
    */
+  extractedDocument?: boolean;
+  /** Require the sanitized body to contain at least `HTML_MIN_BODY_ELEMENT_NODES` element nodes. */
   requireStructuralDocument?: boolean;
 };
 
@@ -688,9 +688,8 @@ export function sanitizeHtmlExport(options: HtmlExportSanitizeOptions): HtmlExpo
           ],
         };
       }
-      const hasDocumentMarkers = findHtmlExportDocumentMarkers(options.html).length > 0;
       const topLevelNarration = new Set(
-        hasDocumentMarkers
+        options.extractedDocument
           ? []
           : childNodes(outputBody).filter(
               (child) =>

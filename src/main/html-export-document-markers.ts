@@ -7,6 +7,7 @@ export type HtmlExportDocumentMarker = {
 export function findHtmlExportDocumentMarkers(source: string): HtmlExportDocumentMarker[] {
   const markers: HtmlExportDocumentMarker[] = [];
   let cursor = 0;
+  let preBalance = 0;
 
   while (cursor < source.length) {
     if (source.startsWith('<!--', cursor)) {
@@ -36,9 +37,15 @@ export function findHtmlExportDocumentMarkers(source: string): HtmlExportDocumen
     if (tagEnd === source.length) return markers;
 
     const tag = source.slice(cursor, tagEnd + 1);
-    if (/^<!doctype\b/i.test(tag)) {
+    if (/^<pre\b/i.test(tag) && !/\/\s*>$/.test(tag)) {
+      preBalance += 1;
+    } else if (/^<\/pre\s*>$/i.test(tag)) {
+      preBalance = Math.max(0, preBalance - 1);
+    }
+
+    if (preBalance === 0 && /^<!doctype\b/i.test(tag)) {
       markers.push({ index: cursor, kind: 'doctype' });
-    } else if (/^<html\b/i.test(tag)) {
+    } else if (preBalance === 0 && /^<html\b/i.test(tag)) {
       markers.push({ index: cursor, kind: 'html' });
     }
 

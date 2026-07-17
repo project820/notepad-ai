@@ -596,12 +596,19 @@ describe('sanitizeHtmlExport — fail-closed structural gate (issue #27)', () =>
   it.each([
     '<!doctype html><html>Intro <section><p>Body copy.</p></section></html>',
     '<html><body>Intro <section><p>Body copy.</p></section></body></html>',
-  ])('preserves body text that is part of complete document flow: %s', (document) => {
-    const result = sanitize(document, structural);
+  ])('preserves body text when the extractor sliced a complete document: %s', (document) => {
+    const result = sanitize(document, { ...structural, extractedDocument: true });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.bodyHtml).toContain('Intro <section>');
     expect(result.stripped).not.toContain(HTML_VIOLATION_CODES.topLevelNarration);
+  });
+  it('uses the extractor verdict instead of rescanning marker-like prose', () => {
+    const result = sanitize('No full <html> needed: <section>x</section> Done', structural);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bodyHtml).toBe('<section>x</section>');
+    expect(result.stripped).toContain(HTML_VIOLATION_CODES.topLevelNarration);
   });
   it('strips and records leading and trailing narration around fragment structural content', () => {
     const result = sanitize('Here is it: <section>x</section> Done.', structural);
