@@ -23,9 +23,8 @@ const ALLOWED_CLOUD_MODEL_IDS: Readonly<Record<'chatgpt' | 'claude' | 'grok', re
 function humanizeEngineId(provider: AiProviderId): string {
   return provider === 'claude' ? 'claude' : provider === 'openrouter' ? 'openrouter' : 'openai';
 }
-function isCuratedCloudModel(selection: ModelDisplaySelection): boolean {
-  const allowed = ALLOWED_CLOUD_MODEL_IDS[selection.provider as keyof typeof ALLOWED_CLOUD_MODEL_IDS];
-  return !!allowed?.includes(selection.id);
+function isRouteHiddenModel(selection: ModelDisplaySelection): boolean {
+  return selection.provider === 'grok' && selection.id === 'grok-composer-2.5-fast';
 }
 function reinjectedSelection(selection: ModelDisplaySelection): ModelRef {
   return {
@@ -62,7 +61,7 @@ export function applyModelDisplayPolicy(
   if (
     current
     && !visible.some((model) => model.provider === current.provider && model.id === current.id)
-    && (selected || !isCuratedCloudModel(current))
+    && (selected || !isRouteHiddenModel(current))
   ) {
     visible.push(selected ? { ...selected, custom: true } : reinjectedSelection(current));
   }

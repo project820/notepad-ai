@@ -246,10 +246,9 @@ export function createToolbar(parent: HTMLElement, h: ToolbarHandlers) {
     const accountBtn = controls.querySelector<HTMLButtonElement>('#hdr-account')!;
     const langBtn = controls.querySelector<HTMLButtonElement>('#hdr-lang')!;
 
-    modelBtn.addEventListener('click', () => {
-      // Kick a non-blocking background refresh so newly started local servers
-      // appear on the next open; the menu below renders the current snapshot.
-      void h.loadModels(true).then((m) => { cachedModels = m; void refreshReasoningCapabilities(); });
+    modelBtn.addEventListener('click', async () => {
+      cachedModels = await h.loadModels(true);
+      void refreshReasoningCapabilities();
       const PROVIDER_LABELS: Record<string, string> = {
         chatgpt: 'ChatGPT', claude: 'Claude', openrouter: 'OpenRouter', ollama: 'Ollama', lmstudio: 'LM Studio', grok: 'Grok',
       };

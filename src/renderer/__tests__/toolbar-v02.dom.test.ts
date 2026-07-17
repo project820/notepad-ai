@@ -213,6 +213,7 @@ describe('toolbar — model dropdown (G003 local providers)', () => {
     });
     await flush(); // model cache warmed by the startup loadModels()
     controls.querySelector<HTMLButtonElement>('#hdr-model')!.click();
+    await flush();
     const items = Array.from(document.querySelectorAll('.pm-item'));
     const llama = items.find((i) => i.getAttribute('data-value') === 'ollama:llama3:latest');
     expect(llama).toBeTruthy();
@@ -235,6 +236,7 @@ describe('toolbar — model dropdown (G003 local providers)', () => {
 
     await flush();
     controls.querySelector<HTMLButtonElement>('#hdr-model')!.click();
+    await flush();
 
     expect(onModelChange).toHaveBeenCalledTimes(1);
     expect(onModelChange).toHaveBeenCalledWith('chatgpt:gpt-5.6');
@@ -250,7 +252,46 @@ describe('toolbar — model dropdown (G003 local providers)', () => {
 
     await flush();
     controls.querySelector<HTMLButtonElement>('#hdr-model')!.click();
+    await flush();
 
+    expect(onModelChange).not.toHaveBeenCalled();
+  });
+  it('uses the fresh inventory to hide a newly unavailable composer selection', async () => {
+    const onModelChange = vi.fn();
+    let calls = 0;
+    const { controls } = mountToolbar({
+      onModelChange,
+      getModel: () => ({ provider: 'grok', id: 'grok-composer-2.5-fast' }),
+      loadModels: async () => {
+        calls += 1;
+        return calls === 1
+          ? [{ id: 'grok-composer-2.5-fast', provider: 'grok' }]
+          : [{ id: 'gpt-5.6', provider: 'chatgpt' }];
+      },
+    });
+
+    await flush();
+    controls.querySelector<HTMLButtonElement>('#hdr-model')!.click();
+    await flush();
+
+    expect(document.querySelector('[data-value="grok:grok-composer-2.5-fast"]')).toBeNull();
+    expect(onModelChange).toHaveBeenCalledTimes(1);
+    expect(onModelChange).toHaveBeenCalledWith('chatgpt:gpt-5.6');
+  });
+
+  it('does not migrate a visible selection while a transient empty inventory is reinjected', async () => {
+    const onModelChange = vi.fn();
+    const { controls } = mountToolbar({
+      onModelChange,
+      getModel: () => ({ provider: 'chatgpt', id: 'gpt-5.6' }),
+      loadModels: async () => [],
+    });
+
+    await flush();
+    controls.querySelector<HTMLButtonElement>('#hdr-model')!.click();
+    await flush();
+
+    expect(document.querySelector('[data-value="chatgpt:gpt-5.6"]')).not.toBeNull();
     expect(onModelChange).not.toHaveBeenCalled();
   });
 });
