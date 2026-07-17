@@ -188,27 +188,22 @@ function start(service: HtmlExportPipelineService, webContentsId = 1): HtmlExpor
   return valueOf(service.beginAttempt(webContentsId)).attemptId;
 }
 describe('extractHtmlExportDocument', () => {
-  it('keeps the largest HTML or plain fenced block and tolerates an unclosed fence', () => {
-    expect(extractHtmlExportDocument('```html\n<p>short</p>\n```\n```html\n<html><body><p>largest</p></body></html>\n```')).toBe(
-      '<html><body><p>largest</p></body></html>\n',
+  it('extracts fenced fragments when no document marker is present', () => {
+    expect(extractHtmlExportDocument('```html\n<p>short</p>\n```\n```html\n<div><p>largest</p></div>\n```')).toBe(
+      '<div><p>largest</p></div>\n',
     );
     expect(extractHtmlExportDocument('```\n<p>plain</p>\n```')).toBe('<p>plain</p>\n');
     expect(extractHtmlExportDocument('before\n```\n<p>unclosed</p>')).toBe('<p>unclosed</p>');
   });
-
-  it('prefers an HTML document fence over a sibling CSS fence', () => {
+  it('extracts documents before considering fences', () => {
     expect(extractHtmlExportDocument('```css\nbody { color: red; }\n```\n```html\n<!doctype html><html><body><p>kept</p></body></html>\n```')).toBe(
-      '<!doctype html><html><body><p>kept</p></body></html>\n',
+      '<!doctype html><html><body><p>kept</p></body></html>',
     );
-  });
-  it('does not merge an unterminated HTML draft with a complete sibling document fence', () => {
     expect(extractHtmlExportDocument('```html\n<html><body><p>draft</p>\nNarration\n```html\n<html><body><p>v2</p></body></html>\n```')).toBe(
-      '<html><body><p>v2</p></body></html>\n',
+      '<html><body><p>v2</p></body></html>',
     );
-  });
-  it('does not include a sibling CSS fence after an unterminated HTML fence', () => {
     expect(extractHtmlExportDocument('```html\n<html><body><p>draft</p>\n```css\nbody { color: red; }\n```')).toBe(
-      '<html><body><p>draft</p>\n',
+      '<html><body><p>draft</p>\n```css\nbody { color: red; }\n```',
     );
   });
   it('does not truncate a fenced document at literal fences inside a pre block', () => {
@@ -229,9 +224,9 @@ describe('extractHtmlExportDocument', () => {
     expect(extractHtmlExportDocument(document)).toBe(document);
   });
 
-  it('keeps an unfenced document ahead of a later fenced code snippet', () => {
+  it('stops a document before a trailing fenced retry', () => {
     const document = '<!doctype html><html><body><p>kept</p></body></html>\n```css\nbody { color: red; }\n```';
-    expect(extractHtmlExportDocument(document)).toBe(document);
+    expect(extractHtmlExportDocument(document)).toBe('<!doctype html><html><body><p>kept</p></body></html>');
   });
 
   it('preserves a clean document containing literal fences byte-for-byte', () => {
@@ -239,14 +234,12 @@ describe('extractHtmlExportDocument', () => {
     expect(extractHtmlExportDocument(document)).toBe(document);
   });
 
-  it('extracts a full document from an xhtml fence', () => {
+  it('extracts a complete document from language-tagged fences', () => {
     expect(extractHtmlExportDocument('```xhtml\n<!doctype html><html><body><p>kept</p></body></html>\n```')).toBe(
-      '<!doctype html><html><body><p>kept</p></body></html>\n',
+      '<!doctype html><html><body><p>kept</p></body></html>',
     );
-  });
-  it('supports non-alphanumeric fenced language tags', () => {
     expect(extractHtmlExportDocument('```c++\n<html><body><p>kept</p></body></html>\n```')).toBe(
-      '<html><body><p>kept</p></body></html>\n',
+      '<html><body><p>kept</p></body></html>',
     );
   });
   it('slices a complete document from leading narration and otherwise passes text through', () => {
@@ -254,6 +247,16 @@ describe('extractHtmlExportDocument', () => {
       '<!DOCTYPE html><html><body><p>kept</p></body></html>',
     );
     expect(extractHtmlExportDocument('just prose')).toBe('just prose');
+  });
+  it('keeps a narrated document when a pre contains a fenced sample', () => {
+    const output = 'Here is your document:\n<!doctype html><html><body><pre>\n```html\n<p>sample</p>\n```\n</pre><p>kept</p></body></html>';
+    expect(extractHtmlExportDocument(output)).toBe(
+      '<!doctype html><html><body><pre>\n```html\n<p>sample</p>\n```\n</pre><p>kept</p></body></html>',
+    );
+  });
+  it('uses the last closing HTML tag when pre content contains an inner close', () => {
+    const output = 'Narration\n<html><body><pre>example </html> still text<p>tail</p></body></html>';
+    expect(extractHtmlExportDocument(output)).toBe('<html><body><pre>example </html> still text<p>tail</p></body></html>');
   });
 });
 
@@ -287,7 +290,7 @@ describe('HtmlExportPipelineService', () => {
     const result = await service.sanitize(1, attemptId, raw.id);
 
     expect(result.ok).toBe(true);
-    expect(parseHost.inputs).toEqual(['<!doctype html><html><body><h1>Title</h1><p>Body</p></body></html>\n']);
+    expect(parseHost.inputs).toEqual(['<!doctype html><html><body><h1>Title</h1><p>Body</p></body></html>']);
   });
 
   it('uses only the parse-host document rather than parsing raw HTML in main', async () => {

@@ -686,17 +686,26 @@ export function sanitizeHtmlExport(options: HtmlExportSanitizeOptions): HtmlExpo
           ],
         };
       }
-      const topLevelNarration = new Set(childNodes(outputBody).filter(
-        (child) =>
-          (child as { nodeName?: string }).nodeName === '#text' &&
-          !isHtmlAsciiWhitespaceOnly(textValue(child)),
-      ));
+      const topLevelNodes = childNodes(outputBody);
+      const firstElement = topLevelNodes.findIndex((child) => tagName(child) !== null);
+      const lastElement = topLevelNodes.length - 1 - [...topLevelNodes].reverse().findIndex((child) => tagName(child) !== null);
+      const hasExplicitBody = /<body\b/i.test(options.html);
+      const topLevelNarration = new Set(
+        hasExplicitBody || firstElement === -1
+          ? []
+          : topLevelNodes.filter(
+            (child, index) =>
+              (index < firstElement || index > lastElement) &&
+              (child as { nodeName?: string }).nodeName === '#text' &&
+              !isHtmlAsciiWhitespaceOnly(textValue(child)),
+          ),
+      );
       if (topLevelNarration.size > 0) {
         outputBody.childNodes = childNodes(outputBody).filter((child) => !topLevelNarration.has(child)) as DefaultTreeAdapterTypes.ChildNode[];
         for (const child of outputBody.childNodes) child.parentNode = outputBody;
         context.stripped.push({
           code: HTML_VIOLATION_CODES.topLevelNarration,
-          detail: 'stripped top-level narration/prose text',
+          detail: 'stripped leading/trailing top-level narration/prose text',
         });
       }
     }

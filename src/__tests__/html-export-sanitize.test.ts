@@ -593,6 +593,21 @@ describe('sanitizeHtmlExport — fail-closed structural gate (issue #27)', () =>
     expect(result.bodyHtml).toContain('<h1>Title</h1>');
     expect(result.stripped.filter((code) => code === HTML_VIOLATION_CODES.topLevelNarration)).toHaveLength(1);
   });
+  it('preserves body text that is part of document flow', () => {
+    const result = sanitize('<!doctype html><html><body>Intro <section><p>Body copy.</p></section></body></html>', structural);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bodyHtml).toContain('Intro <section>');
+    expect(result.stripped).not.toContain(HTML_VIOLATION_CODES.topLevelNarration);
+  });
+  it('strips only leading and trailing narration around structural content', () => {
+    const result = sanitize('Here is your document:<section><p>Body copy.</p></section>Done.', structural);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bodyHtml).not.toContain('Here is your document:');
+    expect(result.bodyHtml).not.toContain('Done.');
+    expect(result.bodyHtml).toContain('<section><p>Body copy.</p></section>');
+  });
 
   it('accepts whitespace-only text between top-level structural elements', () => {
     const doc =

@@ -22,14 +22,20 @@ import { HTML_SANITIZER_LIMITS, sanitizeHtmlExport } from './html-export-sanitiz
 
 export const HTML_EXPORT_RAW_MODEL_OUTPUT_MAX_BYTES = HTML_EXPORT_RAW_ARTIFACT_MAX_BYTES;
 export const HTML_EXPORT_PIPELINE_STAGE_MAX_BYTES = HTML_EXPORT_STAGE_ARTIFACT_MAX_BYTES;
-function hasUnbalancedOpenPre(content: string): boolean {
-  const openingCount = content.match(/<pre\b/gi)?.length ?? 0;
-  const closingCount = content.match(/<\/pre\s*>/gi)?.length ?? 0;
-  return openingCount > closingCount;
-}
-
 export function extractHtmlExportDocument(modelOutput: string): string {
-  if (/^\s*(?:<!doctype\b|<html\b)/i.test(modelOutput)) return modelOutput;
+  const documentMarkers = [...modelOutput.matchAll(/<!doctype\b|<html\b/gi)];
+  if (documentMarkers.length > 0) {
+    const htmlMarkers = [...modelOutput.matchAll(/<html\b/gi)];
+    const start = htmlMarkers.length > 1
+      ? htmlMarkers[htmlMarkers.length - 1].index!
+      : documentMarkers[0].index!;
+    const closingHtml = [...modelOutput.matchAll(/<\/html\s*>/gi)].pop();
+    // Use the last close because literal </html> text inside <pre> must not
+    // truncate the document. A fake close after the real close may over-extend,
+    // which parse5 handles more safely than a truncated document.
+    const end = closingHtml ? closingHtml.index! + closingHtml[0].length : modelOutput.length;
+    return modelOutput.slice(start, end);
+  }
 
   const fence = /^```\S*[ \t]*\r?$/gm;
   const nextFence = /^```(\S*)[ \t]*\r?$/gm;
@@ -40,29 +46,9 @@ export function extractHtmlExportDocument(modelOutput: string): string {
     const start = modelOutput[afterOpening] === '\n' ? afterOpening + 1 : afterOpening;
     nextFence.lastIndex = start;
     const boundary = nextFence.exec(modelOutput);
-    let end = boundary ? boundary.index : modelOutput.length;
-    let content = modelOutput.slice(start, end);
-    let preference = /<!doctype\b|<html\b/i.test(content) ? 2 : content.includes('<') ? 1 : 0;
-    if (preference === 2 && !/<\/html\s*>/i.test(content) && (!boundary || !boundary[1] || hasUnbalancedOpenPre(content))) {
-      const extension = /<\/html\s*>|^```(\S*)[ \t]*\r?$/gmi;
-      extension.lastIndex = end;
-      let lastClosing = boundary;
-      let candidate: RegExpExecArray | null;
-      while ((candidate = extension.exec(modelOutput))) {
-        if (candidate[0][0] === '<') {
-          end = candidate.index + candidate[0].length;
-          content = modelOutput.slice(start, end);
-          break;
-        }
-        if (candidate[1] && !hasUnbalancedOpenPre(modelOutput.slice(start, candidate.index))) break;
-        lastClosing = candidate;
-      }
-      if (!/<\/html\s*>/i.test(content) && lastClosing) {
-        end = lastClosing.index;
-        content = modelOutput.slice(start, end);
-      }
-    }
-    if (/<\/html\s*>/i.test(content)) preference = 3;
+    const end = boundary ? boundary.index : modelOutput.length;
+    const content = modelOutput.slice(start, end);
+    const preference = content.includes('<') ? 1 : 0;
     if (!best || preference > best.preference || (preference === best.preference && end - start > best.end - best.start)) {
       best = { start, end, preference };
     }
@@ -71,12 +57,7 @@ export function extractHtmlExportDocument(modelOutput: string): string {
   }
   if (best && best.preference > 0) return modelOutput.slice(best.start, best.end);
 
-  const documentStart = /<!doctype\b|<html\b/i.exec(modelOutput);
-  if (!documentStart) return modelOutput;
-  const closingHtml = /<\/html\s*>/gi;
-  closingHtml.lastIndex = documentStart.index;
-  const closing = closingHtml.exec(modelOutput);
-  return modelOutput.slice(documentStart.index, closing ? closing.index + closing[0].length : modelOutput.length);
+  return modelOutput;
 }
 
 type HtmlExportCounts = {
