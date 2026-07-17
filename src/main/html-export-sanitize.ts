@@ -46,6 +46,7 @@ export const HTML_VIOLATION_CODES = {
   cap: 'html_cap',
   internal: 'html_internal',
   noStructure: 'html_no_structure',
+  topLevelNarration: 'html_top_level_narration',
 } as const;
 
 type HtmlSanitizerViolationCode =
@@ -85,13 +86,11 @@ export type HtmlExportSanitizeOptions = {
   parse?: HtmlExportParse;
   isAllowedAssetId: (src: string) => boolean;
   /**
-   * When true, require the sanitized body to be a structural HTML document (at
-   * least `HTML_MIN_BODY_ELEMENT_NODES` element nodes, and no non-whitespace
-   * top-level text siblings) — the pipeline enables this so a non-HTML answer
-   * (model narration/prose, or mixed preamble + HTML) is rejected fail-closed,
-   * never finalized (issue #27). The raw sanitizer (unit tests, ad-hoc fragments)
-   * leaves it off and stays a pure filter.
+   * True when the extractor found and sliced a balanced HTML document.
+   * Marker-free fragments strip top-level narration.
    */
+  extractedDocument?: boolean;
+  /** Require the sanitized body to contain at least `HTML_MIN_BODY_ELEMENT_NODES` element nodes. */
   requireStructuralDocument?: boolean;
 };
 
@@ -672,12 +671,10 @@ export function sanitizeHtmlExport(options: HtmlExportSanitizeOptions): HtmlExpo
     for (const child of outputBody.childNodes) child.parentNode = outputBody;
     context.stripped.push(...svgStripped);
 
-    // Fail-closed structural gate (issue #27): a response that is not a structural
-    // HTML document — e.g. model narration/prose — parses to a body of text nodes
-    // with (near-)zero elements. Also reject mixed narration: a non-whitespace
-    // top-level text sibling of real elements (code fences, chat preamble) so it
-    // can never sanitize→finalize→save as an export; the pipeline maps this to a
-    // retryable pipeline-reject. Nested text inside elements is legitimate content.
+    // Structural floor: a response that is not structural HTML — e.g. model
+    // narration/prose — parses to a body with (near-)zero elements and is
+    // rejected. Marker-free fragments discard top-level narration alongside
+    // structural content; complete documents preserve authored body text.
     if (options.requireStructuralDocument) {
       const bodyElementCount = countElementDescendants(outputBody);
       if (bodyElementCount < HTML_MIN_BODY_ELEMENT_NODES) {
@@ -691,22 +688,22 @@ export function sanitizeHtmlExport(options: HtmlExportSanitizeOptions): HtmlExpo
           ],
         };
       }
-      const hasTopLevelNarration = childNodes(outputBody).some(
-        (child) =>
-          (child as { nodeName?: string }).nodeName === '#text' &&
-          !isHtmlAsciiWhitespaceOnly(textValue(child)),
+      const topLevelNarration = new Set(
+        options.extractedDocument
+          ? []
+          : childNodes(outputBody).filter(
+              (child) =>
+                (child as { nodeName?: string }).nodeName === '#text' &&
+                !isHtmlAsciiWhitespaceOnly(textValue(child)),
+            ),
       );
-      if (hasTopLevelNarration) {
-        return {
-          ok: false,
-          violations: [
-            {
-              code: HTML_VIOLATION_CODES.noStructure,
-              detail:
-                'top-level narration/prose text is not allowed; sanitized body must contain only structural HTML elements (whitespace between elements is permitted)',
-            },
-          ],
-        };
+      if (topLevelNarration.size > 0) {
+        outputBody.childNodes = childNodes(outputBody).filter((child) => !topLevelNarration.has(child)) as DefaultTreeAdapterTypes.ChildNode[];
+        for (const child of outputBody.childNodes) child.parentNode = outputBody;
+        context.stripped.push({
+          code: HTML_VIOLATION_CODES.topLevelNarration,
+          detail: 'stripped top-level narration/prose text',
+        });
       }
     }
 

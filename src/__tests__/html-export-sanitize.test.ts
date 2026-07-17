@@ -583,16 +583,61 @@ describe('sanitizeHtmlExport — fail-closed structural gate (issue #27)', () =>
     if (result.ok) expect(result.bodyHtml).toContain('<h1>Title</h1>');
   });
 
-  it('rejects mixed narration / code-fence siblings of otherwise-valid HTML', () => {
-    // Provider responses that wrap valid HTML in a fence or chat preamble still
-    // have bodyElementCount >= 1; top-level non-whitespace text must still fail closed.
-    const fenced = ['```html', '<h1>Title</h1>', '<p>Body copy.</p>', '```'].join('\n');
+  it('strips mixed narration from an otherwise-valid structural document', () => {
     const withPreamble =
-      'Sure, here is the document:\n\n<section><h1>Title</h1><p>Body copy.</p></section>';
-    expect(failureCode(fenced, structural)).toBe(HTML_VIOLATION_CODES.noStructure);
-    expect(failureCode(withPreamble, structural)).toBe(HTML_VIOLATION_CODES.noStructure);
-    // Without the pipeline flag the sanitizer remains a pure filter.
-    expect(sanitize(withPreamble).ok).toBe(true);
+      'Sure, here is the document:\n\n<section><h1>Title</h1><p>Body copy.</p></section>\nDone.';
+    const result = sanitize(withPreamble, structural);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bodyHtml).not.toContain('Sure, here is the document');
+    expect(result.bodyHtml).toContain('<h1>Title</h1>');
+    expect(result.stripped.filter((code) => code === HTML_VIOLATION_CODES.topLevelNarration)).toHaveLength(1);
+  });
+  it.each([
+    '<!doctype html><html>Intro <section><p>Body copy.</p></section></html>',
+    '<html><body>Intro <section><p>Body copy.</p></section></body></html>',
+  ])('preserves body text when the extractor sliced a complete document: %s', (document) => {
+    const result = sanitize(document, { ...structural, extractedDocument: true });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bodyHtml).toContain('Intro <section>');
+    expect(result.stripped).not.toContain(HTML_VIOLATION_CODES.topLevelNarration);
+  });
+  it('uses the extractor verdict instead of rescanning marker-like prose', () => {
+    const result = sanitize('No full <html> needed: <section>x</section> Done', structural);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bodyHtml).toBe('<section>x</section>');
+    expect(result.stripped).toContain(HTML_VIOLATION_CODES.topLevelNarration);
+  });
+  it('strips and records leading and trailing narration around fragment structural content', () => {
+    const result = sanitize('Here is it: <section>x</section> Done.', structural);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bodyHtml).not.toContain('Here is it:');
+    expect(result.bodyHtml).not.toContain('Done.');
+    expect(result.bodyHtml).toContain('<section>x</section>');
+    expect(result.stripped).toContain(HTML_VIOLATION_CODES.topLevelNarration);
+  });
+  it('strips narration around a fragment with a marker-like quoted attribute', () => {
+    const result = sanitize('Here: <section title="<html>"><p>x</p></section> Done', structural);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bodyHtml).toContain('<section title="<html>"><p>x</p></section>');
+    expect(result.bodyHtml).not.toContain('Here:');
+    expect(result.bodyHtml).not.toContain('Done');
+    expect(result.stripped).toContain(HTML_VIOLATION_CODES.topLevelNarration);
+  });
+  it('strips and records interior narration between fragment structural elements', () => {
+    const result = sanitize('Intro <section>a</section> Here is the second: <section>b</section> Done', structural);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bodyHtml).toContain('<section>a</section>');
+    expect(result.bodyHtml).toContain('<section>b</section>');
+    expect(result.bodyHtml).not.toContain('Intro');
+    expect(result.bodyHtml).not.toContain('Here is the second:');
+    expect(result.bodyHtml).not.toContain('Done');
+    expect(result.stripped.filter((code) => code === HTML_VIOLATION_CODES.topLevelNarration)).toHaveLength(1);
   });
 
   it('accepts whitespace-only text between top-level structural elements', () => {
@@ -605,12 +650,12 @@ describe('sanitizeHtmlExport — fail-closed structural gate (issue #27)', () =>
       expect(result.bodyHtml).toContain('<p>Body copy.</p>');
     }
   });
-  it('rejects NBSP-only top-level text under HTML-ASCII whitespace rules', () => {
-    // String.trim() strips U+00A0, so the old gate treated NBSP as whitespace.
-    // HTML-ASCII whitespace is only U+0009/0A/0C/0D/20 — NBSP must fail closed.
-    expect(failureCode('\u00A0<section><p>x</p></section>', structural)).toBe(
-      HTML_VIOLATION_CODES.noStructure,
-    );
+  it('strips NBSP top-level narration when structural content remains', () => {
+    const result = sanitize('\u00A0<section><p>x</p></section>', structural);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bodyHtml).not.toContain('\u00A0');
+    expect(result.stripped).toContain(HTML_VIOLATION_CODES.topLevelNarration);
   });
 
   it('accepts normal spaces/newlines between top-level structural elements', () => {

@@ -18,10 +18,151 @@ import {
 } from '../shared/html-export-pipeline';
 import { HtmlExportAttemptRegistry } from './html-export-attempt-registry';
 import { HtmlExportParseHost, type HtmlExportParseValue } from './html-export-parse-host';
+import { findHtmlExportDocumentMarkers } from './html-export-document-markers';
 import { HTML_SANITIZER_LIMITS, sanitizeHtmlExport } from './html-export-sanitize';
 
 export const HTML_EXPORT_RAW_MODEL_OUTPUT_MAX_BYTES = HTML_EXPORT_RAW_ARTIFACT_MAX_BYTES;
 export const HTML_EXPORT_PIPELINE_STAGE_MAX_BYTES = HTML_EXPORT_STAGE_ARTIFACT_MAX_BYTES;
+const RAW_TEXT_OPENING_TAG = /^<(style|script|title|textarea)\b/i;
+
+function findBalancedClosingMarker(
+  source: string,
+  start: number,
+  closingMarker: RegExp,
+): RegExpExecArray | undefined {
+  const searchFlags = closingMarker.global ? closingMarker.flags : `${closingMarker.flags}g`;
+  const closingMarkerSearch = new RegExp(closingMarker.source, searchFlags);
+  closingMarkerSearch.lastIndex = start;
+  let closing = closingMarkerSearch.exec(source);
+  let cursor = start;
+  let preBalance = 0;
+
+  while (cursor < source.length) {
+    while (closing && closing.index < cursor) {
+      closing = closingMarkerSearch.exec(source);
+    }
+    if (closing?.index === cursor && preBalance === 0) return closing;
+
+    if (source.startsWith('<!--', cursor)) {
+      const commentEnd = source.indexOf('-->', cursor + 4);
+      if (commentEnd === -1) return undefined;
+      cursor = commentEnd + 3;
+      continue;
+    }
+
+    if (source[cursor] === '<' && /[A-Za-z!/]/.test(source[cursor + 1] ?? '')) {
+      let quote: '"' | "'" | undefined;
+      let tagEnd = cursor + 1;
+      for (; tagEnd < source.length; tagEnd += 1) {
+        const character = source[tagEnd];
+        if (quote) {
+          if (character === quote) quote = undefined;
+        } else if (character === '"' || character === "'") {
+          quote = character;
+        } else if (character === '>') {
+          break;
+        }
+      }
+      if (tagEnd === source.length) return undefined;
+
+      const tag = source.slice(cursor, tagEnd + 1);
+      const rawTextElement = RAW_TEXT_OPENING_TAG.exec(tag)?.[1];
+      if (rawTextElement) {
+        const rawTextClose = new RegExp(`</${rawTextElement}\\s*>`, 'gi');
+        rawTextClose.lastIndex = tagEnd + 1;
+        const rawTextClosingTag = rawTextClose.exec(source);
+        if (!rawTextClosingTag) return undefined;
+        cursor = rawTextClosingTag.index + rawTextClosingTag[0].length;
+        continue;
+      }
+
+      if (/^<pre\b/i.test(tag) && !/\/\s*>$/.test(tag)) {
+        preBalance += 1;
+      } else if (/^<\/pre\s*>$/i.test(tag)) {
+        preBalance = Math.max(0, preBalance - 1);
+      }
+
+      cursor = tagEnd + 1;
+      continue;
+    }
+
+    cursor += 1;
+  }
+}
+
+function isStructuralHtmlStart(source: string, start: number): boolean {
+  const openingHtml = /<html\b[^>]*>/gi;
+  openingHtml.lastIndex = start;
+  const match = openingHtml.exec(source);
+  return match?.index === start && /^\s*<(?:head|body|main|section|article|div|p)\b/i.test(source.slice(start + match[0].length));
+}
+
+type ExtractedHtmlExportDocument = {
+  html: string;
+  extractedDocument: boolean;
+};
+
+export function extractHtmlExportDocumentWithVerdict(modelOutput: string): ExtractedHtmlExportDocument {
+  const documentMarkers = findHtmlExportDocumentMarkers(modelOutput);
+  const htmlMarkers = documentMarkers.filter((marker) => marker.kind === 'html');
+  const documentStart = (marker: (typeof documentMarkers)[number]): number => {
+    if (marker.kind !== 'html') return marker.index;
+    const precedingHtml = [...htmlMarkers].reverse().find((html) => html.index < marker.index);
+    return (
+      [...documentMarkers]
+        .reverse()
+        .find(
+          (candidate) =>
+            candidate.kind === 'doctype' &&
+            candidate.index < marker.index &&
+            candidate.index > (precedingHtml?.index ?? -1),
+        )?.index ?? marker.index
+    );
+  };
+
+  const documentStarts = documentMarkers
+    .map(documentStart)
+    .filter((start, index, starts) => index === 0 || start !== starts[index - 1]);
+
+  for (const [index, start] of documentStarts.entries()) {
+    const closingHtml = findBalancedClosingMarker(modelOutput, start, /<\/html\s*>/gi);
+    const nextStart = documentStarts[index + 1] ?? modelOutput.length;
+    if (closingHtml && closingHtml.index < nextStart) {
+      return { html: modelOutput.slice(start, closingHtml.index + closingHtml[0].length), extractedDocument: true };
+    }
+  }
+
+  const unclosedHtml = [...htmlMarkers].reverse().find((marker) => isStructuralHtmlStart(modelOutput, marker.index));
+  if (unclosedHtml) return { html: modelOutput.slice(documentStart(unclosedHtml)), extractedDocument: true };
+
+  const fence = /^```(\S*)[ \t]*\r?$/gm;
+  let best: { start: number; end: number; preference: number } | undefined;
+  let opening: RegExpExecArray | null;
+  while ((opening = fence.exec(modelOutput))) {
+    const afterOpening = opening.index + opening[0].length;
+    const start = modelOutput[afterOpening] === '\n' ? afterOpening + 1 : afterOpening;
+    const boundary = findBalancedClosingMarker(modelOutput, start, /^```(\S*)[ \t]*\r?$/gm);
+    const end = boundary ? boundary.index : modelOutput.length;
+    const content = modelOutput.slice(start, end);
+    const hasMarkup = content.includes('<');
+    const hasCompleteDocument = findHtmlExportDocumentMarkers(content).some((marker) =>
+      Boolean(findBalancedClosingMarker(content, marker.index, /<\/html\s*>/gi)),
+    );
+    const preference = hasCompleteDocument ? 3 : opening[1].toLowerCase() === 'html' && hasMarkup ? 2 : hasMarkup ? 1 : 0;
+    if (!best || preference > best.preference || (preference === best.preference && end - start > best.end - best.start)) {
+      best = { start, end, preference };
+    }
+    if (!boundary) break;
+    fence.lastIndex = boundary[1] ? boundary.index : boundary.index + boundary[0].length;
+  }
+  if (best && best.preference > 0) return { html: modelOutput.slice(best.start, best.end), extractedDocument: false };
+
+  return { html: modelOutput, extractedDocument: false };
+}
+
+export function extractHtmlExportDocument(modelOutput: string): string {
+  return extractHtmlExportDocumentWithVerdict(modelOutput).html;
+}
 
 type HtmlExportCounts = {
   nodeCount: number;
@@ -190,6 +331,8 @@ export class HtmlExportPipelineService {
     } catch {
       return reject('Raw artifact is not valid UTF-8');
     }
+    const extracted = extractHtmlExportDocumentWithVerdict(html);
+    html = extracted.html;
 
     let parsed: HtmlExportPipelineResult<HtmlExportParseValue>;
     try {
@@ -203,6 +346,7 @@ export class HtmlExportPipelineService {
     const sanitized = sanitizeHtmlExport({
       html,
       parse: () => parsed.value.document,
+      extractedDocument: extracted.extractedDocument,
       // Fail-closed (#27): a non-HTML answer (model narration) must be rejected here,
       // never sanitized→finalized→saved as an export.
       requireStructuralDocument: true,
