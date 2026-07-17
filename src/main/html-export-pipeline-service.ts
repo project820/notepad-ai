@@ -22,44 +22,71 @@ import { HTML_SANITIZER_LIMITS, sanitizeHtmlExport } from './html-export-sanitiz
 
 export const HTML_EXPORT_RAW_MODEL_OUTPUT_MAX_BYTES = HTML_EXPORT_RAW_ARTIFACT_MAX_BYTES;
 export const HTML_EXPORT_PIPELINE_STAGE_MAX_BYTES = HTML_EXPORT_STAGE_ARTIFACT_MAX_BYTES;
+function findBalancedClosingMarker(
+  source: string,
+  start: number,
+  closingMarker: RegExp,
+): RegExpExecArray | undefined {
+  const preTag = /<pre\b[^>]*>|<\/pre\s*>/gi;
+  preTag.lastIndex = start;
+  closingMarker.lastIndex = start;
+  let preBalance = 0;
+  let nextPreTag = preTag.exec(source);
+  let closing: RegExpExecArray | null;
+
+  while ((closing = closingMarker.exec(source))) {
+    while (nextPreTag && nextPreTag.index < closing.index) {
+      if (/^<pre\b/i.test(nextPreTag[0]) && !/\/\s*>$/.test(nextPreTag[0])) {
+        preBalance += 1;
+      } else {
+        preBalance = Math.max(0, preBalance - 1);
+      }
+      nextPreTag = preTag.exec(source);
+    }
+    if (preBalance === 0) return closing;
+  }
+}
+
+function isStructuralHtmlStart(source: string, start: number): boolean {
+  const openingHtml = /<html\b[^>]*>/gi;
+  openingHtml.lastIndex = start;
+  const match = openingHtml.exec(source);
+  return match?.index === start && /^\s*<(?:head|body|main|section|article|div|p)\b/i.test(source.slice(start + match[0].length));
+}
+
 export function extractHtmlExportDocument(modelOutput: string): string {
   const documentMarkers = [...modelOutput.matchAll(/<!doctype\b|<html\b/gi)];
-  if (documentMarkers.length > 0) {
-    const htmlMarkers = [...modelOutput.matchAll(/<html\b/gi)];
-    const closingHtmlMarkers = [...modelOutput.matchAll(/<\/html\s*>/gi)];
-    const selectedHtmlMarker = [...htmlMarkers]
-      .reverse()
-      .find((marker) => closingHtmlMarkers.some((closing) => closing.index! > marker.index!));
-    const precedingHtmlIndex = selectedHtmlMarker
-      ? htmlMarkers.findIndex((marker) => marker.index === selectedHtmlMarker.index) - 1
-      : -1;
-    const doctypeMarker = selectedHtmlMarker
-      ? documentMarkers
-          .filter(
-            (marker) =>
-              marker.index! < selectedHtmlMarker.index! &&
-              marker.index! > (htmlMarkers[precedingHtmlIndex]?.index ?? -1),
-          )
-          .pop()
-      : undefined;
-    const start = (doctypeMarker ?? selectedHtmlMarker ?? documentMarkers[0]).index!;
-    const closingHtml = [...closingHtmlMarkers].reverse().find((closing) => closing.index! > start);
-    // Use the last close because literal </html> text inside <pre> must not
-    // truncate the document. A fake close after the real close may over-extend,
-    // which parse5 handles more safely than a truncated document.
-    const end = closingHtml ? closingHtml.index! + closingHtml[0].length : modelOutput.length;
-    return modelOutput.slice(start, end);
+  const htmlMarkers = [...modelOutput.matchAll(/<html\b/gi)];
+  const documentStart = (marker: RegExpMatchArray): number => {
+    if (!/^<html\b/i.test(marker[0])) return marker.index!;
+    const precedingHtml = [...htmlMarkers].reverse().find((html) => html.index! < marker.index!);
+    return (
+      [...documentMarkers]
+        .reverse()
+        .find(
+          (candidate) =>
+            /^<!doctype\b/i.test(candidate[0]) &&
+            candidate.index! < marker.index! &&
+            candidate.index! > (precedingHtml?.index ?? -1),
+        )?.index ?? marker.index!
+    );
+  };
+
+  for (const marker of [...documentMarkers].reverse()) {
+    const closingHtml = findBalancedClosingMarker(modelOutput, marker.index!, /<\/html\s*>/gi);
+    if (closingHtml) return modelOutput.slice(documentStart(marker), closingHtml.index + closingHtml[0].length);
   }
 
+  const unclosedHtml = [...htmlMarkers].reverse().find((marker) => isStructuralHtmlStart(modelOutput, marker.index!));
+  if (unclosedHtml) return modelOutput.slice(documentStart(unclosedHtml));
+
   const fence = /^```\S*[ \t]*\r?$/gm;
-  const nextFence = /^```(\S*)[ \t]*\r?$/gm;
   let best: { start: number; end: number; preference: number } | undefined;
   let opening: RegExpExecArray | null;
   while ((opening = fence.exec(modelOutput))) {
     const afterOpening = opening.index + opening[0].length;
     const start = modelOutput[afterOpening] === '\n' ? afterOpening + 1 : afterOpening;
-    nextFence.lastIndex = start;
-    const boundary = nextFence.exec(modelOutput);
+    const boundary = findBalancedClosingMarker(modelOutput, start, /^```(\S*)[ \t]*\r?$/gm);
     const end = boundary ? boundary.index : modelOutput.length;
     const content = modelOutput.slice(start, end);
     const preference = content.includes('<') ? 1 : 0;

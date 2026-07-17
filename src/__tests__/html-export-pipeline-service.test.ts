@@ -263,6 +263,18 @@ describe('extractHtmlExportDocument', () => {
     const output = 'Narration\n<html><body><pre>example </html> still text<p>tail</p></body></html>';
     expect(extractHtmlExportDocument(output)).toBe('<html><body><pre>example </html> still text<p>tail</p></body></html>');
   });
+  it('falls back to a fenced fragment when an html mention is only prose', () => {
+    const output = 'This is not a full <html> document:\n```html\n<section><p>kept</p></section>\n```';
+    expect(extractHtmlExportDocument(output)).toBe('<section><p>kept</p></section>\n');
+  });
+  it('stops at the first balanced document close before trailing prose', () => {
+    const output = '<!doctype html><html><body><p>kept</p></body></html>\nNote: close with </html>';
+    expect(extractHtmlExportDocument(output)).toBe('<!doctype html><html><body><p>kept</p></body></html>');
+  });
+  it('does not close a fenced fragment at a fence displayed inside pre', () => {
+    const output = '```html\n<section><pre>\n```\nexample\n```\n</pre><p>kept</p></section>\n```';
+    expect(extractHtmlExportDocument(output)).toBe('<section><pre>\n```\nexample\n```\n</pre><p>kept</p></section>\n');
+  });
 });
 
 
