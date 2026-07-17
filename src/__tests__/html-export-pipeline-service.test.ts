@@ -19,6 +19,7 @@ import {
   HTML_EXPORT_PIPELINE_STAGE_MAX_BYTES,
   HTML_EXPORT_RAW_MODEL_OUTPUT_MAX_BYTES,
   HtmlExportPipelineService,
+  extractHtmlExportDocument,
   type HtmlExportPipelineServiceOptions,
   type HtmlExportSanitizedPayload,
 } from '../main/html-export-pipeline-service';
@@ -186,6 +187,23 @@ function serviceFor(registry = new FakeRegistry(), parseHost = new FakeParseHost
 function start(service: HtmlExportPipelineService, webContentsId = 1): HtmlExportAttemptId {
   return valueOf(service.beginAttempt(webContentsId)).attemptId;
 }
+describe('extractHtmlExportDocument', () => {
+  it('keeps the largest HTML or plain fenced block and tolerates an unclosed fence', () => {
+    expect(extractHtmlExportDocument('```html\n<p>short</p>\n```\n```html\n<html><body><p>largest</p></body></html>\n```')).toBe(
+      '<html><body><p>largest</p></body></html>\n',
+    );
+    expect(extractHtmlExportDocument('```\n<p>plain</p>\n```')).toBe('<p>plain</p>\n');
+    expect(extractHtmlExportDocument('before\n```\n<p>unclosed</p>')).toBe('<p>unclosed</p>');
+  });
+
+  it('slices a complete document from leading narration and otherwise passes text through', () => {
+    expect(extractHtmlExportDocument('Here is the page.\n<!DOCTYPE html><html><body><p>kept</p></body></html>\nThanks.')).toBe(
+      '<!DOCTYPE html><html><body><p>kept</p></body></html>',
+    );
+    expect(extractHtmlExportDocument('just prose')).toBe('just prose');
+  });
+});
+
 
 describe('HtmlExportPipelineService', () => {
   it('keeps raw ingress main-only and sends sanitize only a bound opaque raw ID', async () => {
@@ -203,6 +221,20 @@ describe('HtmlExportPipelineService', () => {
       bodyHtml: '<p>raw model output</p>',
       counts: expect.any(Object),
     });
+  });
+  it('extracts a fence-wrapped document before the parse host and sanitizer', async () => {
+    const { service, parseHost } = serviceFor();
+    const attemptId = start(service);
+    const raw = valueOf(service.storeRawModelOutput(
+      1,
+      attemptId,
+      '```html\n<!doctype html><html><body><h1>Title</h1><p>Body</p></body></html>\n```',
+    ));
+
+    const result = await service.sanitize(1, attemptId, raw.id);
+
+    expect(result.ok).toBe(true);
+    expect(parseHost.inputs).toEqual(['<!doctype html><html><body><h1>Title</h1><p>Body</p></body></html>\n']);
   });
 
   it('uses only the parse-host document rather than parsing raw HTML in main', async () => {

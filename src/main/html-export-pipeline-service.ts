@@ -22,6 +22,27 @@ import { HTML_SANITIZER_LIMITS, sanitizeHtmlExport } from './html-export-sanitiz
 
 export const HTML_EXPORT_RAW_MODEL_OUTPUT_MAX_BYTES = HTML_EXPORT_RAW_ARTIFACT_MAX_BYTES;
 export const HTML_EXPORT_PIPELINE_STAGE_MAX_BYTES = HTML_EXPORT_STAGE_ARTIFACT_MAX_BYTES;
+export function extractHtmlExportDocument(modelOutput: string): string {
+  const fence = /```(?:html)?[ \t]*(?:\r?\n|$)/gi;
+  let largest: { start: number; end: number } | undefined;
+  let opening: RegExpExecArray | null;
+  while ((opening = fence.exec(modelOutput))) {
+    const start = opening.index + opening[0].length;
+    const closing = modelOutput.indexOf('```', start);
+    const end = closing === -1 ? modelOutput.length : closing;
+    if (!largest || end - start > largest.end - largest.start) largest = { start, end };
+    if (closing === -1) break;
+    fence.lastIndex = closing + 3;
+  }
+  if (largest) return modelOutput.slice(largest.start, largest.end);
+
+  const documentStart = /<!doctype\b|<html\b/i.exec(modelOutput);
+  if (!documentStart) return modelOutput;
+  const closingHtml = /<\/html\s*>/gi;
+  closingHtml.lastIndex = documentStart.index;
+  const closing = closingHtml.exec(modelOutput);
+  return modelOutput.slice(documentStart.index, closing ? closing.index + closing[0].length : modelOutput.length);
+}
 
 type HtmlExportCounts = {
   nodeCount: number;
@@ -190,6 +211,7 @@ export class HtmlExportPipelineService {
     } catch {
       return reject('Raw artifact is not valid UTF-8');
     }
+    html = extractHtmlExportDocument(html);
 
     let parsed: HtmlExportPipelineResult<HtmlExportParseValue>;
     try {

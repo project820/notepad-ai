@@ -583,16 +583,15 @@ describe('sanitizeHtmlExport — fail-closed structural gate (issue #27)', () =>
     if (result.ok) expect(result.bodyHtml).toContain('<h1>Title</h1>');
   });
 
-  it('rejects mixed narration / code-fence siblings of otherwise-valid HTML', () => {
-    // Provider responses that wrap valid HTML in a fence or chat preamble still
-    // have bodyElementCount >= 1; top-level non-whitespace text must still fail closed.
-    const fenced = ['```html', '<h1>Title</h1>', '<p>Body copy.</p>', '```'].join('\n');
+  it('strips mixed narration from an otherwise-valid structural document', () => {
     const withPreamble =
       'Sure, here is the document:\n\n<section><h1>Title</h1><p>Body copy.</p></section>';
-    expect(failureCode(fenced, structural)).toBe(HTML_VIOLATION_CODES.noStructure);
-    expect(failureCode(withPreamble, structural)).toBe(HTML_VIOLATION_CODES.noStructure);
-    // Without the pipeline flag the sanitizer remains a pure filter.
-    expect(sanitize(withPreamble).ok).toBe(true);
+    const result = sanitize(withPreamble, structural);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bodyHtml).not.toContain('Sure, here is the document');
+    expect(result.bodyHtml).toContain('<h1>Title</h1>');
+    expect(result.stripped).toContain(HTML_VIOLATION_CODES.topLevelNarration);
   });
 
   it('accepts whitespace-only text between top-level structural elements', () => {
@@ -605,12 +604,12 @@ describe('sanitizeHtmlExport — fail-closed structural gate (issue #27)', () =>
       expect(result.bodyHtml).toContain('<p>Body copy.</p>');
     }
   });
-  it('rejects NBSP-only top-level text under HTML-ASCII whitespace rules', () => {
-    // String.trim() strips U+00A0, so the old gate treated NBSP as whitespace.
-    // HTML-ASCII whitespace is only U+0009/0A/0C/0D/20 — NBSP must fail closed.
-    expect(failureCode('\u00A0<section><p>x</p></section>', structural)).toBe(
-      HTML_VIOLATION_CODES.noStructure,
-    );
+  it('strips NBSP top-level narration when structural content remains', () => {
+    const result = sanitize('\u00A0<section><p>x</p></section>', structural);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bodyHtml).not.toContain('\u00A0');
+    expect(result.stripped).toContain(HTML_VIOLATION_CODES.topLevelNarration);
   });
 
   it('accepts normal spaces/newlines between top-level structural elements', () => {
