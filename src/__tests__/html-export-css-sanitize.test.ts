@@ -290,11 +290,13 @@ describe('html export CSS sanitizer', () => {
     expect(sanitizeDeclarationList('font-size:0').ok).toBe(true);
     expect(sanitizeDeclarationList(`font-size:${CSS_MAX_FONT_SIZE_PX}px`).ok).toBe(true);
     expect(failureCode(sanitizeDeclarationList(`font-size:${CSS_MAX_FONT_SIZE_PX + 1}px`))).toBe('css_font_size_too_large');
-    expect(failureCode(sanitizeDeclarationList('font-size:1em'))).toBe('css_font_size_not_allowed');
-    expect(failureCode(sanitizeDeclarationList('font-size:50%'))).toBe('css_font_size_not_allowed');
+    expect(sanitizeDeclarationList('font-size:1em')).toMatchObject({ ok: true });
+    expect(sanitizeDeclarationList('font-size:1rem')).toMatchObject({ ok: true });
+    expect(sanitizeDeclarationList('font-size:50%')).toMatchObject({ ok: true });
     expect(sanitizeDeclarationList(`font:italic ${CSS_MAX_FONT_SIZE_PX}px serif`).ok).toBe(true);
     expect(failureCode(sanitizeDeclarationList(`font:${CSS_MAX_FONT_SIZE_PX + 1}px serif`))).toBe('css_font_size_too_large');
-    expect(failureCode(sanitizeDeclarationList('font:1em serif'))).toBe('css_font_size_not_allowed');
+    expect(sanitizeDeclarationList('font:1em serif')).toMatchObject({ ok: true });
+    expect(sanitizeDeclarationList('font:50% serif')).toMatchObject({ ok: true });
     expect(failureCode(sanitizeDeclarationList('font:inherit'))).toBe('css_font_size_not_allowed');
     expect(sanitizeDeclarationList('position:fixed').ok).toBe(true);
     expect(sanitizeDeclarationList('position:sticky').ok).toBe(true);
@@ -415,3 +417,10 @@ describe('global selector rewrite', () => {
     );
   });
 });
+  it('compounds leading theme selectors with the content root', () => {
+    const result = sanitizeStylesheet('[data-theme="dark"]{--bg:#111}:root[data-theme="light"]{--bg:#fff}');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.css).toContain('[data-he-content][data-theme="dark"]{--bg:#111}');
+    expect(result.css).toContain('[data-he-content][data-theme="light"]{--bg:#fff}');
+  });

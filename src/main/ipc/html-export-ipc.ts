@@ -202,9 +202,15 @@ function isCancelAttemptRequest(input: unknown): input is CancelAttemptRequest {
 }
 
 function isQuarantineMeasureRequest(input: unknown): input is QuarantineMeasureRequest {
-  return hasExactStringFields(input, ['attemptId', 'resolvedArtifactId'])
+  if (!isExactPlainObject(input) || Object.getOwnPropertySymbols(input).length !== 0) return false;
+  const keys = Object.keys(input);
+  return keys.every((key) => key === 'attemptId' || key === 'resolvedArtifactId' || key === 'mode')
+    && keys.length >= 2
+    && typeof input.attemptId === 'string'
+    && typeof input.resolvedArtifactId === 'string'
     && isOpaqueHtmlExportId(input.attemptId)
-    && isOpaqueHtmlExportId(input.resolvedArtifactId);
+    && isOpaqueHtmlExportId(input.resolvedArtifactId)
+    && (input.mode === undefined || input.mode === 'slide' || input.mode === 'scroll');
 }
 
 function isSaveFinalizedRequest(input: unknown): input is SaveFinalizedRequest {
@@ -569,11 +575,18 @@ export function registerHtmlExportIpc({
       if (!result.ok) return result;
 
       // PASS: finalize the exact resolved bytes into a FinalizedArtifactId.
-      const finalized = await pipelineService.finalize(
-        binding.webContentsId,
-        input.attemptId,
-        input.resolvedArtifactId,
-      );
+      const finalized = input.mode === undefined
+        ? await pipelineService.finalize(
+          binding.webContentsId,
+          input.attemptId,
+          input.resolvedArtifactId,
+        )
+        : await pipelineService.finalize(
+          binding.webContentsId,
+          input.attemptId,
+          input.resolvedArtifactId,
+          input.mode,
+        );
       if (!isCurrentSender(binding)) {
         try {
           quarantine.cancelWebContents(binding.webContentsId);

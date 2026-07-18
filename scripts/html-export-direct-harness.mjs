@@ -80,14 +80,19 @@ async function loadModules() {
   const distShell = resolve(REPO, 'dist/main/html-export-shell.js');
   const distRaster = resolve(REPO, 'dist/main/raster-validate.js');
   let bundleSanitizedHtml;
+  let injectHtmlExportRuntime;
   let validateRasterHeader;
-  if (existsSync(distShell)) {
+  const distRuntime = resolve(REPO, 'dist/main/html-export-runtime.js');
+  if (existsSync(distShell) && existsSync(distRuntime)) {
     log('loading shell from dist/main');
     ({ bundleSanitizedHtml } = require(distShell));
+    ({ injectHtmlExportRuntime } = require(distRuntime));
   } else {
     log('dist/main shell missing — bundling TS via esbuild');
-    const { mod } = await esbuildToCjs('src/main/html-export-shell.ts');
-    bundleSanitizedHtml = mod.bundleSanitizedHtml;
+    const shell = await esbuildToCjs('src/main/html-export-shell.ts');
+    const runtime = await esbuildToCjs('src/main/html-export-runtime.ts');
+    bundleSanitizedHtml = shell.mod.bundleSanitizedHtml;
+    injectHtmlExportRuntime = runtime.mod.injectHtmlExportRuntime;
   }
   if (existsSync(distRaster)) {
     ({ validateRasterHeader } = require(distRaster));
@@ -95,8 +100,8 @@ async function loadModules() {
     const { mod } = await esbuildToCjs('src/main/raster-validate.ts');
     validateRasterHeader = mod.validateRasterHeader;
   }
-  if (typeof bundleSanitizedHtml !== 'function') throw new Error('bundleSanitizedHtml export missing');
-  return { bundleSanitizedHtml, validateRasterHeader };
+  if (typeof bundleSanitizedHtml !== 'function' || typeof injectHtmlExportRuntime !== 'function') throw new Error('HTML export shell/runtime export missing');
+  return { bundleSanitizedHtml, injectHtmlExportRuntime, validateRasterHeader };
 }
 
 // ---- Representative finalized payloads (app-authored, shell-shaped) ----------
@@ -182,7 +187,7 @@ async function measure(BrowserWindow, session, html, viewport) {
 }
 
 async function run() {
-  const { bundleSanitizedHtml, validateRasterHeader } = await loadModules();
+  const { bundleSanitizedHtml, injectHtmlExportRuntime, validateRasterHeader } = await loadModules();
   const { BrowserWindow, session } = await import('electron');
 
   const failures = [];
@@ -209,7 +214,8 @@ async function run() {
 
   const layouts = { scroll: scrollPayload(), slides: slidesPayload() };
   for (const [layout, payload] of Object.entries(layouts)) {
-    const { html } = bundleSanitizedHtml(payload);
+    const { html: resolvedHtml } = bundleSanitizedHtml(payload);
+    const html = injectHtmlExportRuntime(resolvedHtml, layout === 'slides' ? 'slide' : 'scroll');
     const saveDigest = digest(Buffer.from(html, 'utf8'));
     check(`${layout}: finalized html is a single self-contained document`, html.startsWith('<!doctype html>') && html.includes('</html>'));
     check(`${layout}: no remote origins in finalized bytes`, !/https?:\/\//i.test(html) && !/\ssrc=["']\/\//i.test(html), 'remote origin found in bytes');

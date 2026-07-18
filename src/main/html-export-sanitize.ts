@@ -130,7 +130,7 @@ const SAFE_ROOT_ATTRIBUTE_NAMES = ['lang', 'dir', 'title', 'role'] as const;
 const SAFE_ROOT_ATTRIBUTE_NAME_SET = new Set<string>(SAFE_ROOT_ATTRIBUTE_NAMES);
 const TABLE_ATTRIBUTES = new Set(['colspan', 'rowspan', 'scope']);
 const IMAGE_ATTRIBUTES = new Set(['alt', 'width', 'height']);
-const RESERVED_CLASS_OR_ID = /^(?:he-s|he-(?:doc|slide|scaler|runtime|manifest|shell|csp)|(?:shell|runtime|manifest|csp))/i;
+const RESERVED_CLASS_OR_ID = /^(?:nai-|he-s|he-(?:doc|slide|scaler|runtime|manifest|shell|csp)|(?:shell|runtime|manifest|csp))/i;
 const ASSET_ID = /^asset:[A-Za-z0-9_-]{16,128}$/;
 const DIMENSION = /^(?:0|[1-9][0-9]*)(?:px)?$/;
 
@@ -375,6 +375,7 @@ function isAllowedAttribute(tag: string, name: string): boolean {
 function hasReservedNamespace(attribute: Attribute): boolean {
   const name = attribute.name.toLowerCase();
   return name.startsWith('data-he-')
+    || name.startsWith('data-nai-')
     || attribute.prefix?.toLowerCase() === 'xlink'
     || attribute.namespace?.toLowerCase().includes('xlink') === true;
 }

@@ -144,8 +144,7 @@ describe('buildDirectHtmlPrompt — 1:1 config mapping + full source', () => {
     expect(prompt).toMatch(/only.{0,40}asset ID/i);
     expect(prompt).toMatch(/never.{0,40}data: URIs|NEVER emit data:/i);
     expect(prompt).not.toMatch(/inline data: images/i);
-    expect(prompt).toMatch(/CSS font-size.*font shorthand size.*px.*0.*absolute keywords/i);
-    expect(prompt).toMatch(/Never rem, em, or % for font size/i);
+    expect(prompt).not.toMatch(/Never rem, em, or % for font size/i);
     expect(prompt).toMatch(/<a href> may ONLY be a non-empty same-document fragment/i);
     expect(prompt).toMatch(/NEVER use https:, http:, mailto:, or any other scheme/i);
     expect(prompt).toMatch(/external\/source links from Markdown as plain text/i);

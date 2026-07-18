@@ -11,8 +11,7 @@
  */
 
 import type { HtmlExportSanitizedPayload } from './html-export-pipeline-service';
-import { HTML_EXPORT_RUNTIME_JS_SHA256 } from '../shared/html-export-runtime';
-import { injectHtmlExportRuntime } from './html-export-runtime';
+import { htmlExportRuntimeSha256 } from './html-export-runtime';
 
 /** Bump when the embedded shell manifest shape changes. */
 const HTML_EXPORT_SHELL_MANIFEST_SCHEMA_VERSION = 1;
@@ -97,7 +96,7 @@ export function bundleSanitizedHtml(
     nodeCount: payload.counts.nodeCount,
     maxDepth: payload.counts.maxDepth,
     attributeCount: payload.counts.attributeCount,
-    runtimeSha256: HTML_EXPORT_RUNTIME_JS_SHA256,
+    runtimeSha256: htmlExportRuntimeSha256(),
   };
 
   const head = [
@@ -120,5 +119,5 @@ export function bundleSanitizedHtml(
     // selectors like `[data-he-content].dark` still match (Codex P2).
     `<body>\n${contentRootOpenTag(payload)}\n${payload.bodyHtml}\n</div>\n</body>\n` +
     '</html>\n';
-  return { html: injectHtmlExportRuntime(html), manifest };
+  return { html, manifest };
 }

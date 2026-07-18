@@ -33,6 +33,16 @@ describe('HTML export runtime DOM', () => {
     mount('<html><head><style>body{color:black}</style></head><body></body></html>');
     expect(document.querySelector('#nai-theme-fallback')?.textContent).toContain('[data-theme="dark"]');
   });
+  it('applies authored theme variables on the content root and skips fallback only when they match', () => {
+    mount('<html><head><style>[data-he-content][data-theme="dark"]{--bg:#111;background:var(--bg)}</style></head><body><div data-he-content></div></body></html>');
+    const content = document.querySelector<HTMLElement>('[data-he-content]')!;
+    expect(content.dataset.theme).toBe('light');
+    document.querySelector<HTMLButtonElement>('#nai-runtime-toggle')!.click();
+    expect(content.dataset.theme).toBe('dark');
+    expect(getComputedStyle(content).getPropertyValue('--bg').trim()).toBe('#111');
+    expect(document.querySelector('#nai-theme-fallback')).toBeNull();
+  });
+
 
   it('pages slide exports by keyboard and controls while ignoring text input focus', () => {
     mount('<html><head></head><body><section class="slide">one</section><section class="slide">two<input></section><section class="slide">three<textarea></textarea></section></body></html>', 'slide');

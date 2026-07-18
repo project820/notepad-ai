@@ -159,6 +159,11 @@ describe('sanitizeHtmlExport', () => {
     expect(dispositionCode('<p class="he-shell">x</p>')).toBe('html_reserved_namespace');
     expect(dispositionCode('<p id="runtime-root">x</p>')).toBe('html_reserved_namespace');
   });
+  it('reserves the nai runtime namespace', () => {
+    expect(dispositionCode('<p data-nai-state="x" class="nai-theme-toggle" id="nai-runtime">x</p>')).toBe(
+      'html_reserved_namespace',
+    );
+  });
   it('keeps interactive event attributes while stripping reserved attributes', () => {
     const result = sanitize('<p onclick="x" data-he-layout="slides" class="he-shell">Kept</p>');
     expect(result.ok).toBe(true);

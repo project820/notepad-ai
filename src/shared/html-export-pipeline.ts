@@ -153,6 +153,7 @@ type HtmlExportQuarantineVerdict = {
 export type QuarantineMeasureRequest = {
   attemptId: HtmlExportAttemptId;
   resolvedArtifactId: ResolvedArtifactId;
+  mode?: 'slide' | 'scroll';
 };
 
 export type QuarantineMeasureResult =

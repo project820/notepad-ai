@@ -2,10 +2,7 @@ import { describe, it, expect } from 'vitest';
 
 import { bundleSanitizedHtml } from '../main/html-export-shell';
 import type { HtmlExportSanitizedPayload } from '../main/html-export-pipeline-service';
-import {
-  HTML_EXPORT_RUNTIME_JS,
-  HTML_EXPORT_RUNTIME_JS_SHA256,
-} from '../shared/html-export-runtime';
+import { htmlExportRuntimeSha256 } from '../main/html-export-runtime';
 
 function payload(over: Partial<HtmlExportSanitizedPayload> = {}): HtmlExportSanitizedPayload {
   return {
@@ -39,11 +36,10 @@ function scriptBlocks(html: string): Array<{ type: string | null; id: string | n
 }
 
 describe('bundleSanitizedHtml — canonical shell contract', () => {
-  it('emits exactly one interactive CSP meta', () => {
+  it('leaves runtime injection to finalization', () => {
     const { html } = bundleSanitizedHtml(payload());
-    const cspMetas = html.match(/<meta http-equiv="Content-Security-Policy"[^>]*>/g) ?? [];
-    expect(cspMetas).toHaveLength(1);
-    expect(cspMetas[0]).toContain("script-src 'unsafe-inline'");
+    expect(html).not.toContain('Content-Security-Policy');
+    expect(scriptBlocks(html).filter((script) => script.id === 'nai-runtime')).toHaveLength(0);
   });
 
   it('emits exactly two <style> blocks; block 2 is contentCss with @layer he-authored', () => {
@@ -58,9 +54,9 @@ describe('bundleSanitizedHtml — canonical shell contract', () => {
     expect(styles[0]).not.toContain('@layer');
   });
 
-  it('emits its single app-owned runtime script', () => {
+  it('does not pre-inject the app-owned runtime script', () => {
     const { html } = bundleSanitizedHtml(payload());
-    expect(scriptBlocks(html).filter((script) => script.id === 'nai-runtime')).toHaveLength(1);
+    expect(scriptBlocks(html).filter((script) => script.id === 'nai-runtime')).toHaveLength(0);
   });
 
   it('embeds a manifest script with < escaped and mirrored counts + runtimeSha256', () => {
@@ -80,7 +76,7 @@ describe('bundleSanitizedHtml — canonical shell contract', () => {
       nodeCount: 12,
       maxDepth: 5,
       attributeCount: 7,
-      runtimeSha256: HTML_EXPORT_RUNTIME_JS_SHA256,
+      runtimeSha256: htmlExportRuntimeSha256(),
     });
 
     const scripts = scriptBlocks(html);
@@ -125,7 +121,7 @@ describe('bundleSanitizedHtml — canonical shell contract', () => {
   it('keeps the emitted document head deterministic', () => {
     const { html } = bundleSanitizedHtml(payload());
     const head = headInner(html);
-    expect(head).toContain('<meta http-equiv="Content-Security-Policy"');
+    expect(head).not.toContain('<meta http-equiv="Content-Security-Policy"');
     expect(head).toContain('<meta charset="utf-8">');
   });
 
@@ -256,7 +252,6 @@ describe('bundleSanitizedHtml — canonical shell contract', () => {
     const headSkeleton = headInner(html).replace(/<style>[\s\S]*?<\/style>/g, '');
     expect(headSkeleton).not.toMatch(/http-equiv\s*=\s*["']?refresh/i);
     expect(headSkeleton).not.toMatch(/https?:\/\//i);
-    const cspMetas = html.match(/<meta http-equiv="Content-Security-Policy"[^>]*>/g) ?? [];
-    expect(cspMetas).toHaveLength(1);
+    expect(html).not.toContain('<meta http-equiv="Content-Security-Policy"');
   });
 });

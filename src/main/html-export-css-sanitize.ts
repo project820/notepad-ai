@@ -144,7 +144,7 @@ const SAFE_ATTRIBUTE_SELECTOR_NAMES = new Set([
 ]);
 const MEDIA_FEATURES = new Set(['width', 'min-width', 'max-width', 'height', 'orientation', 'aspect-ratio', 'prefers-color-scheme']);
 const FONT_SIZE_KEYWORDS = new Set(['xx-small', 'x-small', 'small', 'medium', 'large', 'x-large', 'xx-large', 'xxx-large']);
-const RESERVED_NAME = /^(?:data-he-|he-s|he-(?:doc|slide|scaler|runtime|manifest|shell|csp)|(?:data-)?(?:shell|runtime|manifest|csp))/i;
+const RESERVED_NAME = /^(?:data-(?:he|nai)-|nai-|he-s|he-(?:doc|slide|scaler|runtime|manifest|shell|csp)|(?:data-)?(?:shell|runtime|manifest|csp))/i;
 const NETWORK_FUNCTION = new Set(['url', 'image', 'image-set', '-webkit-image-set', 'cross-fade', 'element', 'expression']);
 const VALUE_INDIRECTION_FUNCTION = new Set(['attr', 'env', 'paint']);
 const ANIMATION_KEYWORDS = new Set([
@@ -295,10 +295,7 @@ function isExactUniversalSelector(selector: any): boolean {
   return nodes.length === 1 && isUniversalAtom(nodes[0]);
 }
 
-function selectorBeginsWithGlobalRoot(selector: any): boolean {
-  const nodes = children(selector);
-  return nodes.length > 0 && isGlobalRootAtom(nodes[0]);
-}
+
 
 /**
  * Scope one validated selector to the export content root.
@@ -308,11 +305,12 @@ function selectorBeginsWithGlobalRoot(selector: any): boolean {
 function scopeSelector(selector: any): string {
   if (isExactGlobalRootSelector(selector)) return CONTENT_ROOT_SELECTOR;
   if (isExactUniversalSelector(selector)) return `${CONTENT_ROOT_SELECTOR} *`;
-  const beginsAtRoot = selectorBeginsWithGlobalRoot(selector);
   const rewritten = cloneCssNode(selector);
   rewriteGlobalRootAtoms(rewritten);
   const text = generated(rewritten);
-  return beginsAtRoot ? text : `${CONTENT_ROOT_SELECTOR} ${text}`;
+  if (text.startsWith(CONTENT_ROOT_SELECTOR)) return text;
+  if (text.startsWith('[data-theme')) return `${CONTENT_ROOT_SELECTOR}${text}`;
+  return `${CONTENT_ROOT_SELECTOR} ${text}`;
 }
 
 /** Collect every non-functional global-root atom anywhere in the selector tree,
@@ -534,12 +532,13 @@ function validateSelector(selector: any): Failure | null {
 }
 
 function rawFunctionFailure(raw: string): Failure | null {
-  const match = /([a-z-]+)\s*\(/i.exec(raw);
-  if (!match) return null;
-  const name = match[1].toLowerCase();
-  if (NETWORK_FUNCTION.has(name)) return fail(CSS_VIOLATION_CODES.networkFunction, `${name}()`);
-  if (VALUE_INDIRECTION_FUNCTION.has(name)) return fail(CSS_VIOLATION_CODES.valueIndirection, `${name}()`);
-  if (!FUNCTION_SET.has(name)) return fail(CSS_VIOLATION_CODES.disallowedFunction, `${name}()`);
+  const matches = raw.matchAll(/([a-z-]+)\s*\(/gi);
+  for (const match of matches) {
+    const name = match[1].toLowerCase();
+    if (NETWORK_FUNCTION.has(name)) return fail(CSS_VIOLATION_CODES.networkFunction, `${name}()`);
+    if (VALUE_INDIRECTION_FUNCTION.has(name)) return fail(CSS_VIOLATION_CODES.valueIndirection, `${name}()`);
+    if (!FUNCTION_SET.has(name)) return fail(CSS_VIOLATION_CODES.disallowedFunction, `${name}()`);
+  }
   return null;
 }
 
@@ -547,7 +546,8 @@ function validateValue(value: any): Failure | null {
   for (const node of valueNodes(value)) {
     if (node?.type === 'Raw') {
       const rawFailure = rawFunctionFailure(String(node.value ?? ''));
-      return rawFailure ?? fail(CSS_VIOLATION_CODES.disallowedFunction, 'unparsed value');
+      if (rawFailure) return rawFailure;
+      continue;
     }
     if (node?.type === 'Url') return fail(CSS_VIOLATION_CODES.networkFunction, 'url()');
     if (node?.type === 'Function') {
@@ -615,16 +615,21 @@ function rewriteAnimation(property: string, value: any, context: CssSanitizeCont
 
 function validateFontSize(value: any): Failure | null {
   const tokens = children(value);
-  if (tokens.length !== 1) return fail(CSS_VIOLATION_CODES.fontSizeNotAllowed, 'font-size must be one safe absolute value');
+  if (tokens.length !== 1) return fail(CSS_VIOLATION_CODES.fontSizeNotAllowed, 'font-size must be one safe value');
   const token = tokens[0];
   if (token.type === 'Number' && Number(token.value) === 0) return null;
-  if (token.type === 'Dimension' && String(token.unit).toLowerCase() === 'px') {
+  if (token.type === 'Dimension' && ['px', 'rem', 'em'].includes(String(token.unit).toLowerCase())) {
     const size = Number(token.value);
     if (Number.isFinite(size) && size >= 0 && size <= CSS_MAX_FONT_SIZE_PX) return null;
-    return fail(CSS_VIOLATION_CODES.fontSizeTooLarge, `font-size must be from 0 to ${CSS_MAX_FONT_SIZE_PX}px`);
+    return fail(CSS_VIOLATION_CODES.fontSizeTooLarge, `font-size must be from 0 to ${CSS_MAX_FONT_SIZE_PX}`);
+  }
+  if (token.type === 'Percentage') {
+    const size = Number(token.value);
+    if (Number.isFinite(size) && size >= 0 && size <= CSS_MAX_FONT_SIZE_PX) return null;
+    return fail(CSS_VIOLATION_CODES.fontSizeTooLarge, `font-size percentage must be from 0 to ${CSS_MAX_FONT_SIZE_PX}%`);
   }
   if (token.type === 'Identifier' && FONT_SIZE_KEYWORDS.has(String(token.name).toLowerCase())) return null;
-  return fail(CSS_VIOLATION_CODES.fontSizeNotAllowed, 'font-size must be zero, px, or a safe absolute keyword');
+  return fail(CSS_VIOLATION_CODES.fontSizeNotAllowed, 'font-size must be zero, px, rem, em, %, or a safe absolute keyword');
 }
 function validateFontShorthand(value: any): Failure | null {
   let beforeLineHeight = true;
@@ -643,18 +648,23 @@ function validateFontShorthand(value: any): Failure | null {
       continue;
     }
     if (token.type === 'Dimension') {
-      if (String(token.unit).toLowerCase() !== 'px') {
-        return fail(CSS_VIOLATION_CODES.fontSizeNotAllowed, 'font shorthand size must use px');
+      if (!['px', 'rem', 'em'].includes(String(token.unit).toLowerCase())) {
+        return fail(CSS_VIOLATION_CODES.fontSizeNotAllowed, 'font shorthand size must use px, rem, or em');
       }
       const size = Number(token.value);
       if (!Number.isFinite(size) || size < 0 || size > CSS_MAX_FONT_SIZE_PX) {
-        return fail(CSS_VIOLATION_CODES.fontSizeTooLarge, `font shorthand size must be from 0 to ${CSS_MAX_FONT_SIZE_PX}px`);
+        return fail(CSS_VIOLATION_CODES.fontSizeTooLarge, `font shorthand size must be from 0 to ${CSS_MAX_FONT_SIZE_PX}`);
       }
       foundSize = true;
       continue;
     }
     if (token.type === 'Percentage') {
-      return fail(CSS_VIOLATION_CODES.fontSizeNotAllowed, 'font shorthand size must not use percentages');
+      const size = Number(token.value);
+      if (!Number.isFinite(size) || size < 0 || size > CSS_MAX_FONT_SIZE_PX) {
+        return fail(CSS_VIOLATION_CODES.fontSizeTooLarge, `font shorthand percentage must be from 0 to ${CSS_MAX_FONT_SIZE_PX}%`);
+      }
+      foundSize = true;
+      continue;
     }
     if (token.type === 'Identifier') {
       const keyword = String(token.name).toLowerCase();

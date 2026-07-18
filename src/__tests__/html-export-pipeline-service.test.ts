@@ -25,6 +25,7 @@ import {
   type HtmlExportPipelineServiceOptions,
   type HtmlExportSanitizedPayload,
 } from '../main/html-export-pipeline-service';
+import { bundleSanitizedHtml } from '../main/html-export-shell';
 
 type Artifact = {
   ref: HtmlExportArtifactRef;
@@ -778,5 +779,20 @@ describe('HtmlExportPipelineService', () => {
     expect(seen).toHaveLength(1);
     expect(seen[0].contentRootClass).toBe('dark');
     expect(seen[0].contentRootId).toBe('app');
+  });
+  it('injects the requested runtime mode after the real shell resolver', async () => {
+    for (const mode of ['slide', 'scroll'] as const) {
+      const { service, registry } = serviceFor(undefined, undefined, async (payload) => bundleSanitizedHtml(payload).html);
+      const attemptId = start(service);
+      const raw = valueOf(service.storeRawModelOutput(1, attemptId, '<section class="slide">one</section><section class="slide">two</section>'));
+      const sanitized = valueOf(await service.sanitize(1, attemptId, raw.id)).artifact;
+      const resolved = valueOf(await service.resolve(1, attemptId, sanitized.id)).artifact;
+      valueOf(service.finalize(1, attemptId, resolved.id, mode));
+
+      const finalized = registry.transitions.at(-1)!;
+      const html = finalized.bytes.toString('utf8');
+      expect(html).toContain('id="nai-runtime"');
+      expect(html.includes('if(true){var slides=')).toBe(mode === 'slide');
+    }
   });
 });
