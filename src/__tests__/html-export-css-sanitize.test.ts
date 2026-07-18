@@ -70,6 +70,13 @@ describe('html export CSS sanitizer', () => {
       declarationCount: 1,
     });
   });
+  it('allows quoted input type attribute selectors while rejecting unrelated attributes', () => {
+    expect(sanitizeStylesheet('input[type="range"]{width:100%}input[type="checkbox"]{height:1em}')).toMatchObject({
+      ok: true,
+      css: '[data-he-content] input[type="range"]{width:100%}[data-he-content] input[type="checkbox"]{height:1em}',
+    });
+    expect(failureCode(sanitizeStylesheet('input[name="volume"]{width:100%}'))).toBe('css_disallowed_selector');
+  });
 
   it('parses inline declarations and preserves duplicate shorthand/longhand order', () => {
     expect(sanitizeDeclarationList('margin:1px;margin-left:4px;color:red;color:blue')).toMatchObject({

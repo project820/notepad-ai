@@ -140,7 +140,7 @@ const PSEUDO_CLASSES = new Set(['active', 'any-link', 'checked', 'default', 'def
 const PSEUDO_ELEMENTS = new Set(['after', 'backdrop', 'before', 'first-letter', 'first-line', 'marker', 'placeholder', 'selection']);
 const SAFE_ATTRIBUTE_SELECTOR_NAMES = new Set([
   'class', 'id', 'title', 'lang', 'dir', 'role', 'data-section-id', 'colspan', 'rowspan', 'scope',
-  'alt', 'width', 'height', 'datetime',
+  'alt', 'width', 'height', 'datetime', 'type',
 ]);
 const MEDIA_FEATURES = new Set(['width', 'min-width', 'max-width', 'height', 'orientation', 'aspect-ratio', 'prefers-color-scheme']);
 const FONT_SIZE_KEYWORDS = new Set(['xx-small', 'x-small', 'small', 'medium', 'large', 'x-large', 'xx-large', 'xxx-large']);

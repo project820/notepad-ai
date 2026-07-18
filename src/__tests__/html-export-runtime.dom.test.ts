@@ -162,6 +162,22 @@ describe('HTML export runtime DOM', () => {
     mount('<html><head><style>@media screen{[data-he-content][data-theme="dark"]{--surface:#111}}</style></head><body><div data-he-content></div></body></html>');
     expect(document.querySelector('#nai-theme-fallback')).toBeNull();
   });
+  it('hides inactive slides over authored important display rules and restores the active display', () => {
+    mount('<html><head><style>section.slide{display:flex!important}</style></head><body><section class="slide">one</section><section class="slide">two</section></body></html>', 'slide');
+
+    const slides = Array.from(document.querySelectorAll<HTMLElement>('section.slide'));
+    const [, next] = Array.from(document.querySelectorAll<HTMLButtonElement>('.nai-slide-nav button'));
+
+    expect(getComputedStyle(slides[0]).display).toBe('flex');
+    expect(getComputedStyle(slides[1]).display).toBe('none');
+    expect(slides[1].style.getPropertyPriority('display')).toBe('important');
+
+    next.click();
+
+    expect(getComputedStyle(slides[0]).display).toBe('none');
+    expect(getComputedStyle(slides[1]).display).toBe('flex');
+    expect(slides[1].style.display).toBe('');
+  });
   it('pages slide exports by keyboard and controls while ignoring text input focus', () => {
     mount('<html><head></head><body><section class="slide">one</section><section class="slide">two<input></section><section class="slide">three<textarea></textarea></section></body></html>', 'slide');
 
