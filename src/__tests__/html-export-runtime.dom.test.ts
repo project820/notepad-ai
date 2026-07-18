@@ -1,12 +1,19 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { bundleSanitizedHtml } from '../main/html-export-shell';
 import { htmlExportRuntimeSha256, injectHtmlExportRuntime } from '../main/html-export-runtime';
 import { sanitizeHtmlExport } from '../main/html-export-sanitize';
+import { htmlExportRuntimeLabels, type HtmlExportRuntimeLocale } from '../main/html-export-runtime-labels';
 
-function mount(html: string, mode: 'scroll' | 'slide' = 'scroll'): void {
-  document.documentElement.innerHTML = injectHtmlExportRuntime(html, mode);
+function mount(
+  html: string,
+  mode: 'scroll' | 'slide' = 'scroll',
+  locale: HtmlExportRuntimeLocale = 'en',
+  styleSheets?: Array<{ cssRules: unknown[] }>,
+): void {
+  document.documentElement.innerHTML = injectHtmlExportRuntime(html, mode, htmlExportRuntimeLabels(locale));
+  if (styleSheets) Object.defineProperty(document, 'styleSheets', { configurable: true, value: styleSheets });
   HTMLElement.prototype.scrollIntoView = () => {};
   const source = document.querySelector<HTMLScriptElement>('#nai-runtime')?.textContent;
   if (!source) throw new Error('runtime was not injected');
@@ -17,6 +24,8 @@ afterEach(() => {
   localStorage.clear();
   document.documentElement.removeAttribute('data-nai-runtime');
   document.documentElement.innerHTML = '';
+  vi.unstubAllGlobals();
+  delete (document as { styleSheets?: unknown }).styleSheets;
 });
 
 describe('HTML export runtime DOM', () => {
@@ -82,6 +91,55 @@ describe('HTML export runtime DOM', () => {
 
     expect(document.querySelector('#nai-theme-fallback')).toBeNull();
   });
+  it('injects the fallback when a theme palette is only inside a non-matching media rule', () => {
+    const matchMedia = vi.fn((condition: string) => ({ matches: condition !== 'print' }));
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: matchMedia,
+    });
+    mount(
+      '<html><head></head><body><div data-he-content></div></body></html>',
+      'scroll',
+      'en',
+      [{ cssRules: [{ type: 4, conditionText: 'print', cssRules: [{ selectorText: '[data-he-content][data-theme="dark"]', style: ['--surface'] }] }] }],
+    );
+    expect(matchMedia).toHaveBeenCalledWith('print');
+    expect(document.querySelector('#nai-theme-fallback')).not.toBeNull();
+  });
+
+  it('skips the fallback when a theme palette is inside a matching media rule', () => {
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: (condition: string) => ({ matches: condition === 'screen' }),
+    });
+    mount(
+      '<html><head></head><body><div data-he-content></div></body></html>',
+      'scroll',
+      'en',
+      [{ cssRules: [{ type: 4, conditionText: 'screen', cssRules: [{ selectorText: '[data-he-content][data-theme="dark"]', style: ['--surface'] }] }] }],
+    );
+    expect(document.querySelector('#nai-theme-fallback')).toBeNull();
+  });
+
+
+  it('localizes runtime controls while keeping the visible slide indicator numeric', () => {
+    mount('<html><head></head><body><section class="slide">one</section><section class="slide">two</section></body></html>', 'slide', 'ko');
+
+    const [previous, next] = Array.from(document.querySelectorAll<HTMLButtonElement>('.nai-slide-nav button'));
+    const indicator = document.querySelector('.nai-slide-nav span')!;
+    expect(document.querySelector('#nai-runtime-toggle')?.getAttribute('aria-label')).toBe('어두운 테마로 전환');
+    expect(previous.getAttribute('aria-label')).toBe('이전 슬라이드');
+    expect(next.getAttribute('title')).toBe('다음 슬라이드');
+    expect(indicator.textContent).toBe('1/2');
+    expect(indicator.getAttribute('aria-label')).toBe('슬라이드 1/2');
+  });
+
+  it('has non-empty runtime labels for all supported locales', () => {
+    for (const locale of ['en', 'ko', 'zh-Hans', 'zh-Hant', 'ja'] as const) {
+      const labels = htmlExportRuntimeLabels(locale);
+      expect(Object.values(labels).every(Boolean), locale).toBe(true);
+    }
+  });
 
   it('skips the fallback for authored theme variables inside media rules', () => {
     mount('<html><head><style>@media screen{[data-he-content][data-theme="dark"]{--surface:#111}}</style></head><body><div data-he-content></div></body></html>');
@@ -122,12 +180,16 @@ describe('HTML export runtime DOM', () => {
     const decoy = '"runtimeSha256":"AAAA"';
     const output = injectHtmlExportRuntime(
       `<html><head><style>[data-he-content]{--x:'${decoy}'}</style><script id="he-manifest" type="application/json">{"runtimeSha256":"stale"}</script></head><body></body></html>`,
+      'slide',
+      htmlExportRuntimeLabels('ko'),
     );
 
     expect(output).toContain(`--x:'${decoy}'`);
     const manifest = output.match(/<script id="he-manifest"[^>]*>([\s\S]*?)<\/script>/);
     expect(manifest).not.toBeNull();
-    expect(JSON.parse(manifest![1]).runtimeSha256).toBe(htmlExportRuntimeSha256());
+    expect(JSON.parse(manifest![1]).runtimeSha256).toBe(
+      htmlExportRuntimeSha256('slide', htmlExportRuntimeLabels('ko')),
+    );
   });
 
   it('is idempotent across double finalization', () => {

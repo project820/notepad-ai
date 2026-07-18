@@ -83,6 +83,7 @@ export type HtmlExportDeps = {
     viewport?: { width: number; height: number };
     reasoningEffort?: 'low';
     mode?: 'slide' | 'scroll';
+    locale?: 'en' | 'ko' | 'zh-Hans' | 'zh-Hant' | 'ja';
   }) => Promise<GenerationAttemptResult>;
   /** Cancel/abandon the in-flight or finalized main-owned generation for this window. */
   cancelHtmlGeneration?: () => void;

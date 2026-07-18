@@ -130,6 +130,7 @@ export type Api = HtmlExportPipelineApi & HtmlExportAssetApi & {
       viewport?: { width: number; height: number };
       reasoningEffort?: 'low';
       mode?: 'slide' | 'scroll';
+      locale?: 'en' | 'ko' | 'zh-Hans' | 'zh-Hant' | 'ja';
     },
   ) => Promise<GenerationAttemptResult>;
   cancelHtmlGeneration: () => Promise<{ ok: boolean }>;

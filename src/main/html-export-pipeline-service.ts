@@ -21,6 +21,7 @@ import { HtmlExportParseHost, type HtmlExportParseValue } from './html-export-pa
 import { findHtmlExportDocumentMarkers } from './html-export-document-markers';
 import { HTML_SANITIZER_LIMITS, sanitizeHtmlExport } from './html-export-sanitize';
 import { injectHtmlExportRuntime, type HtmlExportRuntimeMode } from './html-export-runtime';
+import { htmlExportRuntimeLabels, type HtmlExportRuntimeLocale } from './html-export-runtime-labels';
 
 export const HTML_EXPORT_RAW_MODEL_OUTPUT_MAX_BYTES = HTML_EXPORT_RAW_ARTIFACT_MAX_BYTES;
 export const HTML_EXPORT_PIPELINE_STAGE_MAX_BYTES = HTML_EXPORT_STAGE_ARTIFACT_MAX_BYTES;
@@ -461,6 +462,7 @@ export class HtmlExportPipelineService {
     attemptId: HtmlExportAttemptId,
     resolvedArtifactId: ResolvedArtifactId,
     mode: HtmlExportRuntimeMode = 'scroll',
+    locale: HtmlExportRuntimeLocale = 'en',
   ): HtmlExportPipelineResult<{ artifact: HtmlExportArtifactRef<'finalized'> }> {
     const resolved = this.registry.read(webContentsId, attemptId, resolvedArtifactId, 'resolved');
     if (!resolved.ok) return resolved;
@@ -471,7 +473,11 @@ export class HtmlExportPipelineService {
       return oversize(`Resolved payload exceeds ${HTML_EXPORT_PIPELINE_STAGE_MAX_BYTES} bytes`);
     }
 
-    const finalizedHtml = injectHtmlExportRuntime(new TextDecoder('utf-8').decode(resolved.value.bytes), mode);
+    const finalizedHtml = injectHtmlExportRuntime(
+      new TextDecoder('utf-8').decode(resolved.value.bytes),
+      mode,
+      htmlExportRuntimeLabels(locale),
+    );
     const verified = this.verifyCandidate(
       Buffer.from(finalizedHtml, 'utf8'),
       HTML_EXPORT_PIPELINE_STAGE_MAX_BYTES,

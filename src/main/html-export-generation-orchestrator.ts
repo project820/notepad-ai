@@ -22,6 +22,7 @@ import type {
   ResolvedArtifactId,
   SanitizedArtifactId,
 } from '../shared/html-export-pipeline';
+import type { HtmlExportRuntimeLocale } from './html-export-runtime-labels';
 
 /** Renderer-safe route/model metadata (no secrets, no paths). */
 export type GenerationRoute = {
@@ -87,6 +88,7 @@ export type OrchestratorPipeline = {
     attemptId: HtmlExportAttemptId,
     resolvedArtifactId: ResolvedArtifactId,
     mode?: 'slide' | 'scroll',
+    locale?: HtmlExportRuntimeLocale,
   ): HtmlExportPipelineResult<{ artifact: HtmlExportArtifactRef<'finalized'> }>;
   invalidateAttempt(webContentsId: number, attemptId: HtmlExportAttemptId): unknown;
 };
@@ -170,7 +172,7 @@ export class HtmlExportGenerationOrchestrator {
   async run(
     webContentsId: number,
     prompt: string,
-    opts?: { signal?: AbortSignal; mode?: 'slide' | 'scroll' },
+    opts?: { signal?: AbortSignal; mode?: 'slide' | 'scroll'; locale?: HtmlExportRuntimeLocale },
   ): Promise<GenerationAttemptResult> {
     const signal = opts?.signal;
     if (signal?.aborted) {
@@ -307,9 +309,15 @@ export class HtmlExportGenerationOrchestrator {
 
       // (i) finalize
       stage = 'finalize';
-      const finalized = opts?.mode === undefined
+      const finalized = opts?.mode === undefined && opts?.locale === undefined
         ? this.pipeline.finalize(webContentsId, attemptId, resolvedArtifactId)
-        : this.pipeline.finalize(webContentsId, attemptId, resolvedArtifactId, opts.mode);
+        : this.pipeline.finalize(
+          webContentsId,
+          attemptId,
+          resolvedArtifactId,
+          opts?.mode,
+          opts?.locale,
+        );
       if (!finalized.ok) {
         return failed('finalize', finalized.error.kind);
       }

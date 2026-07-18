@@ -24,6 +24,7 @@ import {
 } from '../../shared/html-export-pipeline';
 import { atomicWrite, nodeAtomicBackend, type AtomicWriteBackend } from '../atomic-write';
 import type { GenerationAttemptResult } from '../html-export-generation-orchestrator';
+import type { HtmlExportRuntimeLocale } from '../html-export-runtime-labels';
 import { isAiProviderId, type AiProviderId } from '../ai/types';
 import { HTML_EXPORT_CHATGPT_MODEL_IDS, isHtmlExportModelAllowed } from '../ai/html-export-model-allowlist';
 import { VIEWPORT_MAX, VIEWPORT_MIN } from '../html-export-quarantine';
@@ -78,6 +79,7 @@ type HtmlExportIpcDeps = {
       viewport?: { width: number; height: number };
       reasoningEffort?: 'low';
       mode?: 'slide' | 'scroll';
+      locale?: HtmlExportRuntimeLocale;
     },
   ) => Promise<GenerationAttemptResult>;
   cancelGenerateHtml?: (webContentsId: number) => void;
@@ -259,10 +261,11 @@ function isGenerateRequest(
   viewport?: { width: number; height: number };
   reasoningEffort?: 'low';
   mode?: 'slide' | 'scroll';
+  locale?: HtmlExportRuntimeLocale;
 } {
   if (!isExactPlainObject(input) || Object.getOwnPropertySymbols(input).length !== 0) return false;
   const keys = Object.keys(input);
-  if (!keys.every((key) => key === 'prompt' || key === 'model' || key === 'instructions' || key === 'viewport' || key === 'reasoningEffort' || key === 'mode')) {
+  if (!keys.every((key) => key === 'prompt' || key === 'model' || key === 'instructions' || key === 'viewport' || key === 'reasoningEffort' || key === 'mode' || key === 'locale')) {
     return false;
   }
   if (!Object.hasOwn(input, 'prompt') || typeof input.prompt !== 'string') return false;
@@ -284,6 +287,7 @@ function isGenerateRequest(
     }
   }
   if ('mode' in input && input.mode !== undefined && input.mode !== 'slide' && input.mode !== 'scroll') return false;
+  if ('locale' in input && input.locale !== undefined && input.locale !== 'en' && input.locale !== 'ko' && input.locale !== 'zh-Hans' && input.locale !== 'zh-Hant' && input.locale !== 'ja') return false;
   return true;
 }
 
@@ -472,6 +476,7 @@ export function registerHtmlExportIpc({
         ...(input.viewport !== undefined ? { viewport: input.viewport } : {}),
         ...(input.reasoningEffort !== undefined ? { reasoningEffort: input.reasoningEffort } : {}),
         ...(input.mode !== undefined ? { mode: input.mode } : {}),
+        ...(input.locale !== undefined ? { locale: input.locale } : {}),
       });
     } catch {
       return { state: 'failed', stage: 'generate', kind: 'pipeline-reject' };

@@ -232,6 +232,16 @@ describe('HtmlExportPipelineService.finalize', () => {
     expect(finalized.ok).toBe(true);
     expect(registry.transitions.at(-1)?.bytes.toString('utf8')).toContain('nai-slide-nav');
   });
+  it('injects locale-specific labels', async () => {
+    const { service, registry } = serviceFor();
+    const { attemptId, resolvedId } = await driveToResolved(service, registry, 1, '<section class="slide">One</section>');
+
+    const finalized = service.finalize(1, attemptId, resolvedId, 'slide', 'ko');
+
+    expect(finalized.ok).toBe(true);
+    const html = registry.transitions.at(-1)?.bytes.toString('utf8') ?? '';
+    expect(html).toContain('어두운 테마로 전환');
+  });
 
   it('returns typed pipeline errors for unknown, wrong-sender, and stale resolved ids', async () => {
     const { service, registry } = serviceFor();
