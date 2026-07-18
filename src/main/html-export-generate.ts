@@ -18,6 +18,7 @@ import {
   type QuarantineMeasureFn,
 } from './html-export-generation-orchestrator';
 import { createHtmlExportTransport, type PinnedTransportStream } from './html-export-transport';
+import type { HtmlExportRuntimeLocale } from './html-export-runtime-labels';
 import type { AiProviderId } from './ai/types';
 import type {
   HtmlExportAttemptId,
@@ -35,6 +36,7 @@ type HtmlGenerateInput = {
   instructions?: string;
   reasoningEffort?: 'low';
   mode?: 'slide' | 'scroll';
+  locale?: HtmlExportRuntimeLocale;
   /** Selected export viewport for the quarantine overflow gate only. */
   viewport?: HtmlGenerateViewport;
 };
@@ -110,7 +112,11 @@ export function createHtmlExportGenerator(deps: HtmlExportGeneratorDeps): HtmlEx
       });
 
       try {
-        return await orchestrator.run(webContentsId, input.prompt, { signal: controller.signal, mode: input.mode });
+        return await orchestrator.run(webContentsId, input.prompt, {
+          signal: controller.signal,
+          mode: input.mode,
+          locale: input.locale,
+        });
       } finally {
         if (controllers.get(webContentsId) === controller) controllers.delete(webContentsId);
       }
