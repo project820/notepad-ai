@@ -35,6 +35,21 @@ describe('HTML export runtime DOM', () => {
     mount('<html><head><style>@layer he-authored{[data-he-content]{color:black}}</style></head><body><div data-he-content></div></body></html>');
     expect(document.querySelector('#nai-theme-fallback')?.textContent).toContain('[data-theme="dark"]');
   });
+  it('keeps the fallback functional when content-root variables are not theme-conditioned', () => {
+    mount('<html><head><style>@layer he-authored{[data-he-content]{--foreground:#111;color:var(--foreground)}}</style></head><body><div data-he-content></div></body></html>');
+    const content = document.querySelector<HTMLElement>('[data-he-content]')!;
+
+    document.querySelector<HTMLButtonElement>('#nai-runtime-toggle')!.click();
+
+    expect(content.dataset.theme).toBe('dark');
+    expect(document.querySelector('#nai-theme-fallback')).not.toBeNull();
+    expect(content.matches('[data-he-content][data-theme="dark"]')).toBe(true);
+  });
+  it('keeps the fallback when a theme-conditioned rule has no custom properties', () => {
+    mount('<html><head><style>[data-he-content][data-theme="dark"]{color:#111}</style></head><body><div data-he-content></div></body></html>');
+
+    expect(document.querySelector('#nai-theme-fallback')).not.toBeNull();
+  });
   it('applies authored theme variables on the content root and skips fallback only when they match', () => {
     mount('<html><head><style>[data-he-content][data-theme="dark"]{--bg:#111;background:var(--bg)}</style></head><body><div data-he-content></div></body></html>');
     const content = document.querySelector<HTMLElement>('[data-he-content]')!;
@@ -60,6 +75,11 @@ describe('HTML export runtime DOM', () => {
     document.querySelector<HTMLButtonElement>('#nai-runtime-toggle')!.click();
 
     expect(content.matches('[data-he-content]:where([data-theme="dark"])')).toBe(true);
+    expect(document.querySelector('#nai-theme-fallback')).toBeNull();
+  });
+  it('skips the fallback for a :is theme palette', () => {
+    mount('<html><head><style>[data-he-content]:is([data-theme="dark"]){--surface:#111}</style></head><body><div data-he-content></div></body></html>');
+
     expect(document.querySelector('#nai-theme-fallback')).toBeNull();
   });
 
