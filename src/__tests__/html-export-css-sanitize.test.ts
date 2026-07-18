@@ -416,6 +416,22 @@ describe('global selector rewrite', () => {
       CSS_VIOLATION_CODES.disallowedSelector,
     );
   });
+  it('compounds all-theme :where and :is selector arguments with the content root', () => {
+    const result = sanitizeStylesheet(
+      ':where([data-theme="dark"],[data-theme="light"]){--bg:#111}:is([data-theme]){--fg:#eee}:where(:root[data-theme]){--root:#fff}:is(html[data-theme]){--html:#ddd}',
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.css).toBe(
+      '[data-he-content]:where([data-theme="dark"],[data-theme="light"]){--bg:#111}[data-he-content]:is([data-theme]){--fg:#eee}[data-he-content]:where([data-he-content][data-theme]){--root:#fff}[data-he-content]:is([data-he-content][data-theme]){--html:#ddd}',
+    );
+  });
+  it('keeps mixed :where selector arguments scoped as descendants', () => {
+    const result = sanitizeStylesheet(':where([data-theme="dark"],.card){--bg:#111}');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.css).toBe('[data-he-content] :where([data-theme="dark"],.card){--bg:#111}');
+  });
 });
   it('compounds leading theme selectors with the content root', () => {
     const result = sanitizeStylesheet('[data-theme="dark"]{--bg:#111}:root[data-theme="light"]{--bg:#fff}');

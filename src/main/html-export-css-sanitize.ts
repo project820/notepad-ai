@@ -285,14 +285,39 @@ function rewriteGlobalRootAtoms(node: any): void {
   }
 }
 
-function isLeadingThemeAtom(node: any): boolean {
+function isThemeAttributeAtom(node: any): boolean {
   return node?.type === 'AttributeSelector' && String(node.name?.name ?? node.name ?? '').toLowerCase() === 'data-theme';
 }
 
-/** Approximate leading theme sibling selectors as descendants to retain containment. */
-function rewriteLeadingThemeSiblingCombinator(selector: any): void {
+function isThemeRootSelector(selector: any): boolean {
   const nodes = children(selector);
-  if (!isLeadingThemeAtom(nodes[0])) return;
+  if (nodes.length === 1) return isThemeAttributeAtom(nodes[0]);
+  return nodes.length === 2
+    && isGlobalRootAtom(nodes[0])
+    && isThemeAttributeAtom(nodes[1])
+    && (nodes[0].type !== 'TypeSelector' || String(nodes[0].name).toLowerCase() === 'html');
+}
+
+function isLeadingThemeAtom(node: any): boolean {
+  if (isThemeAttributeAtom(node)) return true;
+  if (node?.type !== 'PseudoClassSelector') return false;
+  const name = String(node.name).toLowerCase();
+  if (name !== 'where' && name !== 'is') return false;
+  const selectorList = children(node)[0];
+  const selectors = children(selectorList);
+  return selectorList?.type === 'SelectorList' && selectors.length > 0 && selectors.every(isThemeRootSelector);
+}
+
+function leadingThemeRootArgumentCount(node: any): number {
+  if (node?.type !== 'PseudoClassSelector') return 0;
+  return children(children(node)[0]).filter((selector) => isThemeRootSelector(selector)
+    && isGlobalRootAtom(children(selector)[0])).length;
+}
+
+/** Approximate leading theme sibling selectors as descendants to retain containment. */
+function rewriteLeadingThemeSiblingCombinator(selector: any, leadingThemeAtom: boolean): void {
+  const nodes = children(selector);
+  if (!leadingThemeAtom) return;
   for (const node of nodes) {
     if (node?.type !== 'Combinator') continue;
     if (node.name === '+' || node.name === '~') node.name = ' ';
@@ -320,12 +345,13 @@ function isExactUniversalSelector(selector: any): boolean {
 function scopeSelector(selector: any): string {
   if (isExactGlobalRootSelector(selector)) return CONTENT_ROOT_SELECTOR;
   if (isExactUniversalSelector(selector)) return `${CONTENT_ROOT_SELECTOR} *`;
+  const leadingThemeAtom = isLeadingThemeAtom(children(selector)[0]);
   const rewritten = cloneCssNode(selector);
   rewriteGlobalRootAtoms(rewritten);
-  rewriteLeadingThemeSiblingCombinator(rewritten);
+  rewriteLeadingThemeSiblingCombinator(rewritten, leadingThemeAtom);
   const text = generated(rewritten);
   if (text.startsWith(CONTENT_ROOT_SELECTOR)) return text;
-  if (text.startsWith('[data-theme=') || text.startsWith('[data-theme]')) return `${CONTENT_ROOT_SELECTOR}${text}`;
+  if (leadingThemeAtom) return `${CONTENT_ROOT_SELECTOR}${text}`;
   return `${CONTENT_ROOT_SELECTOR} ${text}`;
 }
 
@@ -353,10 +379,11 @@ function validateGlobalRootShape(selector: any): Failure | null {
   const roots: any[] = [];
   collectRootAtoms(selector, roots);
   if (roots.length === 0) return null;
+  const top = children(selector);
+  if (isLeadingThemeAtom(top[0]) && roots.length === leadingThemeRootArgumentCount(top[0])) return null;
   if (roots.length > 1) {
     return fail(CSS_VIOLATION_CODES.disallowedSelector, 'multiple global-root selectors');
   }
-  const top = children(selector);
   if (top[0] !== roots[0]) {
     return fail(CSS_VIOLATION_CODES.disallowedSelector, 'global-root selector must be the leading atom');
   }

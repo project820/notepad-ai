@@ -45,18 +45,21 @@ describe('HTML export runtime DOM', () => {
     expect(document.querySelector('#nai-theme-fallback')).toBeNull();
   });
 
-  it('skips the fallback for a sanitized and finalized authored theme palette in a layer', () => {
+  it('applies a :where theme palette in the finalized artifact without a fallback', () => {
     const sanitized = sanitizeHtmlExport({
-      html: '<html><head><style>[data-theme="dark"]{--surface:#111;background:var(--surface)}</style></head><body><main>content</main></body></html>',
+      html: '<html><head><style>:where([data-theme="dark"]){--surface:#111;background:var(--surface)}</style></head><body><main>content</main></body></html>',
       isAllowedAssetId: () => true,
     });
     expect(sanitized.ok).toBe(true);
     if (!sanitized.ok) return;
-    expect(sanitized.contentCss).toContain('@layer he-authored{[data-he-content][data-theme="dark"]{--surface:#111');
+    expect(sanitized.contentCss).toContain('@layer he-authored{[data-he-content]:where([data-theme="dark"]){--surface:#111');
 
     const finalized = bundleSanitizedHtml(sanitized).html;
     mount(finalized);
+    const content = document.querySelector<HTMLElement>('[data-he-content]')!;
+    document.querySelector<HTMLButtonElement>('#nai-runtime-toggle')!.click();
 
+    expect(content.matches('[data-he-content]:where([data-theme="dark"])')).toBe(true);
     expect(document.querySelector('#nai-theme-fallback')).toBeNull();
   });
 
