@@ -792,7 +792,7 @@ describe('HtmlExportPipelineService', () => {
       const finalized = registry.transitions.at(-1)!;
       const html = finalized.bytes.toString('utf8');
       expect(html).toContain('id="nai-runtime"');
-      expect(html.includes('if(true){var slides=')).toBe(mode === 'slide');
+      expect(html.includes('if(true){var deck=content||document.body,slides=')).toBe(mode === 'slide');
     }
   });
 });

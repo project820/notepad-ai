@@ -767,14 +767,15 @@ function sanitizeDeclarations(block: any, context: CssSanitizeContext, counts: C
     if (declaration.type !== 'Declaration') { strip(context, fail(CSS_VIOLATION_CODES.parseError, 'invalid declaration')); continue; }
     context.seenDeclarations++;
     if (context.seenDeclarations > CSS_MAX_DECLARATIONS) { strip(context, fail(CSS_VIOLATION_CODES.tooManyDeclarations, `more than ${CSS_MAX_DECLARATIONS} declarations`)); break; }
-    const property = String(declaration.property).toLowerCase();
+    const declaredProperty = String(declaration.property);
+    const property = declaredProperty.toLowerCase();
     let failure: Failure | null = null;
     if (!failure) failure = validateValue(declaration.value);
     if (!failure && PROPERTY_SET.has(property)) failure = validateNumericCaps(property, declaration.value, context);
     if (failure) { strip(context, failure); continue; }
     const value = generated(declaration.value);
     if ((!PROPERTY_SET.has(property) && !property.startsWith('--')) || (!property.startsWith('--') && lexer.matchProperty(property, value).error)) continue;
-    output.push(`${property}:${value}${declaration.important ? '!important' : ''}`);
+    output.push(`${declaredProperty.startsWith('--') ? declaredProperty : property}:${value}${declaration.important ? '!important' : ''}`);
     counts.declarationCount++;
   }
   return output.join(';');

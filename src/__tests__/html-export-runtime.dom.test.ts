@@ -86,6 +86,23 @@ describe('HTML export runtime DOM', () => {
     expect(content.matches('[data-he-content]:where([data-theme="dark"])')).toBe(true);
     expect(document.querySelector('#nai-theme-fallback')).toBeNull();
   });
+  it('preserves case-sensitive custom properties and resolves their var() references in finalized artifacts', () => {
+    const sanitized = sanitizeHtmlExport({
+      html: '<html><head><style>:where([data-theme="dark"]){--AccentColor:rgb(1, 2, 3)}:where([data-theme="dark"]){--Resolved:var(--AccentColor)}</style></head><body><main>content</main></body></html>',
+      isAllowedAssetId: () => true,
+    });
+    expect(sanitized.ok).toBe(true);
+    if (!sanitized.ok) return;
+
+    const finalized = bundleSanitizedHtml(sanitized).html;
+    expect(finalized).toMatch(/--AccentColor:rgb\(1,\s*2,\s*3\)/);
+    mount(finalized);
+    document.querySelector<HTMLButtonElement>('#nai-runtime-toggle')!.click();
+
+    const authoredCss = Array.from(document.head.querySelectorAll('style'))[1]?.textContent ?? '';
+    expect(authoredCss).toMatch(/--AccentColor:rgb\(1,\s*2,\s*3\)/);
+    expect(authoredCss).toContain('--Resolved:var(--AccentColor)');
+  });
   it('skips the fallback for a :is theme palette', () => {
     mount('<html><head><style>[data-he-content]:is([data-theme="dark"]){--surface:#111}</style></head><body><div data-he-content></div></body></html>');
 
@@ -174,6 +191,26 @@ describe('HTML export runtime DOM', () => {
     textarea.focus();
     textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
     expect(indicator.textContent).toBe('2/3');
+  });
+  it('counts only top-level slide sections so nested slide content remains visible', () => {
+    mount('<html><head></head><body><section class="slide" id="parent">parent<section class="slide" id="nested">nested</section></section><section class="slide" id="second">second</section></body></html>', 'slide');
+
+    const parent = document.querySelector<HTMLElement>('#parent')!;
+    const nested = document.querySelector<HTMLElement>('#nested')!;
+    const second = document.querySelector<HTMLElement>('#second')!;
+    const indicator = document.querySelector('.nai-slide-nav span')!;
+    const [previous, next] = Array.from(document.querySelectorAll<HTMLButtonElement>('.nai-slide-nav button'));
+
+    expect(indicator.textContent).toBe('1/2');
+    expect(parent.style.display).toBe('');
+    expect(nested.style.display).toBe('');
+    next.click();
+    expect(indicator.textContent).toBe('2/2');
+    expect(second.style.display).toBe('');
+    previous.click();
+    expect(indicator.textContent).toBe('1/2');
+    expect(parent.style.display).toBe('');
+    expect(nested.style.display).toBe('');
   });
 
   it('patches only the manifest runtime SHA, leaving authored CSS decoys untouched', () => {
