@@ -103,6 +103,7 @@ type Context = {
   isAllowedAssetId: (src: string) => boolean;
   stylesheetRules: string[];
   inlineRules: string[];
+  relocatedHeadScripts: SanitizedNode[];
   nextInlineStyle: number;
   cssContext: CssSanitizeContext;
   svgPlans: Map<Node, SvgRootPlan>;
@@ -492,6 +493,12 @@ function scanDiscardedNode(node: Node, context: Context): Failure | null {
     else { context.stripped.push(...result.stripped.map((v) => ({ code: cssRejectedCode(v.code), detail: v.detail }))); context.stylesheetRules.push(result.css); }
     return null;
   }
+  if (name === 'script' && !attrs(node).some((attribute) => attribute.name.toLowerCase() === 'src')) {
+    const sanitized = sanitizeNode(node, context, null);
+    if (isFailure(sanitized)) return sanitized;
+    context.relocatedHeadScripts.push(...sanitized);
+    return null;
+  }
   const attributes = sanitizeAttributes(node, name, context, false);
   if (isFailure(attributes)) return attributes;
   for (const child of childNodes(node)) {
@@ -654,6 +661,7 @@ export function sanitizeHtmlExport(options: HtmlExportSanitizeOptions): HtmlExpo
       isAllowedAssetId,
       stylesheetRules: [],
       inlineRules: [],
+      relocatedHeadScripts: [],
       nextInlineStyle: 0,
       cssContext,
       svgPlans,
@@ -669,6 +677,7 @@ export function sanitizeHtmlExport(options: HtmlExportSanitizeOptions): HtmlExpo
       if (isFailure(sanitized)) return { ok: false, violations: [sanitized.violation] };
       outputNodes.push(...sanitized);
     }
+    outputNodes.push(...context.relocatedHeadScripts);
     outputBody.childNodes = outputNodes as DefaultTreeAdapterTypes.ChildNode[];
     for (const child of outputBody.childNodes) child.parentNode = outputBody;
     context.stripped.push(...svgStripped);

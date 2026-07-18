@@ -133,6 +133,44 @@ describe('sanitizeHtmlExport', () => {
   it.each(['script', 'form', 'input', 'button'])('preserves interactive tag <%s>', (tag) => {
     expect(dispositionCodeWithParse(documentWithElement(tag))).toBe('');
   });
+  it('relocates inline head scripts after model body content in source order', () => {
+    const result = sanitize(
+      '<!doctype html><html><head>' +
+      '<script>window.order = ["head-1"];</script>' +
+      '<script>window.order.push("head-2");</script>' +
+      '</head><body><div>body content</div><script>window.order.push("body");</script></body></html>',
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const bodyContent = result.bodyHtml.indexOf('<div>body content</div>');
+    const bodyScript = result.bodyHtml.indexOf('window.order.push("body")');
+    const firstHeadScript = result.bodyHtml.indexOf('window.order = ["head-1"]');
+    const secondHeadScript = result.bodyHtml.indexOf('window.order.push("head-2")');
+    expect(result.bodyHtml).toContain('<script>window.order = ["head-1"];</script>');
+    expect(result.bodyHtml).toContain('<script>window.order.push("head-2");</script>');
+    expect(bodyContent).toBeGreaterThanOrEqual(0);
+    expect(bodyScript).toBeGreaterThan(bodyContent);
+    expect(firstHeadScript).toBeGreaterThan(bodyScript);
+    expect(secondHeadScript).toBeGreaterThan(firstHeadScript);
+  });
+  it('strips head scripts with src attributes', () => {
+    const result = sanitize(
+      '<!doctype html><html><head><script src="asset:abcdefghijklmnop">window.external = true;</script></head>' +
+      '<body><p>Kept</p></body></html>',
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bodyHtml).toContain('<p>Kept</p>');
+    expect(result.bodyHtml).not.toContain('<script');
+    expect(result.bodyHtml).not.toContain('window.external');
+  });
+  it('continues to extract head styles into authored CSS', () => {
+    const result = sanitize('<!doctype html><html><head><style>p { color: red; }</style></head><body><p>Kept</p></body></html>');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bodyHtml).toBe('<p>Kept</p>');
+    expect(result.contentCss).toContain('p{color:red}');
+  });
 
   it('rejects meta http-equiv as an active redirect surface', () => {
     expect(dispositionCodeWithParse(documentWithElement('meta', [{ name: 'http-equiv', value: 'refresh' }]))).toBe('html_active_tag');
