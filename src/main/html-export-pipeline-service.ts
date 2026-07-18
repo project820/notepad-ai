@@ -407,6 +407,8 @@ export class HtmlExportPipelineService {
     webContentsId: number,
     attemptId: HtmlExportAttemptId,
     sanitizedCandidateId: SanitizedArtifactId,
+    mode?: HtmlExportRuntimeMode,
+    locale: HtmlExportRuntimeLocale = 'en',
   ): Promise<ResolveResult> {
     const sanitized = this.registry.read(webContentsId, attemptId, sanitizedCandidateId, 'sanitized');
     if (!sanitized.ok) return sanitized;
@@ -442,7 +444,15 @@ export class HtmlExportPipelineService {
     if (byteLength > HTML_EXPORT_PIPELINE_STAGE_MAX_BYTES) {
       return oversize(`Pipeline payload exceeds ${HTML_EXPORT_PIPELINE_STAGE_MAX_BYTES} bytes`);
     }
-    const bytes = typeof resolved === 'string' ? Buffer.from(resolved, 'utf8') : Buffer.from(resolved);
+    const resolvedHtml = typeof resolved === 'string'
+      ? resolved
+      : new TextDecoder('utf-8').decode(resolved);
+    const bytes = Buffer.from(
+      mode === undefined
+        ? resolvedHtml
+        : injectHtmlExportRuntime(resolvedHtml, mode, htmlExportRuntimeLabels(locale)),
+      'utf8',
+    );
     const verified = this.verifyCandidate(bytes, HTML_EXPORT_PIPELINE_STAGE_MAX_BYTES);
     if (!verified.ok) return verified;
 

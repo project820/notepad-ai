@@ -181,6 +181,30 @@ describe('HtmlExportGenerationOrchestrator', () => {
     expect(pipeline.invalidateAttempt).not.toHaveBeenCalled();
     expect((generate as ReturnType<typeof createGenerate>).calls).toHaveLength(1);
   });
+  it('injects the selected slide runtime before quarantine and finalizes the same mode', async () => {
+    const quarantine: QuarantineMeasureFn = vi.fn(async () => ({ ok: true as const }));
+    const pipeline = createFakePipeline();
+    const { orchestrator } = createOrchestrator({ pipeline, quarantine });
+
+    const result = await orchestrator.run(WEB_CONTENTS_ID, PROMPT, { mode: 'slide', locale: 'ko' });
+
+    expect(result.state).toBe('final');
+    expect(pipeline.resolve).toHaveBeenCalledWith(
+      WEB_CONTENTS_ID,
+      attempt('attempt-1'),
+      sanitizedId('sanitized-1'),
+      'slide',
+      'ko',
+    );
+    expect(quarantine).toHaveBeenCalledAfter(pipeline.resolve as ReturnType<typeof vi.fn>);
+    expect(pipeline.finalize).toHaveBeenCalledWith(
+      WEB_CONTENTS_ID,
+      attempt('attempt-1'),
+      resolvedId('resolved-1'),
+      'slide',
+      'ko',
+    );
+  });
 
   it('zero-decoded-byte first output retries exactly once on the same route then succeeds', async () => {
     const generate = createGenerate([

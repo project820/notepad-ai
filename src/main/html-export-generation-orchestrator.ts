@@ -82,6 +82,8 @@ export type OrchestratorPipeline = {
     webContentsId: number,
     attemptId: HtmlExportAttemptId,
     sanitizedCandidateId: SanitizedArtifactId,
+    mode?: 'slide' | 'scroll',
+    locale?: HtmlExportRuntimeLocale,
   ): Promise<HtmlExportPipelineResult<{ artifact: HtmlExportArtifactRef<'resolved'> }>>;
   finalize(
     webContentsId: number,
@@ -269,7 +271,13 @@ export class HtmlExportGenerationOrchestrator {
 
       // (f) resolve
       stage = 'resolve';
-      const resolved = await this.pipeline.resolve(webContentsId, attemptId, sanitizedArtifactId);
+      const resolved = await this.pipeline.resolve(
+        webContentsId,
+        attemptId,
+        sanitizedArtifactId,
+        opts?.mode ?? 'scroll',
+        opts?.locale ?? 'en',
+      );
       if (!resolved.ok) {
         return failed('resolve', resolved.error.kind);
       }
