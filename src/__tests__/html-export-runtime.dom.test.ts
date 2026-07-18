@@ -68,6 +68,20 @@ describe('HTML export runtime DOM', () => {
     expect(getComputedStyle(content).getPropertyValue('--bg').trim()).toBe('#111');
     expect(document.querySelector('#nai-theme-fallback')).toBeNull();
   });
+  it('keeps the dark fallback for a light-only authored palette', () => {
+    mount('<html><head><style>[data-he-content][data-theme="light"]{--surface:#fff}</style></head><body><div data-he-content></div></body></html>');
+    const content = document.querySelector<HTMLElement>('[data-he-content]')!;
+
+    document.querySelector<HTMLButtonElement>('#nai-runtime-toggle')!.click();
+
+    expect(content.dataset.theme).toBe('dark');
+    expect(document.querySelector('#nai-theme-fallback')?.textContent).toContain('filter:invert(1)');
+  });
+  it('skips the fallback when both authored theme palettes are present', () => {
+    mount('<html><head><style>[data-he-content][data-theme="light"]{--surface:#fff}[data-he-content][data-theme="dark"]{--surface:#111}</style></head><body><div data-he-content></div></body></html>');
+
+    expect(document.querySelector('#nai-theme-fallback')).toBeNull();
+  });
 
   it('applies a :where theme palette in the finalized artifact without a fallback', () => {
     const sanitized = sanitizeHtmlExport({

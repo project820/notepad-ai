@@ -116,6 +116,16 @@ describe('sanitizeHtmlExport', () => {
     if (!result.ok) return;
     expect(result.bodyHtml).toContain('<form><p>Kept</p></form>');
   });
+  it('preserves safe input bounds and strips unsafe bound values', () => {
+    const result = sanitize('<input type="range" min="1" max="5" step="0.5"><input min="javascript:1" max="&quot;5" step="Infinity">');
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bodyHtml).toContain('<input type="range" min="1" max="5" step="0.5">');
+    expect(result.bodyHtml).toContain('<input>');
+    expect(result.bodyHtml).not.toContain('javascript:1');
+    expect(result.bodyHtml).not.toContain('Infinity');
+  });
   it('unwraps template content stored outside its childNodes array', () => {
     const result = sanitize('<div><template><p>Template text</p></template></div>');
     expect(result.ok).toBe(true);

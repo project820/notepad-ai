@@ -359,6 +359,11 @@ function isReservedValue(value: string): boolean {
 function isAriaAttribute(name: string): boolean {
   return /^aria-[a-z][a-z0-9-]*$/.test(name);
 }
+const SAFE_INPUT_BOUND = /^(?:[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?|\d{4}(?:-\d{2}(?:-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?)?)?|\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)$/i;
+
+function isSafeInputBound(value: string): boolean {
+  return SAFE_INPUT_BOUND.test(value) && (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(value) || Number.isFinite(Number(value)));
+}
 
 function isAllowedAttribute(tag: string, name: string): boolean {
   if (GLOBAL_ATTRIBUTES.has(name) || isAriaAttribute(name) || name === 'data-section-id' || name.startsWith('data-')) return true;
@@ -370,6 +375,7 @@ function isAllowedAttribute(tag: string, name: string): boolean {
   if (name === 'src') return ['img', 'source'].includes(tag);
   if (name === 'type') return ['input', 'button', 'script'].includes(tag);
   if (name === 'value' || name === 'name' || name === 'placeholder' || name === 'checked' || name === 'disabled') return ['input', 'button'].includes(tag);
+  if (['min', 'max', 'step'].includes(name)) return tag === 'input';
   return false;
 }
 
@@ -434,7 +440,11 @@ function sanitizeAttributes(node: Node, tag: string, context: Context, survives:
       continue;
     }
     if (!survives) continue;
-    if (!isAllowedAttribute(tag, name) || ((name === 'width' || name === 'height') && !DIMENSION.test(attribute.value))) {
+    if (
+      !isAllowedAttribute(tag, name)
+      || ((name === 'width' || name === 'height') && !DIMENSION.test(attribute.value))
+      || (['min', 'max', 'step'].includes(name) && !isSafeInputBound(attribute.value))
+    ) {
       context.stripped.push({ code: HTML_VIOLATION_CODES.attribute, detail: `attribute ${name} is not allowed on ${tag}` });
       continue;
     }
