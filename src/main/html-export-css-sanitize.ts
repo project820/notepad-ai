@@ -309,7 +309,7 @@ function scopeSelector(selector: any): string {
   rewriteGlobalRootAtoms(rewritten);
   const text = generated(rewritten);
   if (text.startsWith(CONTENT_ROOT_SELECTOR)) return text;
-  if (text.startsWith('[data-theme')) return `${CONTENT_ROOT_SELECTOR}${text}`;
+  if (text.startsWith('[data-theme=') || text.startsWith('[data-theme]')) return `${CONTENT_ROOT_SELECTOR}${text}`;
   return `${CONTENT_ROOT_SELECTOR} ${text}`;
 }
 

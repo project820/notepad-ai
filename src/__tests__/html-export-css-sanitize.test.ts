@@ -424,3 +424,9 @@ describe('global selector rewrite', () => {
     expect(result.css).toContain('[data-he-content][data-theme="dark"]{--bg:#111}');
     expect(result.css).toContain('[data-he-content][data-theme="light"]{--bg:#fff}');
   });
+  it('does not treat data-theme-prefixed attributes as theme atoms', () => {
+    const result = sanitizeStylesheet('[data-theme-variant="dark"]{--bg:#111}');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.css).toContain('[data-he-content] [data-theme-variant="dark"]{--bg:#111}');
+  });

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { injectHtmlExportRuntime } from '../main/html-export-runtime';
+import { htmlExportRuntimeSha256, injectHtmlExportRuntime } from '../main/html-export-runtime';
 
 function mount(html: string, mode: 'scroll' | 'slide' = 'scroll'): void {
   document.documentElement.innerHTML = injectHtmlExportRuntime(html, mode);
@@ -73,6 +73,18 @@ describe('HTML export runtime DOM', () => {
     textarea.focus();
     textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
     expect(indicator.textContent).toBe('2/3');
+  });
+
+  it('patches only the manifest runtime SHA, leaving authored CSS decoys untouched', () => {
+    const decoy = '"runtimeSha256":"AAAA"';
+    const output = injectHtmlExportRuntime(
+      `<html><head><style>[data-he-content]{--x:'${decoy}'}</style><script id="he-manifest" type="application/json">{"runtimeSha256":"stale"}</script></head><body></body></html>`,
+    );
+
+    expect(output).toContain(`--x:'${decoy}'`);
+    const manifest = output.match(/<script id="he-manifest"[^>]*>([\s\S]*?)<\/script>/);
+    expect(manifest).not.toBeNull();
+    expect(JSON.parse(manifest![1]).runtimeSha256).toBe(htmlExportRuntimeSha256());
   });
 
   it('is idempotent across double finalization', () => {

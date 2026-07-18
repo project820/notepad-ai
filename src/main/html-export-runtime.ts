@@ -24,5 +24,12 @@ export function injectHtmlExportRuntime(html: string, mode: HtmlExportRuntimeMod
   output = /<script\s+id=["']nai-runtime["'][^>]*>[\s\S]*?<\/script\s*>/i.test(output)
     ? output.replace(/<script\s+id=["']nai-runtime["'][^>]*>[\s\S]*?<\/script\s*>/i, script)
     : /<\/body\s*>/i.test(output) ? output.replace(/<\/body\s*>/i, `${script}</body>`) : `${output}${script}`;
-  return output.replace(/("runtimeSha256"\s*:\s*")[^"]*(")/, `$1${htmlExportRuntimeSha256(mode)}$2`);
+  const manifestScript = /(<script\b(?=[^>]*\bid=["']he-manifest["'])[^>]*>)([\s\S]*?)(<\/script\s*>)/i;
+  return output.replace(manifestScript, (_match, open, manifest, close) => {
+    const patchedManifest = manifest.replace(
+      /("runtimeSha256"\s*:\s*")[^"]*(")/,
+      `$1${htmlExportRuntimeSha256(mode)}$2`,
+    );
+    return `${open}${patchedManifest}${close}`;
+  });
 }
