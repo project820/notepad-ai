@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { bundleSanitizedHtml } from '../main/html-export-shell';
 import { htmlExportRuntimeSha256, injectHtmlExportRuntime } from '../main/html-export-runtime';
+import { sanitizeHtmlExport } from '../main/html-export-sanitize';
 
 function mount(html: string, mode: 'scroll' | 'slide' = 'scroll'): void {
   document.documentElement.innerHTML = injectHtmlExportRuntime(html, mode);
@@ -29,8 +31,8 @@ describe('HTML export runtime DOM', () => {
     expect(localStorage.getItem('nai-theme')).toBe('light');
   });
 
-  it('adds the fallback theme stylesheet when authored theme variables are absent', () => {
-    mount('<html><head><style>body{color:black}</style></head><body></body></html>');
+  it('adds the fallback theme stylesheet when authored theme variables are absent inside a layer', () => {
+    mount('<html><head><style>@layer he-authored{[data-he-content]{color:black}}</style></head><body><div data-he-content></div></body></html>');
     expect(document.querySelector('#nai-theme-fallback')?.textContent).toContain('[data-theme="dark"]');
   });
   it('applies authored theme variables on the content root and skips fallback only when they match', () => {
@@ -43,7 +45,25 @@ describe('HTML export runtime DOM', () => {
     expect(document.querySelector('#nai-theme-fallback')).toBeNull();
   });
 
+  it('skips the fallback for a sanitized and finalized authored theme palette in a layer', () => {
+    const sanitized = sanitizeHtmlExport({
+      html: '<html><head><style>[data-theme="dark"]{--surface:#111;background:var(--surface)}</style></head><body><main>content</main></body></html>',
+      isAllowedAssetId: () => true,
+    });
+    expect(sanitized.ok).toBe(true);
+    if (!sanitized.ok) return;
+    expect(sanitized.contentCss).toContain('@layer he-authored{[data-he-content][data-theme="dark"]{--surface:#111');
 
+    const finalized = bundleSanitizedHtml(sanitized).html;
+    mount(finalized);
+
+    expect(document.querySelector('#nai-theme-fallback')).toBeNull();
+  });
+
+  it('skips the fallback for authored theme variables inside media rules', () => {
+    mount('<html><head><style>@media screen{[data-he-content][data-theme="dark"]{--surface:#111}}</style></head><body><div data-he-content></div></body></html>');
+    expect(document.querySelector('#nai-theme-fallback')).toBeNull();
+  });
   it('pages slide exports by keyboard and controls while ignoring text input focus', () => {
     mount('<html><head></head><body><section class="slide">one</section><section class="slide">two<input></section><section class="slide">three<textarea></textarea></section></body></html>', 'slide');
 
