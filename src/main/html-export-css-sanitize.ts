@@ -7,13 +7,13 @@ export const CSS_MAX_DECLARATIONS_PER_RULE = 60;
 export const CSS_MAX_SELECTORS_PER_RULE = 20;
 export const CSS_MAX_COMPOUND_DEPTH = 8;
 export const CSS_MAX_NESTING_DEPTH = 4;
-export const CSS_MAX_KEYFRAMES = 40;
-export const CSS_MAX_FRAMES_PER_KEYFRAMES = 60;
-export const CSS_MAX_ANIMATIONS_PER_ELEMENT = 8;
-export const CSS_MIN_ANIMATION_DURATION_MS = 50;
-export const CSS_MIN_Z_INDEX = 0;
-export const CSS_MAX_Z_INDEX = 9_999;
-export const CSS_MAX_FONT_SIZE_PX = 400;
+export const CSS_MAX_KEYFRAMES = 200;
+export const CSS_MAX_FRAMES_PER_KEYFRAMES = 200;
+export const CSS_MAX_ANIMATIONS_PER_ELEMENT = 32;
+export const CSS_MIN_ANIMATION_DURATION_MS = 0;
+export const CSS_MIN_Z_INDEX = -2_147_483_648;
+export const CSS_MAX_Z_INDEX = 2_147_483_647;
+export const CSS_MAX_FONT_SIZE_PX = 10_000;
 export const CSS_MAX_VALUE_TOKEN_LENGTH = 512;
 export const CSS_MAX_DECLARATIONS = 20_000;
 
@@ -49,13 +49,13 @@ const CSS_ALLOWED_PROPERTIES = [
 ] as const;
 
 const CSS_ALLOWED_FUNCTIONS = [
-  'rgb', 'rgba', 'hsl', 'hsla', 'calc', 'min', 'max', 'clamp', 'linear-gradient',
-  'radial-gradient', 'conic-gradient', 'repeating-linear-gradient', 'repeating-radial-gradient',
-  'repeating-conic-gradient', 'translate', 'translateX', 'translateY', 'translateZ', 'translate3d',
-  'scale', 'scaleX', 'scaleY', 'scaleZ', 'scale3d', 'rotate', 'rotateX', 'rotateY', 'rotateZ',
-  'rotate3d', 'skew', 'skewX', 'skewY', 'matrix', 'matrix3d', 'perspective', 'cubic-bezier',
-  'steps', 'blur', 'brightness', 'contrast', 'drop-shadow', 'grayscale', 'hue-rotate', 'invert',
-  'opacity', 'saturate', 'sepia',
+  'rgb', 'rgba', 'hsl', 'hsla', 'hwb', 'lab', 'lch', 'oklab', 'oklch', 'color', 'color-mix',
+  'calc', 'min', 'max', 'clamp', 'var', 'linear-gradient', 'radial-gradient', 'conic-gradient',
+  'repeating-linear-gradient', 'repeating-radial-gradient', 'repeating-conic-gradient',
+  'translate', 'translateX', 'translateY', 'translateZ', 'translate3d', 'scale', 'scaleX', 'scaleY',
+  'scaleZ', 'scale3d', 'rotate', 'rotateX', 'rotateY', 'rotateZ', 'rotate3d', 'skew', 'skewX',
+  'skewY', 'matrix', 'matrix3d', 'perspective', 'cubic-bezier', 'steps', 'blur', 'brightness',
+  'contrast', 'drop-shadow', 'grayscale', 'hue-rotate', 'invert', 'opacity', 'saturate', 'sepia',
 ] as const;
 
 const CSS_ALLOWED_AT_RULES = ['media', 'supports', 'keyframes'] as const;
@@ -134,10 +134,10 @@ const TYPE_SELECTORS = new Set([
   'p', 'span', 'strong', 'em', 'b', 'i', 'u', 's', 'small', 'mark', 'sub', 'sup', 'br', 'hr',
   'ul', 'ol', 'li', 'dl', 'dt', 'dd', 'blockquote', 'figure', 'figcaption', 'img', 'picture',
   'source', 'svg', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'caption', 'code',
-  'pre', 'kbd', 'samp', 'abbr', 'time', 'a',
+  'pre', 'kbd', 'samp', 'abbr', 'time', 'a', 'form', 'input', 'button',
 ]);
-const PSEUDO_CLASSES = new Set(['hover', 'focus', 'focus-visible', 'first-child', 'last-child', 'nth-child', 'not', 'is', 'where']);
-const PSEUDO_ELEMENTS = new Set(['before', 'after', 'marker', 'first-line', 'first-letter', 'selection']);
+const PSEUDO_CLASSES = new Set(['active', 'any-link', 'checked', 'default', 'defined', 'disabled', 'empty', 'enabled', 'first-child', 'first-of-type', 'focus', 'focus-visible', 'focus-within', 'has', 'hover', 'in-range', 'indeterminate', 'invalid', 'is', 'last-child', 'last-of-type', 'not', 'nth-child', 'nth-last-child', 'nth-last-of-type', 'nth-of-type', 'only-child', 'only-of-type', 'optional', 'out-of-range', 'placeholder-shown', 'read-only', 'read-write', 'required', 'root', 'target', 'user-invalid', 'valid', 'visited', 'where']);
+const PSEUDO_ELEMENTS = new Set(['after', 'backdrop', 'before', 'first-letter', 'first-line', 'marker', 'placeholder', 'selection']);
 const SAFE_ATTRIBUTE_SELECTOR_NAMES = new Set([
   'class', 'id', 'title', 'lang', 'dir', 'role', 'data-section-id', 'colspan', 'rowspan', 'scope',
   'alt', 'width', 'height', 'datetime',
@@ -146,7 +146,7 @@ const MEDIA_FEATURES = new Set(['width', 'min-width', 'max-width', 'height', 'or
 const FONT_SIZE_KEYWORDS = new Set(['xx-small', 'x-small', 'small', 'medium', 'large', 'x-large', 'xx-large', 'xxx-large']);
 const RESERVED_NAME = /^(?:data-he-|he-s|he-(?:doc|slide|scaler|runtime|manifest|shell|csp)|(?:data-)?(?:shell|runtime|manifest|csp))/i;
 const NETWORK_FUNCTION = new Set(['url', 'image', 'image-set', '-webkit-image-set', 'cross-fade', 'element', 'expression']);
-const VALUE_INDIRECTION_FUNCTION = new Set(['attr', 'env', 'paint', 'var']);
+const VALUE_INDIRECTION_FUNCTION = new Set(['attr', 'env', 'paint']);
 const ANIMATION_KEYWORDS = new Set([
   'none', 'linear', 'ease', 'ease-in', 'ease-out', 'ease-in-out', 'step-start', 'step-end',
   'infinite', 'normal', 'reverse', 'alternate', 'alternate-reverse', 'forwards', 'backwards',
@@ -462,7 +462,7 @@ function validateSelectorAtom(node: any): Failure | null {
     if ((name === 'class' && hasReservedName(selectedValue)) || (name === 'id' && (hasReservedName(selectedValue) || canonicalizeIdent(selectedValue).startsWith('he-')))) {
       return fail(CSS_VIOLATION_CODES.reservedSelector, `reserved attribute selector ${name}`);
     }
-    if (!SAFE_ATTRIBUTE_SELECTOR_NAMES.has(name) && !name.startsWith('aria-')) {
+    if (!SAFE_ATTRIBUTE_SELECTOR_NAMES.has(name) && !name.startsWith('aria-') && !name.startsWith('data-')) {
       return fail(CSS_VIOLATION_CODES.disallowedSelector, `attribute selector ${name}`);
     }
   } else if (type === 'PseudoClassSelector') {
@@ -537,10 +537,10 @@ function rawFunctionFailure(raw: string): Failure | null {
   const match = /([a-z-]+)\s*\(/i.exec(raw);
   if (!match) return null;
   const name = match[1].toLowerCase();
-  if (name === 'var') return fail(CSS_VIOLATION_CODES.customProperty, 'var()');
   if (NETWORK_FUNCTION.has(name)) return fail(CSS_VIOLATION_CODES.networkFunction, `${name}()`);
   if (VALUE_INDIRECTION_FUNCTION.has(name)) return fail(CSS_VIOLATION_CODES.valueIndirection, `${name}()`);
-  return fail(CSS_VIOLATION_CODES.disallowedFunction, `${name}()`);
+  if (!FUNCTION_SET.has(name)) return fail(CSS_VIOLATION_CODES.disallowedFunction, `${name}()`);
+  return null;
 }
 
 function validateValue(value: any): Failure | null {
@@ -552,7 +552,6 @@ function validateValue(value: any): Failure | null {
     if (node?.type === 'Url') return fail(CSS_VIOLATION_CODES.networkFunction, 'url()');
     if (node?.type === 'Function') {
       const name = String(node.name).toLowerCase();
-      if (name === 'var') return fail(CSS_VIOLATION_CODES.customProperty, 'var()');
       if (NETWORK_FUNCTION.has(name)) return fail(CSS_VIOLATION_CODES.networkFunction, `${name}()`);
       if (VALUE_INDIRECTION_FUNCTION.has(name)) return fail(CSS_VIOLATION_CODES.valueIndirection, `${name}()`);
       if (!FUNCTION_SET.has(name)) return fail(CSS_VIOLATION_CODES.disallowedFunction, `${name}()`);
@@ -682,7 +681,7 @@ function validateContent(value: any): Failure | null {
 function validateNumericCaps(property: string, value: any, context: CssSanitizeContext): Failure | null {
   if (property === 'position') {
     const position = generated(value).toLowerCase();
-    if (position === 'fixed' || position === 'sticky') return fail(CSS_VIOLATION_CODES.unsafePosition, `position:${position} is not allowed`);
+    if (!['static', 'relative', 'absolute', 'fixed', 'sticky'].includes(position)) return fail(CSS_VIOLATION_CODES.unsafePosition, `position:${position} is not allowed`);
   }
   if (property === 'z-index') {
     const tokens = children(value);
@@ -716,13 +715,12 @@ function sanitizeDeclarations(block: any, context: CssSanitizeContext, counts: C
     context.seenDeclarations++;
     if (context.seenDeclarations > CSS_MAX_DECLARATIONS) { strip(context, fail(CSS_VIOLATION_CODES.tooManyDeclarations, `more than ${CSS_MAX_DECLARATIONS} declarations`)); break; }
     const property = String(declaration.property).toLowerCase();
-    let failure: Failure | null = declaration.important ? fail(CSS_VIOLATION_CODES.important, `!important on ${property}`) : null;
-    if (!failure && property.startsWith('--')) failure = fail(CSS_VIOLATION_CODES.customProperty, `custom property ${property}`);
+    let failure: Failure | null = null;
     if (!failure) failure = validateValue(declaration.value);
     if (!failure && PROPERTY_SET.has(property)) failure = validateNumericCaps(property, declaration.value, context);
     if (failure) { strip(context, failure); continue; }
     const value = generated(declaration.value);
-    if (!PROPERTY_SET.has(property) || lexer.matchProperty(property, value).error) continue;
+    if ((!PROPERTY_SET.has(property) && !property.startsWith('--')) || (!property.startsWith('--') && lexer.matchProperty(property, value).error)) continue;
     output.push(`${property}:${value}`);
     counts.declarationCount++;
   }

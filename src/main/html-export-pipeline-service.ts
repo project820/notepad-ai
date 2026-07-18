@@ -20,6 +20,7 @@ import { HtmlExportAttemptRegistry } from './html-export-attempt-registry';
 import { HtmlExportParseHost, type HtmlExportParseValue } from './html-export-parse-host';
 import { findHtmlExportDocumentMarkers } from './html-export-document-markers';
 import { HTML_SANITIZER_LIMITS, sanitizeHtmlExport } from './html-export-sanitize';
+import { injectHtmlExportRuntime, type HtmlExportRuntimeMode } from './html-export-runtime';
 
 export const HTML_EXPORT_RAW_MODEL_OUTPUT_MAX_BYTES = HTML_EXPORT_RAW_ARTIFACT_MAX_BYTES;
 export const HTML_EXPORT_PIPELINE_STAGE_MAX_BYTES = HTML_EXPORT_STAGE_ARTIFACT_MAX_BYTES;
@@ -459,6 +460,7 @@ export class HtmlExportPipelineService {
     webContentsId: number,
     attemptId: HtmlExportAttemptId,
     resolvedArtifactId: ResolvedArtifactId,
+    mode: HtmlExportRuntimeMode = 'scroll',
   ): HtmlExportPipelineResult<{ artifact: HtmlExportArtifactRef<'finalized'> }> {
     const resolved = this.registry.read(webContentsId, attemptId, resolvedArtifactId, 'resolved');
     if (!resolved.ok) return resolved;
@@ -469,8 +471,9 @@ export class HtmlExportPipelineService {
       return oversize(`Resolved payload exceeds ${HTML_EXPORT_PIPELINE_STAGE_MAX_BYTES} bytes`);
     }
 
+    const finalizedHtml = injectHtmlExportRuntime(new TextDecoder('utf-8').decode(resolved.value.bytes), mode);
     const verified = this.verifyCandidate(
-      Buffer.from(resolved.value.bytes),
+      Buffer.from(finalizedHtml, 'utf8'),
       HTML_EXPORT_PIPELINE_STAGE_MAX_BYTES,
     );
     if (!verified.ok) return verified;

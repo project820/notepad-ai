@@ -11,11 +11,8 @@
  */
 
 import type { HtmlExportSanitizedPayload } from './html-export-pipeline-service';
-import {
-  HTML_EXPORT_CSP_META,
-  HTML_EXPORT_RUNTIME_JS,
-  HTML_EXPORT_RUNTIME_JS_SHA256,
-} from '../shared/html-export-runtime';
+import { HTML_EXPORT_RUNTIME_JS_SHA256 } from '../shared/html-export-runtime';
+import { injectHtmlExportRuntime } from './html-export-runtime';
 
 /** Bump when the embedded shell manifest shape changes. */
 const HTML_EXPORT_SHELL_MANIFEST_SCHEMA_VERSION = 1;
@@ -105,7 +102,6 @@ export function bundleSanitizedHtml(
 
   const head = [
     '<meta charset="utf-8">',
-    HTML_EXPORT_CSP_META,
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     `<style>${escapeStyleText(SHELL_BASE_CSS)}</style>`,
     `<style>${escapeStyleText(payload.contentCss)}</style>`,
@@ -122,8 +118,7 @@ export function bundleSanitizedHtml(
     // matches and the export renders unstyled. See #29 review (P1).
     // Safe class/id from source <html>/<body> are transferred so rewritten
     // selectors like `[data-he-content].dark` still match (Codex P2).
-    `<body>\n${contentRootOpenTag(payload)}\n${payload.bodyHtml}\n</div>\n<script>${HTML_EXPORT_RUNTIME_JS}</script>\n</body>\n` +
+    `<body>\n${contentRootOpenTag(payload)}\n${payload.bodyHtml}\n</div>\n</body>\n` +
     '</html>\n';
-
-  return { html, manifest };
+  return { html: injectHtmlExportRuntime(html), manifest };
 }

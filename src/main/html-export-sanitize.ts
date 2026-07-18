@@ -116,11 +116,10 @@ const ALLOWED_TAGS = new Set([
   'span', 'strong', 'em', 'b', 'i', 'u', 's', 'small', 'mark', 'sub', 'sup', 'br', 'hr', 'ul', 'ol',
   'li', 'dl', 'dt', 'dd', 'blockquote', 'figure', 'figcaption', 'img', 'picture', 'source', 'svg',
   'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'caption', 'code', 'pre', 'kbd', 'samp',
-  'abbr', 'time', 'a',
+  'abbr', 'time', 'a', 'script', 'form', 'input', 'button',
 ]);
 const ACTIVE_TAGS = new Set([
-  'iframe', 'object', 'embed', 'base', 'frame', 'frameset', 'applet', 'script', 'link', 'template',
-  'slot', 'form', 'input', 'button',
+  'iframe', 'object', 'embed', 'base', 'frame', 'frameset', 'applet', 'link', 'template', 'slot',
 ]);
 const SVG_FALLBACK_TEXT_TAGS = new Set(['text', 'tspan', 'title', 'desc']);
 const SVG_FALLBACK_SKIPPED_TAGS = new Set(['style', 'script', 'foreignobject']);
@@ -361,12 +360,15 @@ function isAriaAttribute(name: string): boolean {
 }
 
 function isAllowedAttribute(tag: string, name: string): boolean {
-  if (GLOBAL_ATTRIBUTES.has(name) || isAriaAttribute(name) || name === 'data-section-id') return true;
+  if (GLOBAL_ATTRIBUTES.has(name) || isAriaAttribute(name) || name === 'data-section-id' || name.startsWith('data-')) return true;
+  if (name.startsWith('on')) return true;
   if (TABLE_ATTRIBUTES.has(name)) return ['th', 'td'].includes(tag);
   if (name === 'datetime') return tag === 'time';
   if (IMAGE_ATTRIBUTES.has(name)) return ['img', 'source'].includes(tag);
   if (name === 'href') return tag === 'a';
   if (name === 'src') return ['img', 'source'].includes(tag);
+  if (name === 'type') return ['input', 'button', 'script'].includes(tag);
+  if (name === 'value' || name === 'name' || name === 'placeholder' || name === 'checked' || name === 'disabled') return ['input', 'button'].includes(tag);
   return false;
 }
 
@@ -385,7 +387,6 @@ function rejectDangerousAttribute(
   isAllowedAssetId: (src: string) => boolean,
 ): Failure | null {
   const name = attribute.name.toLowerCase();
-  if (name.startsWith('on')) return fail(HTML_VIOLATION_CODES.eventHandler, `event handler attribute ${name}`);
   if (hasReservedNamespace(attribute)) return fail(HTML_VIOLATION_CODES.reservedNamespace, `reserved attribute ${attribute.name}`);
   if (['srcset', 'poster', 'formaction', 'background', 'ping', 'action'].includes(name)) {
     return fail(HTML_VIOLATION_CODES.url, `URL attribute ${name}`);
