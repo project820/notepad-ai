@@ -59,4 +59,4 @@ const HTML_EXPORT_CSP =
     "frame-ancestors 'none'",
   ].join('; ') + ';';
 
-export const HTML_EXPORT_CSP_META = `<meta http-equiv="Content-Security-Policy" content="${HTML_EXPORT_CSP}">`;
+const HTML_EXPORT_CSP_META = `<meta http-equiv="Content-Security-Policy" content="${HTML_EXPORT_CSP}">`;

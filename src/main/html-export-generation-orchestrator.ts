@@ -86,6 +86,7 @@ export type OrchestratorPipeline = {
     webContentsId: number,
     attemptId: HtmlExportAttemptId,
     resolvedArtifactId: ResolvedArtifactId,
+    mode?: 'slide' | 'scroll',
   ): HtmlExportPipelineResult<{ artifact: HtmlExportArtifactRef<'finalized'> }>;
   invalidateAttempt(webContentsId: number, attemptId: HtmlExportAttemptId): unknown;
 };
@@ -169,7 +170,7 @@ export class HtmlExportGenerationOrchestrator {
   async run(
     webContentsId: number,
     prompt: string,
-    opts?: { signal?: AbortSignal },
+    opts?: { signal?: AbortSignal; mode?: 'slide' | 'scroll' },
   ): Promise<GenerationAttemptResult> {
     const signal = opts?.signal;
     if (signal?.aborted) {
@@ -306,7 +307,9 @@ export class HtmlExportGenerationOrchestrator {
 
       // (i) finalize
       stage = 'finalize';
-      const finalized = this.pipeline.finalize(webContentsId, attemptId, resolvedArtifactId);
+      const finalized = opts?.mode === undefined
+        ? this.pipeline.finalize(webContentsId, attemptId, resolvedArtifactId)
+        : this.pipeline.finalize(webContentsId, attemptId, resolvedArtifactId, opts.mode);
       if (!finalized.ok) {
         return failed('finalize', finalized.error.kind);
       }

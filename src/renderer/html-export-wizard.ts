@@ -82,6 +82,7 @@ export type HtmlExportDeps = {
     instructions?: string;
     viewport?: { width: number; height: number };
     reasoningEffort?: 'low';
+    mode?: 'slide' | 'scroll';
   }) => Promise<GenerationAttemptResult>;
   /** Cancel/abandon the in-flight or finalized main-owned generation for this window. */
   cancelHtmlGeneration?: () => void;
@@ -503,6 +504,7 @@ export function mountHtmlExportWizard(host: HTMLElement, deps: HtmlExportDeps): 
         prompt: pendingPrompt,
         model: { provider, id: model.id },
         viewport,
+        mode: state.layout === 'slides' ? 'slide' : 'scroll',
         ...(reasoningEffort ? { reasoningEffort } : {}),
       })
       .then((result) => {

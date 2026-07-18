@@ -721,7 +721,7 @@ function sanitizeDeclarations(block: any, context: CssSanitizeContext, counts: C
     if (failure) { strip(context, failure); continue; }
     const value = generated(declaration.value);
     if ((!PROPERTY_SET.has(property) && !property.startsWith('--')) || (!property.startsWith('--') && lexer.matchProperty(property, value).error)) continue;
-    output.push(`${property}:${value}`);
+    output.push(`${property}:${value}${declaration.important ? '!important' : ''}`);
     counts.declarationCount++;
   }
   return output.join(';');

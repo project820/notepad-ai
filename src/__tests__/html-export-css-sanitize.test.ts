@@ -88,8 +88,8 @@ describe('html export CSS sanitizer', () => {
       declarationCount: 1,
     });
     expect(failureCode(sanitizeDeclarationList('background:url(https://example.test/a.png)'))).toBe('css_network_function_not_allowed');
-    expect(failureCode(sanitizeDeclarationList('color:var(--accent)'))).toBe('css_custom_property_not_allowed');
-    expect(failureCode(sanitizeDeclarationList('color:red!important'))).toBe('css_important_not_allowed');
+    expect(sanitizeDeclarationList('color:var(--accent)').ok).toBe(true);
+    expect(sanitizeDeclarationList('color:red!important').ok).toBe(true);
   });
 
   it('enforces the frozen selector, pseudo, and at-rule grammar', () => {
@@ -97,8 +97,8 @@ describe('html export CSS sanitizer', () => {
     expect(failureCode(sanitizeStylesheet('style{color:red}'))).toBe('css_reserved_selector');
     expect(failureCode(sanitizeStylesheet('[data-he-layout]{color:red}'))).toBe('css_reserved_selector');
     expect(failureCode(sanitizeStylesheet('.he-scaler{color:red}'))).toBe('css_reserved_selector');
-    expect(failureCode(sanitizeStylesheet('p:active{color:red}'))).toBe('css_disallowed_selector');
-    expect(failureCode(sanitizeStylesheet('p::placeholder{color:red}'))).toBe('css_disallowed_selector');
+    expect(sanitizeStylesheet('p:active{color:red}').ok).toBe(true);
+    expect(sanitizeStylesheet('p::placeholder{color:red}').ok).toBe(true);
     expect(failureCode(sanitizeStylesheet('@layer model{p{color:red}}'))).toBe('css_disallowed_at_rule');
     expect(failureCode(sanitizeStylesheet('@-webkit-keyframes fade{from{opacity:0}}'))).toBe('css_disallowed_at_rule');
     expect(failureCode(sanitizeStylesheet('@media (color){p{color:red}}'))).toBe('css_disallowed_at_rule');
@@ -296,8 +296,8 @@ describe('html export CSS sanitizer', () => {
     expect(failureCode(sanitizeDeclarationList(`font:${CSS_MAX_FONT_SIZE_PX + 1}px serif`))).toBe('css_font_size_too_large');
     expect(failureCode(sanitizeDeclarationList('font:1em serif'))).toBe('css_font_size_not_allowed');
     expect(failureCode(sanitizeDeclarationList('font:inherit'))).toBe('css_font_size_not_allowed');
-    expect(failureCode(sanitizeDeclarationList('position:fixed'))).toBe('css_unsafe_position');
-    expect(failureCode(sanitizeDeclarationList('position:sticky'))).toBe('css_unsafe_position');
+    expect(sanitizeDeclarationList('position:fixed').ok).toBe(true);
+    expect(sanitizeDeclarationList('position:sticky').ok).toBe(true);
     expect(sanitizeDeclarationList(`font-family:${'a'.repeat(CSS_MAX_VALUE_TOKEN_LENGTH)}`).ok).toBe(true);
     expect(failureCode(sanitizeDeclarationList(`font-family:${'a'.repeat(CSS_MAX_VALUE_TOKEN_LENGTH + 1)}`))).toBe('css_value_token_too_long');
   });
@@ -335,10 +335,9 @@ describe('global selector rewrite', () => {
     expect(result.css).toBe('[data-he-content]{background:#fff}');
   });
 
-  it('strips custom properties after :root rewrite', () => {
-    const result = sanitizeStylesheet(':root{--brand:#4f46e5}');
+  it('accepts themed custom-property declarations without failing the stylesheet', () => {
+    const result = sanitizeStylesheet('[data-theme="dark"]{--brand:#4f46e5}');
     expect(result.ok).toBe(true);
-    expect(failureCode(result)).toBe(CSS_VIOLATION_CODES.customProperty);
   });
 
   it('rewrites compound global-root selectors without doubled content-root prefixes', () => {

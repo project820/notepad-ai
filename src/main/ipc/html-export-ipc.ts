@@ -76,6 +76,8 @@ type HtmlExportIpcDeps = {
       model: { provider: AiProviderId; id: string };
       instructions?: string;
       viewport?: { width: number; height: number };
+      reasoningEffort?: 'low';
+      mode?: 'slide' | 'scroll';
     },
   ) => Promise<GenerationAttemptResult>;
   cancelGenerateHtml?: (webContentsId: number) => void;
@@ -250,10 +252,11 @@ function isGenerateRequest(
   instructions?: string;
   viewport?: { width: number; height: number };
   reasoningEffort?: 'low';
+  mode?: 'slide' | 'scroll';
 } {
   if (!isExactPlainObject(input) || Object.getOwnPropertySymbols(input).length !== 0) return false;
   const keys = Object.keys(input);
-  if (!keys.every((key) => key === 'prompt' || key === 'model' || key === 'instructions' || key === 'viewport' || key === 'reasoningEffort')) {
+  if (!keys.every((key) => key === 'prompt' || key === 'model' || key === 'instructions' || key === 'viewport' || key === 'reasoningEffort' || key === 'mode')) {
     return false;
   }
   if (!Object.hasOwn(input, 'prompt') || typeof input.prompt !== 'string') return false;
@@ -274,6 +277,7 @@ function isGenerateRequest(
       return false;
     }
   }
+  if ('mode' in input && input.mode !== undefined && input.mode !== 'slide' && input.mode !== 'scroll') return false;
   return true;
 }
 
@@ -461,6 +465,7 @@ export function registerHtmlExportIpc({
         ...(input.instructions !== undefined ? { instructions: input.instructions } : {}),
         ...(input.viewport !== undefined ? { viewport: input.viewport } : {}),
         ...(input.reasoningEffort !== undefined ? { reasoningEffort: input.reasoningEffort } : {}),
+        ...(input.mode !== undefined ? { mode: input.mode } : {}),
       });
     } catch {
       return { state: 'failed', stage: 'generate', kind: 'pipeline-reject' };

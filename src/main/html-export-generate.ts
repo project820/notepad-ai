@@ -34,6 +34,7 @@ type HtmlGenerateInput = {
   model: HtmlGenerateModel;
   instructions?: string;
   reasoningEffort?: 'low';
+  mode?: 'slide' | 'scroll';
   /** Selected export viewport for the quarantine overflow gate only. */
   viewport?: HtmlGenerateViewport;
 };
@@ -109,7 +110,7 @@ export function createHtmlExportGenerator(deps: HtmlExportGeneratorDeps): HtmlEx
       });
 
       try {
-        return await orchestrator.run(webContentsId, input.prompt, { signal: controller.signal });
+        return await orchestrator.run(webContentsId, input.prompt, { signal: controller.signal, mode: input.mode });
       } finally {
         if (controllers.get(webContentsId) === controller) controllers.delete(webContentsId);
       }
