@@ -424,6 +424,20 @@ describe('global selector rewrite', () => {
     expect(result.css).toContain('[data-he-content][data-theme="dark"]{--bg:#111}');
     expect(result.css).toContain('[data-he-content][data-theme="light"]{--bg:#fff}');
   });
+  it('rewrites theme-root sibling selectors as descendants of the content root', () => {
+    const result = sanitizeStylesheet('[data-theme="dark"]~button{color:red}[data-theme="dark"]+button{color:blue}');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.css).toBe(
+      '[data-he-content][data-theme="dark"] button{color:red}[data-he-content][data-theme="dark"] button{color:blue}',
+    );
+  });
+  it('preserves child-combinator semantics for theme-root selectors', () => {
+    const result = sanitizeStylesheet('[data-theme="dark"]>button{color:red}');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.css).toBe('[data-he-content][data-theme="dark"]>button{color:red}');
+  });
   it('does not treat data-theme-prefixed attributes as theme atoms', () => {
     const result = sanitizeStylesheet('[data-theme-variant="dark"]{--bg:#111}');
     expect(result.ok).toBe(true);

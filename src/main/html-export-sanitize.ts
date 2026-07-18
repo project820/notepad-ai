@@ -677,7 +677,7 @@ export function sanitizeHtmlExport(options: HtmlExportSanitizeOptions): HtmlExpo
       if (isFailure(sanitized)) return { ok: false, violations: [sanitized.violation] };
       outputNodes.push(...sanitized);
     }
-    outputNodes.push(...context.relocatedHeadScripts);
+    outputNodes.unshift(...context.relocatedHeadScripts);
     outputBody.childNodes = outputNodes as DefaultTreeAdapterTypes.ChildNode[];
     for (const child of outputBody.childNodes) child.parentNode = outputBody;
     context.stripped.push(...svgStripped);

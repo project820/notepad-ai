@@ -285,6 +285,21 @@ function rewriteGlobalRootAtoms(node: any): void {
   }
 }
 
+function isLeadingThemeAtom(node: any): boolean {
+  return node?.type === 'AttributeSelector' && String(node.name?.name ?? node.name ?? '').toLowerCase() === 'data-theme';
+}
+
+/** Approximate leading theme sibling selectors as descendants to retain containment. */
+function rewriteLeadingThemeSiblingCombinator(selector: any): void {
+  const nodes = children(selector);
+  if (!isLeadingThemeAtom(nodes[0])) return;
+  for (const node of nodes) {
+    if (node?.type !== 'Combinator') continue;
+    if (node.name === '+' || node.name === '~') node.name = ' ';
+    return;
+  }
+}
+
 function isExactGlobalRootSelector(selector: any): boolean {
   const nodes = children(selector);
   return nodes.length === 1 && isGlobalRootAtom(nodes[0]);
@@ -307,6 +322,7 @@ function scopeSelector(selector: any): string {
   if (isExactUniversalSelector(selector)) return `${CONTENT_ROOT_SELECTOR} *`;
   const rewritten = cloneCssNode(selector);
   rewriteGlobalRootAtoms(rewritten);
+  rewriteLeadingThemeSiblingCombinator(rewritten);
   const text = generated(rewritten);
   if (text.startsWith(CONTENT_ROOT_SELECTOR)) return text;
   if (text.startsWith('[data-theme=') || text.startsWith('[data-theme]')) return `${CONTENT_ROOT_SELECTOR}${text}`;

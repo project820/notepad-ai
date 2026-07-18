@@ -133,7 +133,7 @@ describe('sanitizeHtmlExport', () => {
   it.each(['script', 'form', 'input', 'button'])('preserves interactive tag <%s>', (tag) => {
     expect(dispositionCodeWithParse(documentWithElement(tag))).toBe('');
   });
-  it('relocates inline head scripts after model body content in source order', () => {
+  it('relocates inline head scripts before model body content in source order', () => {
     const result = sanitize(
       '<!doctype html><html><head>' +
       '<script>window.order = ["head-1"];</script>' +
@@ -148,10 +148,19 @@ describe('sanitizeHtmlExport', () => {
     const secondHeadScript = result.bodyHtml.indexOf('window.order.push("head-2")');
     expect(result.bodyHtml).toContain('<script>window.order = ["head-1"];</script>');
     expect(result.bodyHtml).toContain('<script>window.order.push("head-2");</script>');
-    expect(bodyContent).toBeGreaterThanOrEqual(0);
-    expect(bodyScript).toBeGreaterThan(bodyContent);
-    expect(firstHeadScript).toBeGreaterThan(bodyScript);
+    expect(firstHeadScript).toBe(8);
     expect(secondHeadScript).toBeGreaterThan(firstHeadScript);
+    expect(bodyContent).toBeGreaterThan(secondHeadScript);
+    expect(bodyScript).toBeGreaterThan(bodyContent);
+  });
+  it('relocates head definitions before body calls', () => {
+    const result = sanitize(
+      '<!doctype html><html><head><script>window.init = () => "ready";</script></head>' +
+      '<body><script>init()</script></body></html>',
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bodyHtml).toBe('<script>window.init = () => "ready";</script><script>init()</script>');
   });
   it('strips head scripts with src attributes', () => {
     const result = sanitize(
