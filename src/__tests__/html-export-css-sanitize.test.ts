@@ -425,12 +425,12 @@ describe('global selector rewrite', () => {
   });
   it('compounds all-theme :where and :is selector arguments with the content root', () => {
     const result = sanitizeStylesheet(
-      ':where([data-theme="dark"],[data-theme="light"]){--bg:#111}:is([data-theme]){--fg:#eee}:where(:root[data-theme]){--root:#fff}:is(html[data-theme]){--html:#ddd}',
+      ':where([data-theme="dark"],[data-theme="light"]){--bg:#111}:is([data-theme]){--fg:#eee}:where(:root[data-theme]){--root:#fff}:is(html[data-theme]){--html:#ddd}:where(body[data-theme="dark"]){--body-where:#222}:is(body[data-theme="light"]){--body-is:#ccc}',
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.css).toBe(
-      '[data-he-content]:where([data-theme="dark"],[data-theme="light"]){--bg:#111}[data-he-content]:is([data-theme]){--fg:#eee}[data-he-content]:where([data-he-content][data-theme]){--root:#fff}[data-he-content]:is([data-he-content][data-theme]){--html:#ddd}',
+      '[data-he-content]:where([data-theme="dark"],[data-theme="light"]){--bg:#111}[data-he-content]:is([data-theme]){--fg:#eee}[data-he-content]:where([data-he-content][data-theme]){--root:#fff}[data-he-content]:is([data-he-content][data-theme]){--html:#ddd}[data-he-content]:where([data-he-content][data-theme="dark"]){--body-where:#222}[data-he-content]:is([data-he-content][data-theme="light"]){--body-is:#ccc}',
     );
   });
   it('keeps mixed :where selector arguments scoped as descendants', () => {

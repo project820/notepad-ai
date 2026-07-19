@@ -126,6 +126,15 @@ describe('sanitizeHtmlExport', () => {
     expect(result.bodyHtml).not.toContain('javascript:1');
     expect(result.bodyHtml).not.toContain('Infinity');
   });
+  it('preserves case-insensitive arbitrary input steps but rejects hostile step values', () => {
+    const result = sanitize('<input type="range" step="ANY"><input type="range" step="anywhere"><input type="range" step="Infinity">');
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bodyHtml).toContain('<input type="range" step="ANY">');
+    expect(result.bodyHtml).not.toContain('step="anywhere"');
+    expect(result.bodyHtml).not.toContain('step="Infinity"');
+  });
   it('unwraps template content stored outside its childNodes array', () => {
     const result = sanitize('<div><template><p>Template text</p></template></div>');
     expect(result.ok).toBe(true);

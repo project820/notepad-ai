@@ -100,6 +100,28 @@ describe('HTML export runtime DOM', () => {
     expect(content.matches('[data-he-content]:where([data-theme="dark"])')).toBe(true);
     expect(document.querySelector('#nai-theme-fallback')).toBeNull();
   });
+  it('applies functional body theme palettes in finalized artifacts without a fallback', () => {
+    const sanitized = sanitizeHtmlExport({
+      html: '<html><head><style>:where(body[data-theme="dark"]){--body-where:#111}:is(body[data-theme="dark"]){--body-is:#222}</style></head><body><main>content</main></body></html>',
+      isAllowedAssetId: () => true,
+    });
+    expect(sanitized.ok).toBe(true);
+    if (!sanitized.ok) return;
+    expect(sanitized.contentCss).toContain(
+      '[data-he-content]:where([data-he-content][data-theme="dark"]){--body-where:#111}',
+    );
+    expect(sanitized.contentCss).toContain(
+      '[data-he-content]:is([data-he-content][data-theme="dark"]){--body-is:#222}',
+    );
+
+    mount(bundleSanitizedHtml(sanitized).html);
+    const content = document.querySelector<HTMLElement>('[data-he-content]')!;
+    document.querySelector<HTMLButtonElement>('#nai-runtime-toggle')!.click();
+
+    expect(content.matches('[data-he-content]:where([data-he-content][data-theme="dark"])')).toBe(true);
+    expect(content.matches('[data-he-content]:is([data-he-content][data-theme="dark"])')).toBe(true);
+    expect(document.querySelector('#nai-theme-fallback')).toBeNull();
+  });
   it('preserves case-sensitive custom properties and resolves their var() references in finalized artifacts', () => {
     const sanitized = sanitizeHtmlExport({
       html: '<html><head><style>:where([data-theme="dark"]){--AccentColor:rgb(1, 2, 3)}:where([data-theme="dark"]){--Resolved:var(--AccentColor)}</style></head><body><main>content</main></body></html>',

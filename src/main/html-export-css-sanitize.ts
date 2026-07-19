@@ -294,8 +294,7 @@ function isThemeRootSelector(selector: any): boolean {
   if (nodes.length === 1) return isThemeAttributeAtom(nodes[0]);
   return nodes.length === 2
     && isGlobalRootAtom(nodes[0])
-    && isThemeAttributeAtom(nodes[1])
-    && (nodes[0].type !== 'TypeSelector' || String(nodes[0].name).toLowerCase() === 'html');
+    && isThemeAttributeAtom(nodes[1]);
 }
 
 function isLeadingThemeAtom(node: any): boolean {

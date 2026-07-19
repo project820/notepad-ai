@@ -443,7 +443,9 @@ function sanitizeAttributes(node: Node, tag: string, context: Context, survives:
     if (
       !isAllowedAttribute(tag, name)
       || ((name === 'width' || name === 'height') && !DIMENSION.test(attribute.value))
-      || (['min', 'max', 'step'].includes(name) && !isSafeInputBound(attribute.value))
+      || (['min', 'max', 'step'].includes(name)
+        && !(name === 'step' && /^any$/i.test(attribute.value))
+        && !isSafeInputBound(attribute.value))
     ) {
       context.stripped.push({ code: HTML_VIOLATION_CODES.attribute, detail: `attribute ${name} is not allowed on ${tag}` });
       continue;
