@@ -470,10 +470,6 @@ function sanitizeAttributes(node: Node, tag: string, context: Context, survives:
       continue;
     }
     if (BOOLEAN_FORM_ATTRIBUTES.has(name)) {
-      if (attribute.value && attribute.value.toLowerCase() !== name) {
-        context.stripped.push({ code: HTML_VIOLATION_CODES.attribute, detail: `boolean attribute ${name} must be empty or its own name` });
-        continue;
-      }
       output.push({ name, value: '' });
       continue;
     }

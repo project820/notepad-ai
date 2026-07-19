@@ -278,9 +278,9 @@ describe('HTML export runtime DOM', () => {
     expect(slides[0].style.display).toBe('');
     expect(slides[1].style.getPropertyPriority('display')).toBe('important');
   });
-  it('preserves required inputs that match :required in finalized artifacts', () => {
+  it('preserves normalized boolean form state in finalized artifacts', () => {
     const sanitized = sanitizeHtmlExport({
-      html: '<html><head></head><body><input required></body></html>',
+      html: '<html><head></head><body><input required="true" checked="true"><select><option>Busan</option><option selected="true">Seoul</option></select></body></html>',
       isAllowedAssetId: () => true,
     });
     expect(sanitized.ok).toBe(true);
@@ -288,8 +288,14 @@ describe('HTML export runtime DOM', () => {
 
     mount(bundleSanitizedHtml(sanitized).html);
     const input = document.querySelector<HTMLInputElement>('input')!;
+    const [unselectedOption, selectedOption] = Array.from(document.querySelectorAll<HTMLOptionElement>('option'));
     expect(input.hasAttribute('required')).toBe(true);
-    expect(input.matches(':required')).toBe(true);
+    expect(input.hasAttribute('checked')).toBe(true);
+    expect(input.required).toBe(true);
+    expect(input.checked).toBe(true);
+    expect(selectedOption.hasAttribute('selected')).toBe(true);
+    expect(unselectedOption.selected).toBe(false);
+    expect(selectedOption.selected).toBe(true);
   });
   it('pages slide exports by keyboard and controls while ignoring text input focus', () => {
     mount('<html><head></head><body><section class="slide">one</section><section class="slide">two<input></section><section class="slide">three<textarea></textarea></section></body></html>', 'slide');

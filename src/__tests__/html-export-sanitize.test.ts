@@ -126,11 +126,11 @@ describe('sanitizeHtmlExport', () => {
     expect(result.bodyHtml).not.toContain('javascript:1');
     expect(result.bodyHtml).not.toContain('Infinity');
   });
-  it('preserves inert boolean form attributes only when present without a value or with their own name', () => {
+  it('normalizes inert boolean form attributes to bare presence regardless of their authored value', () => {
     const result = sanitize(
       '<input required checked="checked" disabled="disabled" readonly="readonly" multiple="multiple">' +
       '<textarea required readonly></textarea><select required disabled multiple></select>' +
-      '<input required="false" checked="true">',
+      '<input required="true" checked="true"><option selected="true">Seoul</option>',
     );
 
     expect(result.ok).toBe(true);
@@ -138,8 +138,11 @@ describe('sanitizeHtmlExport', () => {
     expect(result.bodyHtml).toContain('<input required="" checked="" disabled="" readonly="" multiple="">');
     expect(result.bodyHtml).toContain('<textarea required="" readonly=""></textarea>');
     expect(result.bodyHtml).toContain('<select required="" disabled="" multiple=""></select>');
-    expect(result.bodyHtml).not.toContain('required="false"');
+    expect(result.bodyHtml).toContain('<input required="" checked="">');
+    expect(result.bodyHtml).toContain('<option selected="">Seoul</option>');
     expect(result.bodyHtml).not.toContain('checked="true"');
+    expect(result.bodyHtml).not.toContain('required="true"');
+    expect(result.bodyHtml).not.toContain('selected="true"');
   });
   it('preserves inert label and control metadata while stripping hostile values', () => {
     const result = sanitize(
