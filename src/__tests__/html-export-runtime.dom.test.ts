@@ -367,6 +367,16 @@ describe('HTML export runtime DOM', () => {
     expect(output.indexOf('id="nai-runtime"')).toBeGreaterThan(output.indexOf(authoredScript));
     expect(output.indexOf('id="nai-runtime"')).toBeLessThan(output.lastIndexOf('</body>'));
   });
+  it('replaces only real head CSP meta tags and preserves CSP-like script strings', () => {
+    const authoredScript = `<script>const csp='<meta http-equiv="Content-Security-Policy" content="authored">';</script>`;
+    const output = injectHtmlExportRuntime(
+      `<html><head><meta http-equiv="Content-Security-Policy" content="stale">${authoredScript}</head><body></body></html>`,
+    );
+
+    expect(output).toContain(authoredScript);
+    document.documentElement.innerHTML = output;
+    expect(document.head.querySelectorAll('meta[http-equiv="Content-Security-Policy"]')).toHaveLength(1);
+  });
   it('is idempotent across double finalization', () => {
     const once = injectHtmlExportRuntime('<html><head></head><body>content</body></html>');
     const twice = injectHtmlExportRuntime(once);

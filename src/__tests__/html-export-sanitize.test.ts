@@ -155,6 +155,21 @@ describe('sanitizeHtmlExport', () => {
     expect(result.bodyHtml).not.toContain('javascript:');
     expect(result.bodyHtml).not.toContain('https://example.test');
   });
+  it('preserves structured form names while stripping hostile values', () => {
+    const result = sanitize(
+      '<input name="items[]"><input name="user[email]"><input name="user[contact][email]">' +
+      '<input name="user[ mail]"><input name="user[\"email\"]"><input name="https://example.test">',
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bodyHtml).toContain('<input name="items[]">');
+    expect(result.bodyHtml).toContain('<input name="user[email]">');
+    expect(result.bodyHtml).toContain('<input name="user[contact][email]">');
+    expect(result.bodyHtml).not.toContain('user[ mail]');
+    expect(result.bodyHtml).not.toContain('user[&quot;email&quot;]');
+    expect(result.bodyHtml).not.toContain('https://example.test');
+  });
   it('preserves select options and removes unsupported option attributes', () => {
     const result = sanitize(
       '<select><optgroup label="Regions" disabled><option value="seoul" label="Seoul" selected>Seoul</option>' +

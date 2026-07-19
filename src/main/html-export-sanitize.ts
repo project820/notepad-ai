@@ -365,7 +365,7 @@ const SAFE_INPUT_BOUND = /^(?:[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?|\d{4}(?
 function isSafeInputBound(value: string): boolean {
   return SAFE_INPUT_BOUND.test(value) && (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(value) || Number.isFinite(Number(value)));
 }
-const SAFE_FORM_METADATA_TOKEN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
+const SAFE_FORM_METADATA_TOKEN = /^[A-Za-z0-9][A-Za-z0-9_-]*(?:\[(?:[A-Za-z0-9][A-Za-z0-9_-]*)?\]){0,2}$/;
 const UNSAFE_FORM_METADATA_TEXT = /^\s*(?:javascript|data|https?|mailto|tel):/i;
 
 function isSafeFormMetadata(name: string, value: string): boolean {

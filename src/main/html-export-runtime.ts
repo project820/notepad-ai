@@ -1,5 +1,5 @@
 import { sha256Base64 } from '../shared/sha256';
-import { findHtmlExportBodyEnd } from './html-export-document-markers';
+import { findHtmlExportBodyEnd, findHtmlExportHeadCspMetaTags } from './html-export-document-markers';
 import { htmlExportRuntimeLabels, type HtmlExportRuntimeLabels } from './html-export-runtime-labels';
 
 export type HtmlExportRuntimeMode = 'scroll' | 'slide';
@@ -25,10 +25,16 @@ export function injectHtmlExportRuntime(
   mode: HtmlExportRuntimeMode = 'scroll',
   labels: HtmlExportRuntimeLabels = htmlExportRuntimeLabels(),
 ): string {
-  let output = html.replace(/<meta\s+http-equiv=["']Content-Security-Policy["'][^>]*>\s*/gi, '');
-  output = /<\/head\s*>/i.test(output)
-    ? output.replace(/<\/head\s*>/i, `${HTML_EXPORT_INTERACTIVE_CSP_META}</head>`)
-    : `${HTML_EXPORT_INTERACTIVE_CSP_META}${output}`;
+  const { cspMetaRanges, headContentStart } = findHtmlExportHeadCspMetaTags(html);
+  let output = html;
+  for (const { start, end } of [...cspMetaRanges].reverse()) {
+    output = `${output.slice(0, start)}${output.slice(end)}`;
+  }
+  if (headContentStart !== -1) {
+    output = `${output.slice(0, headContentStart)}${HTML_EXPORT_INTERACTIVE_CSP_META}${output.slice(headContentStart)}`;
+  } else {
+    output = `${HTML_EXPORT_INTERACTIVE_CSP_META}${output}`;
+  }
   const script = `<script id="nai-runtime">${runtimeSource(mode, labels)}</script>`;
   output = /<script\s+id=["']nai-runtime["'][^>]*>[\s\S]*?<\/script\s*>/i.test(output)
     ? output.replace(/<script\s+id=["']nai-runtime["'][^>]*>[\s\S]*?<\/script\s*>/i, script)
