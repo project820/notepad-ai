@@ -134,7 +134,7 @@ const TYPE_SELECTORS = new Set([
   'p', 'span', 'strong', 'em', 'b', 'i', 'u', 's', 'small', 'mark', 'sub', 'sup', 'br', 'hr',
   'ul', 'ol', 'li', 'dl', 'dt', 'dd', 'blockquote', 'figure', 'figcaption', 'img', 'picture',
   'source', 'svg', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'caption', 'code',
-  'pre', 'kbd', 'samp', 'abbr', 'time', 'a', 'form', 'input', 'button',
+  'pre', 'kbd', 'samp', 'abbr', 'time', 'a', 'form', 'input', 'textarea', 'select', 'option', 'optgroup', 'button', 'label', 'fieldset', 'legend',
 ]);
 const PSEUDO_CLASSES = new Set(['active', 'any-link', 'checked', 'default', 'defined', 'disabled', 'empty', 'enabled', 'first-child', 'first-of-type', 'focus', 'focus-visible', 'focus-within', 'has', 'hover', 'in-range', 'indeterminate', 'invalid', 'is', 'last-child', 'last-of-type', 'not', 'nth-child', 'nth-last-child', 'nth-last-of-type', 'nth-of-type', 'only-child', 'only-of-type', 'optional', 'out-of-range', 'placeholder-shown', 'read-only', 'read-write', 'required', 'root', 'target', 'user-invalid', 'valid', 'visited', 'where']);
 const PSEUDO_ELEMENTS = new Set(['after', 'backdrop', 'before', 'first-letter', 'first-line', 'marker', 'placeholder', 'selection']);

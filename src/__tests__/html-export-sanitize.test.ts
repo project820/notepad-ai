@@ -141,6 +141,18 @@ describe('sanitizeHtmlExport', () => {
     expect(result.bodyHtml).not.toContain('required="false"');
     expect(result.bodyHtml).not.toContain('checked="true"');
   });
+  it('preserves select options and removes unsupported option attributes', () => {
+    const result = sanitize(
+      '<select><optgroup label="Regions" disabled><option value="seoul" label="Seoul" selected>Seoul</option>' +
+      '<option value="busan" disabled type="button" name="city">Busan</option></optgroup></select>',
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bodyHtml).toContain('<select><optgroup label="Regions" disabled=""><option value="seoul" label="Seoul" selected="">Seoul</option><option value="busan" disabled="">Busan</option></optgroup></select>');
+    expect(result.bodyHtml).not.toContain('type="button"');
+    expect(result.bodyHtml).not.toContain('name="city"');
+  });
   it('preserves case-insensitive arbitrary input steps but rejects hostile step values', () => {
     const result = sanitize('<input type="range" step="ANY"><input type="range" step="anywhere"><input type="range" step="Infinity">');
 

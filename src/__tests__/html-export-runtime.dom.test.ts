@@ -331,6 +331,15 @@ describe('HTML export runtime DOM', () => {
     );
   });
 
+  it('inserts the runtime after a body boundary rather than a raw script string', () => {
+    const authoredScript = `<script>const closingBody = '</body>';</script>`;
+    const output = injectHtmlExportRuntime(`<html><head></head><body>${authoredScript}<main>content</main></body></html>`);
+
+    expect(output).toContain(authoredScript);
+    expect((output.match(/id="nai-runtime"/g) ?? [])).toHaveLength(1);
+    expect(output.indexOf('id="nai-runtime"')).toBeGreaterThan(output.indexOf(authoredScript));
+    expect(output.indexOf('id="nai-runtime"')).toBeLessThan(output.lastIndexOf('</body>'));
+  });
   it('is idempotent across double finalization', () => {
     const once = injectHtmlExportRuntime('<html><head></head><body>content</body></html>');
     const twice = injectHtmlExportRuntime(once);

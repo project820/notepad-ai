@@ -1,4 +1,5 @@
 import { sha256Base64 } from '../shared/sha256';
+import { findHtmlExportBodyEnd } from './html-export-document-markers';
 import { htmlExportRuntimeLabels, type HtmlExportRuntimeLabels } from './html-export-runtime-labels';
 
 export type HtmlExportRuntimeMode = 'scroll' | 'slide';
@@ -31,7 +32,10 @@ export function injectHtmlExportRuntime(
   const script = `<script id="nai-runtime">${runtimeSource(mode, labels)}</script>`;
   output = /<script\s+id=["']nai-runtime["'][^>]*>[\s\S]*?<\/script\s*>/i.test(output)
     ? output.replace(/<script\s+id=["']nai-runtime["'][^>]*>[\s\S]*?<\/script\s*>/i, script)
-    : /<\/body\s*>/i.test(output) ? output.replace(/<\/body\s*>/i, `${script}</body>`) : `${output}${script}`;
+    : (() => {
+      const bodyEnd = findHtmlExportBodyEnd(output);
+      return bodyEnd === -1 ? `${output}${script}` : `${output.slice(0, bodyEnd)}${script}${output.slice(bodyEnd)}`;
+    })();
   const manifestScript = /(<script\b(?=[^>]*\bid=["']he-manifest["'])[^>]*>)([\s\S]*?)(<\/script\s*>)/i;
   return output.replace(manifestScript, (_match, open, manifest, close) => {
     const patchedManifest = manifest.replace(

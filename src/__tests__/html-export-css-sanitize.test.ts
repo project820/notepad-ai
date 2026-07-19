@@ -70,6 +70,12 @@ describe('html export CSS sanitizer', () => {
       declarationCount: 1,
     });
   });
+  it('accepts preserved control type selectors scoped to the content root', () => {
+    expect(sanitizeStylesheet('textarea{color:red}select{color:blue}option{font-weight:700}optgroup{color:green}')).toMatchObject({
+      ok: true,
+      css: '[data-he-content] textarea{color:red}[data-he-content] select{color:blue}[data-he-content] option{font-weight:700}[data-he-content] optgroup{color:green}',
+    });
+  });
   it('allows quoted input type attribute selectors while rejecting unrelated attributes', () => {
     expect(sanitizeStylesheet('input[type="range"]{width:100%}input[type="checkbox"]{height:1em}')).toMatchObject({
       ok: true,
