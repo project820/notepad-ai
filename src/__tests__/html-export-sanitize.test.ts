@@ -126,6 +126,21 @@ describe('sanitizeHtmlExport', () => {
     expect(result.bodyHtml).not.toContain('javascript:1');
     expect(result.bodyHtml).not.toContain('Infinity');
   });
+  it('preserves inert boolean form attributes only when present without a value or with their own name', () => {
+    const result = sanitize(
+      '<input required checked="checked" disabled="disabled" readonly="readonly" multiple="multiple">' +
+      '<textarea required readonly></textarea><select required disabled multiple></select>' +
+      '<input required="false" checked="true">',
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bodyHtml).toContain('<input required="" checked="" disabled="" readonly="" multiple="">');
+    expect(result.bodyHtml).toContain('<textarea required="" readonly=""></textarea>');
+    expect(result.bodyHtml).toContain('<select required="" disabled="" multiple=""></select>');
+    expect(result.bodyHtml).not.toContain('required="false"');
+    expect(result.bodyHtml).not.toContain('checked="true"');
+  });
   it('preserves case-insensitive arbitrary input steps but rejects hostile step values', () => {
     const result = sanitize('<input type="range" step="ANY"><input type="range" step="anywhere"><input type="range" step="Infinity">');
 

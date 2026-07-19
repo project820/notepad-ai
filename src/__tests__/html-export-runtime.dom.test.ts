@@ -214,6 +214,56 @@ describe('HTML export runtime DOM', () => {
     expect(getComputedStyle(slides[1]).display).toBe('flex');
     expect(slides[1].style.display).toBe('');
   });
+  it('shows every slide while printing, restores the active slide afterwards, and includes print-only control hiding', () => {
+    mount('<html><head></head><body><section class="slide">one</section><section class="slide">two</section></body></html>', 'slide');
+
+    const slides = Array.from(document.querySelectorAll<HTMLElement>('section.slide'));
+    const [, next] = Array.from(document.querySelectorAll<HTMLButtonElement>('.nai-slide-nav button'));
+    next.click();
+
+    window.dispatchEvent(new Event('beforeprint'));
+    expect(slides.every((slide) => slide.style.display === '')).toBe(true);
+
+    window.dispatchEvent(new Event('afterprint'));
+    expect(slides[0].style.getPropertyPriority('display')).toBe('important');
+    expect(slides[1].style.display).toBe('');
+    expect(document.querySelector('#nai-print-controls')?.textContent)
+      .toContain('@media print{#nai-runtime-toggle,#nai-slide-nav{display:none!important}}');
+  });
+  it('uses the print media change listener when print events are unavailable', () => {
+    let printListener: ((event: MediaQueryListEvent) => void) | undefined;
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: (query: string) => ({
+        matches: false,
+        addEventListener: (type: string, listener: (event: MediaQueryListEvent) => void) => {
+          if (query === 'print' && type === 'change') printListener = listener;
+        },
+      }),
+    });
+    mount('<html><head></head><body><section class="slide">one</section><section class="slide">two</section></body></html>', 'slide');
+
+    const slides = Array.from(document.querySelectorAll<HTMLElement>('section.slide'));
+    expect(printListener).toBeTypeOf('function');
+    printListener!({ matches: true } as MediaQueryListEvent);
+    expect(slides.every((slide) => slide.style.display === '')).toBe(true);
+    printListener!({ matches: false } as MediaQueryListEvent);
+    expect(slides[0].style.display).toBe('');
+    expect(slides[1].style.getPropertyPriority('display')).toBe('important');
+  });
+  it('preserves required inputs that match :required in finalized artifacts', () => {
+    const sanitized = sanitizeHtmlExport({
+      html: '<html><head></head><body><input required></body></html>',
+      isAllowedAssetId: () => true,
+    });
+    expect(sanitized.ok).toBe(true);
+    if (!sanitized.ok) return;
+
+    mount(bundleSanitizedHtml(sanitized).html);
+    const input = document.querySelector<HTMLInputElement>('input')!;
+    expect(input.hasAttribute('required')).toBe(true);
+    expect(input.matches(':required')).toBe(true);
+  });
   it('pages slide exports by keyboard and controls while ignoring text input focus', () => {
     mount('<html><head></head><body><section class="slide">one</section><section class="slide">two<input></section><section class="slide">three<textarea></textarea></section></body></html>', 'slide');
 
