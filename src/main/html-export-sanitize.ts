@@ -365,6 +365,14 @@ const SAFE_INPUT_BOUND = /^(?:[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?|\d{4}(?
 function isSafeInputBound(value: string): boolean {
   return SAFE_INPUT_BOUND.test(value) && (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(value) || Number.isFinite(Number(value)));
 }
+const SAFE_FORM_METADATA_TOKEN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
+const UNSAFE_FORM_METADATA_TEXT = /^\s*(?:javascript|data|https?|mailto|tel):/i;
+
+function isSafeFormMetadata(name: string, value: string): boolean {
+  return name === 'placeholder'
+    ? !UNSAFE_FORM_METADATA_TEXT.test(value)
+    : SAFE_FORM_METADATA_TOKEN.test(value);
+}
 
 function isAllowedAttribute(tag: string, name: string): boolean {
   if (GLOBAL_ATTRIBUTES.has(name) || isAriaAttribute(name) || name === 'data-section-id' || name.startsWith('data-')) return true;
@@ -376,7 +384,8 @@ function isAllowedAttribute(tag: string, name: string): boolean {
   if (name === 'src') return ['img', 'source'].includes(tag);
   if (name === 'type') return ['input', 'button', 'script'].includes(tag);
   if (name === 'value') return ['input', 'button', 'option'].includes(tag);
-  if (name === 'name' || name === 'placeholder') return ['input', 'button'].includes(tag);
+  if (name === 'name' || name === 'placeholder') return ['input', 'textarea', 'select', 'button'].includes(tag);
+  if (name === 'for') return tag === 'label';
   if (name === 'label') return ['option', 'optgroup'].includes(tag);
   if (name === 'required') return ['input', 'textarea', 'select', 'button'].includes(tag);
   if (name === 'disabled') return ['input', 'textarea', 'select', 'option', 'optgroup', 'button'].includes(tag);
@@ -452,6 +461,7 @@ function sanitizeAttributes(node: Node, tag: string, context: Context, survives:
     if (
       !isAllowedAttribute(tag, name)
       || ((name === 'width' || name === 'height') && !DIMENSION.test(attribute.value))
+      || (['for', 'name', 'placeholder'].includes(name) && !isSafeFormMetadata(name, attribute.value))
       || (['min', 'max', 'step'].includes(name)
         && !(name === 'step' && /^any$/i.test(attribute.value))
         && !isSafeInputBound(attribute.value))

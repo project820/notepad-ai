@@ -141,6 +141,20 @@ describe('sanitizeHtmlExport', () => {
     expect(result.bodyHtml).not.toContain('required="false"');
     expect(result.bodyHtml).not.toContain('checked="true"');
   });
+  it('preserves inert label and control metadata while stripping hostile values', () => {
+    const result = sanitize(
+      '<label for="city">City</label><textarea name="notes" placeholder="Add notes"></textarea><select name="city"></select>' +
+      '<label for="javascript:city">Unsafe</label><textarea name="https://example.test" placeholder="javascript:alert(1)"></textarea><select name="javascript:city"></select>',
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bodyHtml).toContain('<label for="city">City</label>');
+    expect(result.bodyHtml).toContain('<textarea name="notes" placeholder="Add notes"></textarea>');
+    expect(result.bodyHtml).toContain('<select name="city"></select>');
+    expect(result.bodyHtml).not.toContain('javascript:');
+    expect(result.bodyHtml).not.toContain('https://example.test');
+  });
   it('preserves select options and removes unsupported option attributes', () => {
     const result = sanitize(
       '<select><optgroup label="Regions" disabled><option value="seoul" label="Seoul" selected>Seoul</option>' +

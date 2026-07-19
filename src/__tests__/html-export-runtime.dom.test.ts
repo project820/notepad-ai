@@ -198,6 +198,33 @@ describe('HTML export runtime DOM', () => {
     mount('<html><head><style>@media screen{[data-he-content][data-theme="dark"]{--surface:#111}}</style></head><body><div data-he-content></div></body></html>');
     expect(document.querySelector('#nai-theme-fallback')).toBeNull();
   });
+  it('maintains the authored active-slide convention through navigation and printing', () => {
+    mount('<html><head><style>.slide{display:none}.slide.active{display:block}</style></head><body><section class="slide">one</section><section class="slide">two</section></body></html>', 'slide');
+
+    const slides = Array.from(document.querySelectorAll<HTMLElement>('section.slide'));
+    const [, next] = Array.from(document.querySelectorAll<HTMLButtonElement>('.nai-slide-nav button'));
+
+    expect(slides[0].classList.contains('active')).toBe(true);
+    expect(slides[1].classList.contains('active')).toBe(false);
+    expect(getComputedStyle(slides[0]).display).toBe('block');
+    expect(getComputedStyle(slides[1]).display).toBe('none');
+
+    next.click();
+    expect(slides[0].classList.contains('active')).toBe(false);
+    expect(slides[1].classList.contains('active')).toBe(true);
+    expect(getComputedStyle(slides[0]).display).toBe('none');
+    expect(getComputedStyle(slides[1]).display).toBe('block');
+
+    window.dispatchEvent(new Event('beforeprint'));
+    expect(slides.every((slide) => slide.classList.contains('active'))).toBe(true);
+    expect(slides.every((slide) => getComputedStyle(slide).display === 'block')).toBe(true);
+
+    window.dispatchEvent(new Event('afterprint'));
+    expect(slides[0].classList.contains('active')).toBe(false);
+    expect(slides[1].classList.contains('active')).toBe(true);
+    expect(getComputedStyle(slides[0]).display).toBe('none');
+    expect(getComputedStyle(slides[1]).display).toBe('block');
+  });
   it('hides inactive slides over authored important display rules and restores the active display', () => {
     mount('<html><head><style>section.slide{display:flex!important}</style></head><body><section class="slide">one</section><section class="slide">two</section></body></html>', 'slide');
 
