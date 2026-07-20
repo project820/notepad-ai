@@ -2,6 +2,16 @@
 
 이 문서는 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/) 형식을 따릅니다.
 
+## [0.9.0] - 2026-07-20
+
+### 추가
+- HTML 내보내기 결과에서 모델이 만든 JavaScript와 폼 컨트롤을 사용할 수 있습니다. 네트워크 호출은 콘텐츠 보안 정책(CSP)으로 계속 차단됩니다.
+- HTML 페이지에는 항상 테마 전환 버튼이, 슬라이드에는 키보드·이전/다음 버튼·진행 표시를 이용한 탐색과 인쇄용 전체 슬라이드 표시가 추가됩니다.
+- 테마·슬라이드 런타임 안내를 영어·한국어·중국어 간체·중국어 번체·일본어로 제공합니다.
+
+### 변경
+- HTML 내보내기 CSS에서 사용자 정의 속성, `position: fixed`·`sticky`, `!important`, 확장 선택자를 사용할 수 있습니다.
+
 ## [0.8.0] - 2026-07-17
 
 ### 추가
@@ -16,6 +26,7 @@
 - 한 번의 생성에서도 글자 크기·밀도·링크·로컬 모델 선택을 더 안정적으로 반영합니다.
 - 코드 펜스나 설명문으로 감싼 HTML 응답에서도 문서를 추출하고, 조각 응답에서는 주변 설명문을 제거합니다.
 - Grok Composer는 xAI API 키가 있을 때만 선택할 수 있으며, 설정에 xAI API 키 입력란을 추가하고 키가 없으면 설정 방법을 안내하는 현지화된 오류를 표시합니다.
+- HTML 내보내기 모델을 검증된 ChatGPT(GPT-5.6 Sol·Terra·Luna), Claude, Grok 및 자동 감지한 로컬 모델로 정리하고, GPT-5.6 모델에서는 Fast 옵션을 선택할 수 있습니다.
 
 ## [0.7.0] - 2026-06-26
 
@@ -28,5 +39,6 @@
 
 - [v0.6.1 이하 릴리스](https://github.com/project820/notepad-ai/releases)
 
-[0.8.0]: https://github.com/project820/notepad-ai/compare/dc0aa00...main
+[0.9.0]: https://github.com/project820/notepad-ai/compare/v0.8.0...main
+[0.8.0]: https://github.com/project820/notepad-ai/compare/dc0aa00...v0.8.0
 [0.7.0]: https://github.com/project820/notepad-ai/compare/v0.6.1...dc0aa00
