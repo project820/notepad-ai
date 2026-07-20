@@ -7,13 +7,13 @@ export const CSS_MAX_DECLARATIONS_PER_RULE = 60;
 export const CSS_MAX_SELECTORS_PER_RULE = 20;
 export const CSS_MAX_COMPOUND_DEPTH = 8;
 export const CSS_MAX_NESTING_DEPTH = 4;
-export const CSS_MAX_KEYFRAMES = 40;
-export const CSS_MAX_FRAMES_PER_KEYFRAMES = 60;
-export const CSS_MAX_ANIMATIONS_PER_ELEMENT = 8;
-export const CSS_MIN_ANIMATION_DURATION_MS = 50;
-export const CSS_MIN_Z_INDEX = 0;
-export const CSS_MAX_Z_INDEX = 9_999;
-export const CSS_MAX_FONT_SIZE_PX = 400;
+export const CSS_MAX_KEYFRAMES = 200;
+export const CSS_MAX_FRAMES_PER_KEYFRAMES = 200;
+export const CSS_MAX_ANIMATIONS_PER_ELEMENT = 32;
+export const CSS_MIN_ANIMATION_DURATION_MS = 0;
+export const CSS_MIN_Z_INDEX = -2_147_483_648;
+export const CSS_MAX_Z_INDEX = 2_147_483_647;
+export const CSS_MAX_FONT_SIZE_PX = 10_000;
 export const CSS_MAX_VALUE_TOKEN_LENGTH = 512;
 export const CSS_MAX_DECLARATIONS = 20_000;
 
@@ -49,13 +49,13 @@ const CSS_ALLOWED_PROPERTIES = [
 ] as const;
 
 const CSS_ALLOWED_FUNCTIONS = [
-  'rgb', 'rgba', 'hsl', 'hsla', 'calc', 'min', 'max', 'clamp', 'linear-gradient',
-  'radial-gradient', 'conic-gradient', 'repeating-linear-gradient', 'repeating-radial-gradient',
-  'repeating-conic-gradient', 'translate', 'translateX', 'translateY', 'translateZ', 'translate3d',
-  'scale', 'scaleX', 'scaleY', 'scaleZ', 'scale3d', 'rotate', 'rotateX', 'rotateY', 'rotateZ',
-  'rotate3d', 'skew', 'skewX', 'skewY', 'matrix', 'matrix3d', 'perspective', 'cubic-bezier',
-  'steps', 'blur', 'brightness', 'contrast', 'drop-shadow', 'grayscale', 'hue-rotate', 'invert',
-  'opacity', 'saturate', 'sepia',
+  'rgb', 'rgba', 'hsl', 'hsla', 'hwb', 'lab', 'lch', 'oklab', 'oklch', 'color', 'color-mix',
+  'calc', 'min', 'max', 'clamp', 'var', 'linear-gradient', 'radial-gradient', 'conic-gradient',
+  'repeating-linear-gradient', 'repeating-radial-gradient', 'repeating-conic-gradient',
+  'translate', 'translateX', 'translateY', 'translateZ', 'translate3d', 'scale', 'scaleX', 'scaleY',
+  'scaleZ', 'scale3d', 'rotate', 'rotateX', 'rotateY', 'rotateZ', 'rotate3d', 'skew', 'skewX',
+  'skewY', 'matrix', 'matrix3d', 'perspective', 'cubic-bezier', 'steps', 'blur', 'brightness',
+  'contrast', 'drop-shadow', 'grayscale', 'hue-rotate', 'invert', 'opacity', 'saturate', 'sepia',
 ] as const;
 
 const CSS_ALLOWED_AT_RULES = ['media', 'supports', 'keyframes'] as const;
@@ -134,19 +134,19 @@ const TYPE_SELECTORS = new Set([
   'p', 'span', 'strong', 'em', 'b', 'i', 'u', 's', 'small', 'mark', 'sub', 'sup', 'br', 'hr',
   'ul', 'ol', 'li', 'dl', 'dt', 'dd', 'blockquote', 'figure', 'figcaption', 'img', 'picture',
   'source', 'svg', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'caption', 'code',
-  'pre', 'kbd', 'samp', 'abbr', 'time', 'a',
+  'pre', 'kbd', 'samp', 'abbr', 'time', 'a', 'form', 'input', 'textarea', 'select', 'option', 'optgroup', 'button', 'label', 'fieldset', 'legend',
 ]);
-const PSEUDO_CLASSES = new Set(['hover', 'focus', 'focus-visible', 'first-child', 'last-child', 'nth-child', 'not', 'is', 'where']);
-const PSEUDO_ELEMENTS = new Set(['before', 'after', 'marker', 'first-line', 'first-letter', 'selection']);
+const PSEUDO_CLASSES = new Set(['active', 'any-link', 'checked', 'default', 'defined', 'disabled', 'empty', 'enabled', 'first-child', 'first-of-type', 'focus', 'focus-visible', 'focus-within', 'has', 'hover', 'in-range', 'indeterminate', 'invalid', 'is', 'last-child', 'last-of-type', 'not', 'nth-child', 'nth-last-child', 'nth-last-of-type', 'nth-of-type', 'only-child', 'only-of-type', 'optional', 'out-of-range', 'placeholder-shown', 'read-only', 'read-write', 'required', 'root', 'target', 'user-invalid', 'valid', 'visited', 'where']);
+const PSEUDO_ELEMENTS = new Set(['after', 'backdrop', 'before', 'first-letter', 'first-line', 'marker', 'placeholder', 'selection']);
 const SAFE_ATTRIBUTE_SELECTOR_NAMES = new Set([
   'class', 'id', 'title', 'lang', 'dir', 'role', 'data-section-id', 'colspan', 'rowspan', 'scope',
-  'alt', 'width', 'height', 'datetime',
+  'alt', 'width', 'height', 'datetime', 'type',
 ]);
 const MEDIA_FEATURES = new Set(['width', 'min-width', 'max-width', 'height', 'orientation', 'aspect-ratio', 'prefers-color-scheme']);
 const FONT_SIZE_KEYWORDS = new Set(['xx-small', 'x-small', 'small', 'medium', 'large', 'x-large', 'xx-large', 'xxx-large']);
-const RESERVED_NAME = /^(?:data-he-|he-s|he-(?:doc|slide|scaler|runtime|manifest|shell|csp)|(?:data-)?(?:shell|runtime|manifest|csp))/i;
+const RESERVED_NAME = /^(?:data-(?:he|nai)-|nai-|he-s|he-(?:doc|slide|scaler|runtime|manifest|shell|csp)|(?:data-)?(?:shell|runtime|manifest|csp))/i;
 const NETWORK_FUNCTION = new Set(['url', 'image', 'image-set', '-webkit-image-set', 'cross-fade', 'element', 'expression']);
-const VALUE_INDIRECTION_FUNCTION = new Set(['attr', 'env', 'paint', 'var']);
+const VALUE_INDIRECTION_FUNCTION = new Set(['attr', 'env', 'paint']);
 const ANIMATION_KEYWORDS = new Set([
   'none', 'linear', 'ease', 'ease-in', 'ease-out', 'ease-in-out', 'step-start', 'step-end',
   'infinite', 'normal', 'reverse', 'alternate', 'alternate-reverse', 'forwards', 'backwards',
@@ -285,6 +285,45 @@ function rewriteGlobalRootAtoms(node: any): void {
   }
 }
 
+function isThemeAttributeAtom(node: any): boolean {
+  return node?.type === 'AttributeSelector' && String(node.name?.name ?? node.name ?? '').toLowerCase() === 'data-theme';
+}
+
+function isThemeRootSelector(selector: any): boolean {
+  const nodes = children(selector);
+  if (nodes.length === 1) return isThemeAttributeAtom(nodes[0]);
+  return nodes.length === 2
+    && isGlobalRootAtom(nodes[0])
+    && isThemeAttributeAtom(nodes[1]);
+}
+
+function isLeadingThemeAtom(node: any): boolean {
+  if (isThemeAttributeAtom(node)) return true;
+  if (node?.type !== 'PseudoClassSelector') return false;
+  const name = String(node.name).toLowerCase();
+  if (name !== 'where' && name !== 'is') return false;
+  const selectorList = children(node)[0];
+  const selectors = children(selectorList);
+  return selectorList?.type === 'SelectorList' && selectors.length > 0 && selectors.every(isThemeRootSelector);
+}
+
+function leadingThemeRootArgumentCount(node: any): number {
+  if (node?.type !== 'PseudoClassSelector') return 0;
+  return children(children(node)[0]).filter((selector) => isThemeRootSelector(selector)
+    && isGlobalRootAtom(children(selector)[0])).length;
+}
+
+/** Approximate leading theme sibling selectors as descendants to retain containment. */
+function rewriteLeadingThemeSiblingCombinator(selector: any, leadingThemeAtom: boolean): void {
+  const nodes = children(selector);
+  if (!leadingThemeAtom) return;
+  for (const node of nodes) {
+    if (node?.type !== 'Combinator') continue;
+    if (node.name === '+' || node.name === '~') node.name = ' ';
+    return;
+  }
+}
+
 function isExactGlobalRootSelector(selector: any): boolean {
   const nodes = children(selector);
   return nodes.length === 1 && isGlobalRootAtom(nodes[0]);
@@ -295,10 +334,7 @@ function isExactUniversalSelector(selector: any): boolean {
   return nodes.length === 1 && isUniversalAtom(nodes[0]);
 }
 
-function selectorBeginsWithGlobalRoot(selector: any): boolean {
-  const nodes = children(selector);
-  return nodes.length > 0 && isGlobalRootAtom(nodes[0]);
-}
+
 
 /**
  * Scope one validated selector to the export content root.
@@ -308,11 +344,14 @@ function selectorBeginsWithGlobalRoot(selector: any): boolean {
 function scopeSelector(selector: any): string {
   if (isExactGlobalRootSelector(selector)) return CONTENT_ROOT_SELECTOR;
   if (isExactUniversalSelector(selector)) return `${CONTENT_ROOT_SELECTOR} *`;
-  const beginsAtRoot = selectorBeginsWithGlobalRoot(selector);
+  const leadingThemeAtom = isLeadingThemeAtom(children(selector)[0]);
   const rewritten = cloneCssNode(selector);
   rewriteGlobalRootAtoms(rewritten);
+  rewriteLeadingThemeSiblingCombinator(rewritten, leadingThemeAtom);
   const text = generated(rewritten);
-  return beginsAtRoot ? text : `${CONTENT_ROOT_SELECTOR} ${text}`;
+  if (text.startsWith(CONTENT_ROOT_SELECTOR)) return text;
+  if (leadingThemeAtom) return `${CONTENT_ROOT_SELECTOR}${text}`;
+  return `${CONTENT_ROOT_SELECTOR} ${text}`;
 }
 
 /** Collect every non-functional global-root atom anywhere in the selector tree,
@@ -339,10 +378,11 @@ function validateGlobalRootShape(selector: any): Failure | null {
   const roots: any[] = [];
   collectRootAtoms(selector, roots);
   if (roots.length === 0) return null;
+  const top = children(selector);
+  if (isLeadingThemeAtom(top[0]) && roots.length === leadingThemeRootArgumentCount(top[0])) return null;
   if (roots.length > 1) {
     return fail(CSS_VIOLATION_CODES.disallowedSelector, 'multiple global-root selectors');
   }
-  const top = children(selector);
   if (top[0] !== roots[0]) {
     return fail(CSS_VIOLATION_CODES.disallowedSelector, 'global-root selector must be the leading atom');
   }
@@ -462,7 +502,7 @@ function validateSelectorAtom(node: any): Failure | null {
     if ((name === 'class' && hasReservedName(selectedValue)) || (name === 'id' && (hasReservedName(selectedValue) || canonicalizeIdent(selectedValue).startsWith('he-')))) {
       return fail(CSS_VIOLATION_CODES.reservedSelector, `reserved attribute selector ${name}`);
     }
-    if (!SAFE_ATTRIBUTE_SELECTOR_NAMES.has(name) && !name.startsWith('aria-')) {
+    if (!SAFE_ATTRIBUTE_SELECTOR_NAMES.has(name) && !name.startsWith('aria-') && !name.startsWith('data-')) {
       return fail(CSS_VIOLATION_CODES.disallowedSelector, `attribute selector ${name}`);
     }
   } else if (type === 'PseudoClassSelector') {
@@ -534,25 +574,26 @@ function validateSelector(selector: any): Failure | null {
 }
 
 function rawFunctionFailure(raw: string): Failure | null {
-  const match = /([a-z-]+)\s*\(/i.exec(raw);
-  if (!match) return null;
-  const name = match[1].toLowerCase();
-  if (name === 'var') return fail(CSS_VIOLATION_CODES.customProperty, 'var()');
-  if (NETWORK_FUNCTION.has(name)) return fail(CSS_VIOLATION_CODES.networkFunction, `${name}()`);
-  if (VALUE_INDIRECTION_FUNCTION.has(name)) return fail(CSS_VIOLATION_CODES.valueIndirection, `${name}()`);
-  return fail(CSS_VIOLATION_CODES.disallowedFunction, `${name}()`);
+  const matches = raw.matchAll(/([a-z-]+)\s*\(/gi);
+  for (const match of matches) {
+    const name = match[1].toLowerCase();
+    if (NETWORK_FUNCTION.has(name)) return fail(CSS_VIOLATION_CODES.networkFunction, `${name}()`);
+    if (VALUE_INDIRECTION_FUNCTION.has(name)) return fail(CSS_VIOLATION_CODES.valueIndirection, `${name}()`);
+    if (!FUNCTION_SET.has(name)) return fail(CSS_VIOLATION_CODES.disallowedFunction, `${name}()`);
+  }
+  return null;
 }
 
 function validateValue(value: any): Failure | null {
   for (const node of valueNodes(value)) {
     if (node?.type === 'Raw') {
       const rawFailure = rawFunctionFailure(String(node.value ?? ''));
-      return rawFailure ?? fail(CSS_VIOLATION_CODES.disallowedFunction, 'unparsed value');
+      if (rawFailure) return rawFailure;
+      continue;
     }
     if (node?.type === 'Url') return fail(CSS_VIOLATION_CODES.networkFunction, 'url()');
     if (node?.type === 'Function') {
       const name = String(node.name).toLowerCase();
-      if (name === 'var') return fail(CSS_VIOLATION_CODES.customProperty, 'var()');
       if (NETWORK_FUNCTION.has(name)) return fail(CSS_VIOLATION_CODES.networkFunction, `${name}()`);
       if (VALUE_INDIRECTION_FUNCTION.has(name)) return fail(CSS_VIOLATION_CODES.valueIndirection, `${name}()`);
       if (!FUNCTION_SET.has(name)) return fail(CSS_VIOLATION_CODES.disallowedFunction, `${name}()`);
@@ -616,16 +657,21 @@ function rewriteAnimation(property: string, value: any, context: CssSanitizeCont
 
 function validateFontSize(value: any): Failure | null {
   const tokens = children(value);
-  if (tokens.length !== 1) return fail(CSS_VIOLATION_CODES.fontSizeNotAllowed, 'font-size must be one safe absolute value');
+  if (tokens.length !== 1) return fail(CSS_VIOLATION_CODES.fontSizeNotAllowed, 'font-size must be one safe value');
   const token = tokens[0];
   if (token.type === 'Number' && Number(token.value) === 0) return null;
-  if (token.type === 'Dimension' && String(token.unit).toLowerCase() === 'px') {
+  if (token.type === 'Dimension' && ['px', 'rem', 'em'].includes(String(token.unit).toLowerCase())) {
     const size = Number(token.value);
     if (Number.isFinite(size) && size >= 0 && size <= CSS_MAX_FONT_SIZE_PX) return null;
-    return fail(CSS_VIOLATION_CODES.fontSizeTooLarge, `font-size must be from 0 to ${CSS_MAX_FONT_SIZE_PX}px`);
+    return fail(CSS_VIOLATION_CODES.fontSizeTooLarge, `font-size must be from 0 to ${CSS_MAX_FONT_SIZE_PX}`);
+  }
+  if (token.type === 'Percentage') {
+    const size = Number(token.value);
+    if (Number.isFinite(size) && size >= 0 && size <= CSS_MAX_FONT_SIZE_PX) return null;
+    return fail(CSS_VIOLATION_CODES.fontSizeTooLarge, `font-size percentage must be from 0 to ${CSS_MAX_FONT_SIZE_PX}%`);
   }
   if (token.type === 'Identifier' && FONT_SIZE_KEYWORDS.has(String(token.name).toLowerCase())) return null;
-  return fail(CSS_VIOLATION_CODES.fontSizeNotAllowed, 'font-size must be zero, px, or a safe absolute keyword');
+  return fail(CSS_VIOLATION_CODES.fontSizeNotAllowed, 'font-size must be zero, px, rem, em, %, or a safe absolute keyword');
 }
 function validateFontShorthand(value: any): Failure | null {
   let beforeLineHeight = true;
@@ -644,18 +690,23 @@ function validateFontShorthand(value: any): Failure | null {
       continue;
     }
     if (token.type === 'Dimension') {
-      if (String(token.unit).toLowerCase() !== 'px') {
-        return fail(CSS_VIOLATION_CODES.fontSizeNotAllowed, 'font shorthand size must use px');
+      if (!['px', 'rem', 'em'].includes(String(token.unit).toLowerCase())) {
+        return fail(CSS_VIOLATION_CODES.fontSizeNotAllowed, 'font shorthand size must use px, rem, or em');
       }
       const size = Number(token.value);
       if (!Number.isFinite(size) || size < 0 || size > CSS_MAX_FONT_SIZE_PX) {
-        return fail(CSS_VIOLATION_CODES.fontSizeTooLarge, `font shorthand size must be from 0 to ${CSS_MAX_FONT_SIZE_PX}px`);
+        return fail(CSS_VIOLATION_CODES.fontSizeTooLarge, `font shorthand size must be from 0 to ${CSS_MAX_FONT_SIZE_PX}`);
       }
       foundSize = true;
       continue;
     }
     if (token.type === 'Percentage') {
-      return fail(CSS_VIOLATION_CODES.fontSizeNotAllowed, 'font shorthand size must not use percentages');
+      const size = Number(token.value);
+      if (!Number.isFinite(size) || size < 0 || size > CSS_MAX_FONT_SIZE_PX) {
+        return fail(CSS_VIOLATION_CODES.fontSizeTooLarge, `font shorthand percentage must be from 0 to ${CSS_MAX_FONT_SIZE_PX}%`);
+      }
+      foundSize = true;
+      continue;
     }
     if (token.type === 'Identifier') {
       const keyword = String(token.name).toLowerCase();
@@ -682,7 +733,7 @@ function validateContent(value: any): Failure | null {
 function validateNumericCaps(property: string, value: any, context: CssSanitizeContext): Failure | null {
   if (property === 'position') {
     const position = generated(value).toLowerCase();
-    if (position === 'fixed' || position === 'sticky') return fail(CSS_VIOLATION_CODES.unsafePosition, `position:${position} is not allowed`);
+    if (!['static', 'relative', 'absolute', 'fixed', 'sticky'].includes(position)) return fail(CSS_VIOLATION_CODES.unsafePosition, `position:${position} is not allowed`);
   }
   if (property === 'z-index') {
     const tokens = children(value);
@@ -715,15 +766,15 @@ function sanitizeDeclarations(block: any, context: CssSanitizeContext, counts: C
     if (declaration.type !== 'Declaration') { strip(context, fail(CSS_VIOLATION_CODES.parseError, 'invalid declaration')); continue; }
     context.seenDeclarations++;
     if (context.seenDeclarations > CSS_MAX_DECLARATIONS) { strip(context, fail(CSS_VIOLATION_CODES.tooManyDeclarations, `more than ${CSS_MAX_DECLARATIONS} declarations`)); break; }
-    const property = String(declaration.property).toLowerCase();
-    let failure: Failure | null = declaration.important ? fail(CSS_VIOLATION_CODES.important, `!important on ${property}`) : null;
-    if (!failure && property.startsWith('--')) failure = fail(CSS_VIOLATION_CODES.customProperty, `custom property ${property}`);
+    const declaredProperty = String(declaration.property);
+    const property = declaredProperty.toLowerCase();
+    let failure: Failure | null = null;
     if (!failure) failure = validateValue(declaration.value);
     if (!failure && PROPERTY_SET.has(property)) failure = validateNumericCaps(property, declaration.value, context);
     if (failure) { strip(context, failure); continue; }
     const value = generated(declaration.value);
-    if (!PROPERTY_SET.has(property) || lexer.matchProperty(property, value).error) continue;
-    output.push(`${property}:${value}`);
+    if ((!PROPERTY_SET.has(property) && !property.startsWith('--')) || (!property.startsWith('--') && lexer.matchProperty(property, value).error)) continue;
+    output.push(`${declaredProperty.startsWith('--') ? declaredProperty : property}:${value}${declaration.important ? '!important' : ''}`);
     counts.declarationCount++;
   }
   return output.join(';');

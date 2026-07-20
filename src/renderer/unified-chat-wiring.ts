@@ -3,7 +3,7 @@ import { mountHtmlExportWizard, type HtmlExportWizardHandle } from './html-expor
 import { clampChatWidth } from './chat-layout';
 import { guardVerdict } from './humanize-guards';
 import { styleDirective, detectLanguage, type Naturalness } from './humanize-engine';
-import { t } from './i18n';
+import { getLocale, t } from './i18n';
 import { aiChatErrorMessage } from './ai-error-message';
 import { modelContextWindowTokens } from '../main/ai/output-budget';
 import { isAiProviderId, type AiProviderId, type ProviderAuthStatus } from '../main/ai/types';
@@ -406,7 +406,7 @@ export function initUnifiedChatWiring(ctx: AppContext, deps: UnifiedChatWiringDe
       listDesigns: () => window.api.listDesigns(),
       saveHtmlFinalized: (args) => window.api.saveHtmlFinalized(args),
       openSavedHtml: (filePath) => window.api.openSavedHtml(filePath),
-      generateHtmlExport: (request) => window.api.generateHtmlExport(request),
+      generateHtmlExport: (request) => window.api.generateHtmlExport({ ...request, locale: getLocale() }),
       cancelHtmlGeneration: () => void window.api.cancelHtmlGeneration(),
       openExternal: (url) => void window.api.openExternal(url),
       onCancel: () => ctx.setStatus(t('status.htmlExportCanceled')),

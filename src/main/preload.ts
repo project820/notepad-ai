@@ -320,6 +320,7 @@ const api = {
       instructions?: string;
       viewport?: { width: number; height: number };
       reasoningEffort?: 'low';
+      mode?: 'slide' | 'scroll';
     },
   ): Promise<GenerationAttemptResult> => ipcRenderer.invoke('html:generate', request),
   cancelHtmlGeneration: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('html:generate:cancel'),

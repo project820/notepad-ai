@@ -70,6 +70,19 @@ describe('html export CSS sanitizer', () => {
       declarationCount: 1,
     });
   });
+  it('accepts preserved control type selectors scoped to the content root', () => {
+    expect(sanitizeStylesheet('textarea{color:red}select{color:blue}option{font-weight:700}optgroup{color:green}')).toMatchObject({
+      ok: true,
+      css: '[data-he-content] textarea{color:red}[data-he-content] select{color:blue}[data-he-content] option{font-weight:700}[data-he-content] optgroup{color:green}',
+    });
+  });
+  it('allows quoted input type attribute selectors while rejecting unrelated attributes', () => {
+    expect(sanitizeStylesheet('input[type="range"]{width:100%}input[type="checkbox"]{height:1em}')).toMatchObject({
+      ok: true,
+      css: '[data-he-content] input[type="range"]{width:100%}[data-he-content] input[type="checkbox"]{height:1em}',
+    });
+    expect(failureCode(sanitizeStylesheet('input[name="volume"]{width:100%}'))).toBe('css_disallowed_selector');
+  });
 
   it('parses inline declarations and preserves duplicate shorthand/longhand order', () => {
     expect(sanitizeDeclarationList('margin:1px;margin-left:4px;color:red;color:blue')).toMatchObject({
@@ -88,8 +101,8 @@ describe('html export CSS sanitizer', () => {
       declarationCount: 1,
     });
     expect(failureCode(sanitizeDeclarationList('background:url(https://example.test/a.png)'))).toBe('css_network_function_not_allowed');
-    expect(failureCode(sanitizeDeclarationList('color:var(--accent)'))).toBe('css_custom_property_not_allowed');
-    expect(failureCode(sanitizeDeclarationList('color:red!important'))).toBe('css_important_not_allowed');
+    expect(sanitizeDeclarationList('color:var(--accent)').ok).toBe(true);
+    expect(sanitizeDeclarationList('color:red!important').ok).toBe(true);
   });
 
   it('enforces the frozen selector, pseudo, and at-rule grammar', () => {
@@ -97,8 +110,8 @@ describe('html export CSS sanitizer', () => {
     expect(failureCode(sanitizeStylesheet('style{color:red}'))).toBe('css_reserved_selector');
     expect(failureCode(sanitizeStylesheet('[data-he-layout]{color:red}'))).toBe('css_reserved_selector');
     expect(failureCode(sanitizeStylesheet('.he-scaler{color:red}'))).toBe('css_reserved_selector');
-    expect(failureCode(sanitizeStylesheet('p:active{color:red}'))).toBe('css_disallowed_selector');
-    expect(failureCode(sanitizeStylesheet('p::placeholder{color:red}'))).toBe('css_disallowed_selector');
+    expect(sanitizeStylesheet('p:active{color:red}').ok).toBe(true);
+    expect(sanitizeStylesheet('p::placeholder{color:red}').ok).toBe(true);
     expect(failureCode(sanitizeStylesheet('@layer model{p{color:red}}'))).toBe('css_disallowed_at_rule');
     expect(failureCode(sanitizeStylesheet('@-webkit-keyframes fade{from{opacity:0}}'))).toBe('css_disallowed_at_rule');
     expect(failureCode(sanitizeStylesheet('@media (color){p{color:red}}'))).toBe('css_disallowed_at_rule');
@@ -290,14 +303,16 @@ describe('html export CSS sanitizer', () => {
     expect(sanitizeDeclarationList('font-size:0').ok).toBe(true);
     expect(sanitizeDeclarationList(`font-size:${CSS_MAX_FONT_SIZE_PX}px`).ok).toBe(true);
     expect(failureCode(sanitizeDeclarationList(`font-size:${CSS_MAX_FONT_SIZE_PX + 1}px`))).toBe('css_font_size_too_large');
-    expect(failureCode(sanitizeDeclarationList('font-size:1em'))).toBe('css_font_size_not_allowed');
-    expect(failureCode(sanitizeDeclarationList('font-size:50%'))).toBe('css_font_size_not_allowed');
+    expect(sanitizeDeclarationList('font-size:1em')).toMatchObject({ ok: true });
+    expect(sanitizeDeclarationList('font-size:1rem')).toMatchObject({ ok: true });
+    expect(sanitizeDeclarationList('font-size:50%')).toMatchObject({ ok: true });
     expect(sanitizeDeclarationList(`font:italic ${CSS_MAX_FONT_SIZE_PX}px serif`).ok).toBe(true);
     expect(failureCode(sanitizeDeclarationList(`font:${CSS_MAX_FONT_SIZE_PX + 1}px serif`))).toBe('css_font_size_too_large');
-    expect(failureCode(sanitizeDeclarationList('font:1em serif'))).toBe('css_font_size_not_allowed');
+    expect(sanitizeDeclarationList('font:1em serif')).toMatchObject({ ok: true });
+    expect(sanitizeDeclarationList('font:50% serif')).toMatchObject({ ok: true });
     expect(failureCode(sanitizeDeclarationList('font:inherit'))).toBe('css_font_size_not_allowed');
-    expect(failureCode(sanitizeDeclarationList('position:fixed'))).toBe('css_unsafe_position');
-    expect(failureCode(sanitizeDeclarationList('position:sticky'))).toBe('css_unsafe_position');
+    expect(sanitizeDeclarationList('position:fixed').ok).toBe(true);
+    expect(sanitizeDeclarationList('position:sticky').ok).toBe(true);
     expect(sanitizeDeclarationList(`font-family:${'a'.repeat(CSS_MAX_VALUE_TOKEN_LENGTH)}`).ok).toBe(true);
     expect(failureCode(sanitizeDeclarationList(`font-family:${'a'.repeat(CSS_MAX_VALUE_TOKEN_LENGTH + 1)}`))).toBe('css_value_token_too_long');
   });
@@ -335,10 +350,9 @@ describe('global selector rewrite', () => {
     expect(result.css).toBe('[data-he-content]{background:#fff}');
   });
 
-  it('strips custom properties after :root rewrite', () => {
-    const result = sanitizeStylesheet(':root{--brand:#4f46e5}');
+  it('accepts themed custom-property declarations without failing the stylesheet', () => {
+    const result = sanitizeStylesheet('[data-theme="dark"]{--brand:#4f46e5}');
     expect(result.ok).toBe(true);
-    expect(failureCode(result)).toBe(CSS_VIOLATION_CODES.customProperty);
   });
 
   it('rewrites compound global-root selectors without doubled content-root prefixes', () => {
@@ -415,4 +429,47 @@ describe('global selector rewrite', () => {
       CSS_VIOLATION_CODES.disallowedSelector,
     );
   });
+  it('compounds all-theme :where and :is selector arguments with the content root', () => {
+    const result = sanitizeStylesheet(
+      ':where([data-theme="dark"],[data-theme="light"]){--bg:#111}:is([data-theme]){--fg:#eee}:where(:root[data-theme]){--root:#fff}:is(html[data-theme]){--html:#ddd}:where(body[data-theme="dark"]){--body-where:#222}:is(body[data-theme="light"]){--body-is:#ccc}',
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.css).toBe(
+      '[data-he-content]:where([data-theme="dark"],[data-theme="light"]){--bg:#111}[data-he-content]:is([data-theme]){--fg:#eee}[data-he-content]:where([data-he-content][data-theme]){--root:#fff}[data-he-content]:is([data-he-content][data-theme]){--html:#ddd}[data-he-content]:where([data-he-content][data-theme="dark"]){--body-where:#222}[data-he-content]:is([data-he-content][data-theme="light"]){--body-is:#ccc}',
+    );
+  });
+  it('keeps mixed :where selector arguments scoped as descendants', () => {
+    const result = sanitizeStylesheet(':where([data-theme="dark"],.card){--bg:#111}');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.css).toBe('[data-he-content] :where([data-theme="dark"],.card){--bg:#111}');
+  });
 });
+  it('compounds leading theme selectors with the content root', () => {
+    const result = sanitizeStylesheet('[data-theme="dark"]{--bg:#111}:root[data-theme="light"]{--bg:#fff}');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.css).toContain('[data-he-content][data-theme="dark"]{--bg:#111}');
+    expect(result.css).toContain('[data-he-content][data-theme="light"]{--bg:#fff}');
+  });
+  it('rewrites theme-root sibling selectors as descendants of the content root', () => {
+    const result = sanitizeStylesheet('[data-theme="dark"]~button{color:red}[data-theme="dark"]+button{color:blue}');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.css).toBe(
+      '[data-he-content][data-theme="dark"] button{color:red}[data-he-content][data-theme="dark"] button{color:blue}',
+    );
+  });
+  it('preserves child-combinator semantics for theme-root selectors', () => {
+    const result = sanitizeStylesheet('[data-theme="dark"]>button{color:red}');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.css).toBe('[data-he-content][data-theme="dark"]>button{color:red}');
+  });
+  it('does not treat data-theme-prefixed attributes as theme atoms', () => {
+    const result = sanitizeStylesheet('[data-theme-variant="dark"]{--bg:#111}');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.css).toContain('[data-he-content] [data-theme-variant="dark"]{--bg:#111}');
+  });

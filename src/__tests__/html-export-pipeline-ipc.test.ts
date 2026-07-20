@@ -16,6 +16,11 @@ vi.mock('electron', () => ({ dialog: {}, shell: {} }));
 import { dialog } from 'electron';
 
 import { registerHtmlExportIpc } from '../main/ipc/html-export-ipc';
+import { createHtmlExportGenerator } from '../main/html-export-generate';
+import { htmlExportRuntimeLabels } from '../main/html-export-runtime-labels';
+import { injectHtmlExportRuntime } from '../main/html-export-runtime';
+import type { AiChatEvent, AiChatRequest } from '../main/ai/types';
+import type { HtmlExportRuntimeLocale } from '../main/html-export-runtime-labels';
 
 type Sender = {
   id: number;
@@ -1142,6 +1147,102 @@ describe('HTML export pipeline IPC', () => {
         prompt: 'make it',
         model: { provider: 'ollama', id: 'llama3:latest' },
       });
+    });
+    it('preserves locale through IPC, generation, and finalization runtime labels', async () => {
+      const finalizedHtml: string[] = [];
+      const pipeline = {
+        beginAttempt: () => ({ ok: true as const, value: { attemptId: 'attempt-1' } }),
+        storeRawModelOutput: () => ({
+          ok: true as const,
+          value: { id: 'raw-1', attemptId: 'attempt-1', stage: 'raw', sha256: 'a'.repeat(64), byteLength: 32 },
+        }),
+        sanitize: async () => ({
+          ok: true as const,
+          value: {
+            artifact: {
+              id: 'sanitized-1',
+              attemptId: 'attempt-1',
+              stage: 'sanitized',
+              sha256: 'a'.repeat(64),
+              byteLength: 32,
+            },
+          },
+        }),
+        resolve: async () => ({
+          ok: true as const,
+          value: {
+            artifact: {
+              id: 'resolved-1',
+              attemptId: 'attempt-1',
+              stage: 'resolved',
+              sha256: 'a'.repeat(64),
+              byteLength: 32,
+            },
+          },
+        }),
+        finalize: (
+          _webContentsId: number,
+          _attemptId: string,
+          _resolvedArtifactId: string,
+          mode: 'slide' | 'scroll' = 'scroll',
+          locale: HtmlExportRuntimeLocale = 'en',
+        ) => {
+          finalizedHtml.push(
+            injectHtmlExportRuntime(
+              '<html><body><section class="slide">One</section></body></html>',
+              mode,
+              htmlExportRuntimeLabels(locale),
+            ),
+          );
+          return {
+            ok: true as const,
+            value: {
+              artifact: {
+                id: 'finalized-1',
+                attemptId: 'attempt-1',
+                stage: 'finalized',
+                sha256: 'a'.repeat(64),
+                byteLength: 32,
+              },
+            },
+          };
+        },
+        invalidateAttempt: () => undefined,
+      };
+      const generator = createHtmlExportGenerator({
+        pipeline: pipeline as never,
+        stream: async (_request: AiChatRequest, onEvent: (event: AiChatEvent) => void) => {
+          onEvent({ kind: 'delta', text: '<html><body><section class="slide">One</section></body></html>' });
+          onEvent({ kind: 'done', text: '' });
+        },
+        quarantine: async () => ({ ok: true as const }),
+      });
+      const sender: Sender = { id: 92, once: vi.fn() };
+      registerHtmlExportIpc({
+        windowForWebContents: () => null,
+        pipelineService: createService() as never,
+        assetLifecycle: createNoopAssetLifecycle(),
+        generateHtml: (webContentsId, input) => generator.run(webContentsId, input),
+      });
+
+      const korean = await ipc.handler('html:generate')!(eventFor(sender), {
+        prompt: 'make it',
+        model: { provider: 'ollama', id: 'llama3:latest' },
+        mode: 'slide',
+        locale: 'ko',
+      });
+      const english = await ipc.handler('html:generate')!(eventFor(sender), {
+        prompt: 'make it',
+        model: { provider: 'ollama', id: 'llama3:latest' },
+        mode: 'slide',
+      });
+
+      expect(korean).toMatchObject({ state: 'final', finalizedArtifactId: 'finalized-1' });
+      expect(english).toMatchObject({ state: 'final', finalizedArtifactId: 'finalized-1' });
+      expect(finalizedHtml[0]).toContain('어두운 테마로 전환');
+      expect(finalizedHtml[0]).not.toContain('Switch to dark theme');
+      expect(finalizedHtml[1]).toContain('Switch to dark theme');
+      expect(finalizedHtml[1]).not.toContain('어두운 테마로 전환');
     });
   });
 });

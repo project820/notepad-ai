@@ -110,13 +110,89 @@ describe('sanitizeHtmlExport', () => {
     if (!result.ok) return;
     expect(result.bodyHtml).toBe('<p>Kept</p>Text');
   });
-  it('unwraps content-bearing active containers while recording their removal', () => {
+  it('preserves interactive form containers', () => {
     const result = sanitize('<form><p>Kept</p></form>');
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.bodyHtml).toContain('<p>Kept</p>');
-    expect(result.bodyHtml).not.toContain('<form');
-    expect(result.stripped).toContain('html_active_tag');
+    expect(result.bodyHtml).toContain('<form><p>Kept</p></form>');
+  });
+  it('preserves safe input bounds and strips unsafe bound values', () => {
+    const result = sanitize('<input type="range" min="1" max="5" step="0.5"><input min="javascript:1" max="&quot;5" step="Infinity">');
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bodyHtml).toContain('<input type="range" min="1" max="5" step="0.5">');
+    expect(result.bodyHtml).toContain('<input>');
+    expect(result.bodyHtml).not.toContain('javascript:1');
+    expect(result.bodyHtml).not.toContain('Infinity');
+  });
+  it('normalizes inert boolean form attributes to bare presence regardless of their authored value', () => {
+    const result = sanitize(
+      '<input required checked="checked" disabled="disabled" readonly="readonly" multiple="multiple">' +
+      '<textarea required readonly></textarea><select required disabled multiple></select>' +
+      '<input required="true" checked="true"><option selected="true">Seoul</option>',
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bodyHtml).toContain('<input required="" checked="" disabled="" readonly="" multiple="">');
+    expect(result.bodyHtml).toContain('<textarea required="" readonly=""></textarea>');
+    expect(result.bodyHtml).toContain('<select required="" disabled="" multiple=""></select>');
+    expect(result.bodyHtml).toContain('<input required="" checked="">');
+    expect(result.bodyHtml).toContain('<option selected="">Seoul</option>');
+    expect(result.bodyHtml).not.toContain('checked="true"');
+    expect(result.bodyHtml).not.toContain('required="true"');
+    expect(result.bodyHtml).not.toContain('selected="true"');
+  });
+  it('preserves inert label and control metadata while stripping hostile values', () => {
+    const result = sanitize(
+      '<label for="city">City</label><textarea name="notes" placeholder="Add notes"></textarea><select name="city"></select>' +
+      '<label for="javascript:city">Unsafe</label><textarea name="https://example.test" placeholder="javascript:alert(1)"></textarea><select name="javascript:city"></select>',
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bodyHtml).toContain('<label for="city">City</label>');
+    expect(result.bodyHtml).toContain('<textarea name="notes" placeholder="Add notes"></textarea>');
+    expect(result.bodyHtml).toContain('<select name="city"></select>');
+    expect(result.bodyHtml).not.toContain('javascript:');
+    expect(result.bodyHtml).not.toContain('https://example.test');
+  });
+  it('preserves structured form names while stripping hostile values', () => {
+    const result = sanitize(
+      '<input name="items[]"><input name="user[email]"><input name="user[contact][email]">' +
+      '<input name="user[ mail]"><input name="user[\"email\"]"><input name="https://example.test">',
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bodyHtml).toContain('<input name="items[]">');
+    expect(result.bodyHtml).toContain('<input name="user[email]">');
+    expect(result.bodyHtml).toContain('<input name="user[contact][email]">');
+    expect(result.bodyHtml).not.toContain('user[ mail]');
+    expect(result.bodyHtml).not.toContain('user[&quot;email&quot;]');
+    expect(result.bodyHtml).not.toContain('https://example.test');
+  });
+  it('preserves select options and removes unsupported option attributes', () => {
+    const result = sanitize(
+      '<select><optgroup label="Regions" disabled><option value="seoul" label="Seoul" selected>Seoul</option>' +
+      '<option value="busan" disabled type="button" name="city">Busan</option></optgroup></select>',
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bodyHtml).toContain('<select><optgroup label="Regions" disabled=""><option value="seoul" label="Seoul" selected="">Seoul</option><option value="busan" disabled="">Busan</option></optgroup></select>');
+    expect(result.bodyHtml).not.toContain('type="button"');
+    expect(result.bodyHtml).not.toContain('name="city"');
+  });
+  it('preserves case-insensitive arbitrary input steps but rejects hostile step values', () => {
+    const result = sanitize('<input type="range" step="ANY"><input type="range" step="anywhere"><input type="range" step="Infinity">');
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bodyHtml).toContain('<input type="range" step="ANY">');
+    expect(result.bodyHtml).not.toContain('step="anywhere"');
+    expect(result.bodyHtml).not.toContain('step="Infinity"');
   });
   it('unwraps template content stored outside its childNodes array', () => {
     const result = sanitize('<div><template><p>Template text</p></template></div>');
@@ -128,10 +204,59 @@ describe('sanitizeHtmlExport', () => {
   });
 
   it.each([
-    'iframe', 'object', 'embed', 'base', 'frame', 'frameset', 'applet', 'script', 'link', 'template',
-    'slot', 'form', 'input', 'button',
-  ])('rejects active tag <%s>', (tag) => {
+    'iframe', 'object', 'embed', 'base', 'frame', 'frameset', 'applet', 'link', 'template', 'slot',
+  ])('rejects unsupported active tag <%s>', (tag) => {
     expect(dispositionCodeWithParse(documentWithElement(tag))).toBe('html_active_tag');
+  });
+  it.each(['script', 'form', 'input', 'button'])('preserves interactive tag <%s>', (tag) => {
+    expect(dispositionCodeWithParse(documentWithElement(tag))).toBe('');
+  });
+  it('relocates inline head scripts before model body content in source order', () => {
+    const result = sanitize(
+      '<!doctype html><html><head>' +
+      '<script>window.order = ["head-1"];</script>' +
+      '<script>window.order.push("head-2");</script>' +
+      '</head><body><div>body content</div><script>window.order.push("body");</script></body></html>',
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const bodyContent = result.bodyHtml.indexOf('<div>body content</div>');
+    const bodyScript = result.bodyHtml.indexOf('window.order.push("body")');
+    const firstHeadScript = result.bodyHtml.indexOf('window.order = ["head-1"]');
+    const secondHeadScript = result.bodyHtml.indexOf('window.order.push("head-2")');
+    expect(result.bodyHtml).toContain('<script>window.order = ["head-1"];</script>');
+    expect(result.bodyHtml).toContain('<script>window.order.push("head-2");</script>');
+    expect(firstHeadScript).toBe(8);
+    expect(secondHeadScript).toBeGreaterThan(firstHeadScript);
+    expect(bodyContent).toBeGreaterThan(secondHeadScript);
+    expect(bodyScript).toBeGreaterThan(bodyContent);
+  });
+  it('relocates head definitions before body calls', () => {
+    const result = sanitize(
+      '<!doctype html><html><head><script>window.init = () => "ready";</script></head>' +
+      '<body><script>init()</script></body></html>',
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bodyHtml).toBe('<script>window.init = () => "ready";</script><script>init()</script>');
+  });
+  it('strips head scripts with src attributes', () => {
+    const result = sanitize(
+      '<!doctype html><html><head><script src="asset:abcdefghijklmnop">window.external = true;</script></head>' +
+      '<body><p>Kept</p></body></html>',
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bodyHtml).toContain('<p>Kept</p>');
+    expect(result.bodyHtml).not.toContain('<script');
+    expect(result.bodyHtml).not.toContain('window.external');
+  });
+  it('continues to extract head styles into authored CSS', () => {
+    const result = sanitize('<!doctype html><html><head><style>p { color: red; }</style></head><body><p>Kept</p></body></html>');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bodyHtml).toBe('<p>Kept</p>');
+    expect(result.contentCss).toContain('p{color:red}');
   });
 
   it('rejects meta http-equiv as an active redirect surface', () => {
@@ -153,18 +278,22 @@ describe('sanitizeHtmlExport', () => {
     expect(dispositionCode(html)).toBe(code);
   });
 
-  it('rejects event handlers and app shell/runtime namespace preseed', () => {
-    expect(dispositionCode('<p onclick="x">x</p>')).toBe('html_event_handler');
+  it('preserves event handlers while rejecting app shell/runtime namespace preseed', () => {
+    expect(dispositionCode('<p onclick="x">x</p>')).toBe('');
     expect(dispositionCode('<p data-he-layout="slides">x</p>')).toBe('html_reserved_namespace');
     expect(dispositionCode('<p class="he-shell">x</p>')).toBe('html_reserved_namespace');
     expect(dispositionCode('<p id="runtime-root">x</p>')).toBe('html_reserved_namespace');
   });
-  it('removes stripped event and reserved attributes from exported HTML', () => {
+  it('reserves the nai runtime namespace', () => {
+    expect(dispositionCode('<p data-nai-state="x" class="nai-theme-toggle" id="nai-runtime">x</p>')).toBe(
+      'html_reserved_namespace',
+    );
+  });
+  it('keeps interactive event attributes while stripping reserved attributes', () => {
     const result = sanitize('<p onclick="x" data-he-layout="slides" class="he-shell">Kept</p>');
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.bodyHtml).toContain('Kept');
-    expect(result.bodyHtml).not.toContain('onclick');
+    expect(result.bodyHtml).toContain('onclick="x"');
     expect(result.bodyHtml).not.toContain('data-he-');
     expect(result.bodyHtml).not.toContain('he-shell');
   });
@@ -294,41 +423,33 @@ describe('sanitizeHtmlExport', () => {
     expect(stylesheet).toMatchObject({ ok: true, stripped: ['css_rejected.css_network_function_not_allowed'] });
 
     const inline = sanitize('<p style="color:red!important">safe</p>');
-    expect(inline).toMatchObject({ ok: true, stripped: ['css_rejected.css_important_not_allowed'] });
-    if (inline.ok) {
-      expect(inline.bodyHtml).not.toContain('style=');
-      expect(inline.stripped.join()).not.toContain('color');
-    }
+    expect(inline).toMatchObject({ ok: true, stripped: [] });
+    if (inline.ok) expect(inline.contentCss).toContain('color:red!important');
   });
   it('strips oversized malformed CSS before stylesheet registration can parse it', () => {
     const result = sanitize(`<style>${'@'.repeat(CSS_MAX_STYLESHEET_BYTES + 1)}</style>`);
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.stripped).toContain('css_rejected.css_too_large');
   });
-  it('keeps the document and ordinary rules while stripping :is() sticky declarations', () => {
+  it('keeps interactive sticky declarations', () => {
     const result = sanitize('<style>:is(.note){position:sticky;color:red}.plain{color:blue}</style><p class="note">Kept</p><p class="plain">Also kept</p>');
-    expect(result).toMatchObject({ ok: true, stripped: ['css_rejected.css_unsafe_position'] });
+    expect(result).toMatchObject({ ok: true, stripped: [] });
     if (!result.ok) return;
     expect(result.bodyHtml).toContain('Kept');
-    expect(result.contentCss).toContain(':is(.note){color:red}');
+    expect(result.contentCss).toContain(':is(.note){position:sticky;color:red}');
     expect(result.contentCss).toContain('.plain{color:blue}');
-    expect(result.contentCss).not.toContain('sticky');
   });
 
-  it('gives active and style-node attribute failures precedence over malformed nested CSS', () => {
+  it('keeps reserved namespace checks ahead of malformed CSS', () => {
     for (const [html, code] of [
-      ['<template><style>@</style></template>', 'html_active_tag'],
-      ['<script><style>@</style></script>', 'html_active_tag'],
-      ['<style onclick="x">@</style>', 'html_event_handler'],
-      ['<p onclick="x" style="@">x</p>', 'html_event_handler'],
       ['<style data-he-injected="x">@</style>', 'html_reserved_namespace'],
     ]) {
       expect(failureCode(html)).toBe(code);
     }
   });
   it.each([
-    ['active ancestor', '<form><svg><path d="M,0 0"/></svg></form>', 'html_active_tag'],
-    ['event ancestor', '<div onclick="x"><svg><path d="M,0 0"/></svg></div>', 'html_event_handler'],
+    ['active ancestor', '<form><svg><path d="M,0 0"/></svg></form>', 'html_svg_rejected'],
+    ['event ancestor', '<div onclick="x"><svg><path d="M,0 0"/></svg></div>', 'html_svg_rejected'],
     ['reserved ancestor', '<div class="he-shell"><svg><path d="M,0 0"/></svg></div>', 'html_reserved_namespace'],
     ['structural ancestor', '<p contenteditable="true"><svg><path d="M,0 0"/></svg></p>', 'html_attribute'],
   ])('gives outer HTML boundaries precedence over malformed SVG: %s', (_name, html, code) => {
@@ -739,7 +860,6 @@ describe('sanitizeHtmlExport — fail-closed structural gate (issue #27)', () =>
     }
     const custom = sanitize('<html style="color:var(--accent)"><body><p>x</p></body></html>');
     expect(custom.ok).toBe(true);
-    if (custom.ok) expect(custom.stripped).toContain('css_rejected.css_custom_property_not_allowed');
   });
 
   it('emits no content-root style rule when html/body have no style attribute', () => {

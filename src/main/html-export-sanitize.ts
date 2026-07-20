@@ -103,6 +103,7 @@ type Context = {
   isAllowedAssetId: (src: string) => boolean;
   stylesheetRules: string[];
   inlineRules: string[];
+  relocatedHeadScripts: SanitizedNode[];
   nextInlineStyle: number;
   cssContext: CssSanitizeContext;
   svgPlans: Map<Node, SvgRootPlan>;
@@ -116,11 +117,10 @@ const ALLOWED_TAGS = new Set([
   'span', 'strong', 'em', 'b', 'i', 'u', 's', 'small', 'mark', 'sub', 'sup', 'br', 'hr', 'ul', 'ol',
   'li', 'dl', 'dt', 'dd', 'blockquote', 'figure', 'figcaption', 'img', 'picture', 'source', 'svg',
   'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'caption', 'code', 'pre', 'kbd', 'samp',
-  'abbr', 'time', 'a',
+  'abbr', 'time', 'a', 'script', 'form', 'input', 'textarea', 'select', 'option', 'optgroup', 'button', 'label', 'fieldset', 'legend',
 ]);
 const ACTIVE_TAGS = new Set([
-  'iframe', 'object', 'embed', 'base', 'frame', 'frameset', 'applet', 'script', 'link', 'template',
-  'slot', 'form', 'input', 'button',
+  'iframe', 'object', 'embed', 'base', 'frame', 'frameset', 'applet', 'link', 'template', 'slot',
 ]);
 const SVG_FALLBACK_TEXT_TAGS = new Set(['text', 'tspan', 'title', 'desc']);
 const SVG_FALLBACK_SKIPPED_TAGS = new Set(['style', 'script', 'foreignobject']);
@@ -131,7 +131,8 @@ const SAFE_ROOT_ATTRIBUTE_NAMES = ['lang', 'dir', 'title', 'role'] as const;
 const SAFE_ROOT_ATTRIBUTE_NAME_SET = new Set<string>(SAFE_ROOT_ATTRIBUTE_NAMES);
 const TABLE_ATTRIBUTES = new Set(['colspan', 'rowspan', 'scope']);
 const IMAGE_ATTRIBUTES = new Set(['alt', 'width', 'height']);
-const RESERVED_CLASS_OR_ID = /^(?:he-s|he-(?:doc|slide|scaler|runtime|manifest|shell|csp)|(?:shell|runtime|manifest|csp))/i;
+const BOOLEAN_FORM_ATTRIBUTES = new Set(['required', 'checked', 'disabled', 'readonly', 'multiple', 'selected']);
+const RESERVED_CLASS_OR_ID = /^(?:nai-|he-s|he-(?:doc|slide|scaler|runtime|manifest|shell|csp)|(?:shell|runtime|manifest|csp))/i;
 const ASSET_ID = /^asset:[A-Za-z0-9_-]{16,128}$/;
 const DIMENSION = /^(?:0|[1-9][0-9]*)(?:px)?$/;
 
@@ -359,20 +360,47 @@ function isReservedValue(value: string): boolean {
 function isAriaAttribute(name: string): boolean {
   return /^aria-[a-z][a-z0-9-]*$/.test(name);
 }
+const SAFE_INPUT_BOUND = /^(?:[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?|\d{4}(?:-\d{2}(?:-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?)?)?|\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)$/i;
+
+function isSafeInputBound(value: string): boolean {
+  return SAFE_INPUT_BOUND.test(value) && (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(value) || Number.isFinite(Number(value)));
+}
+const SAFE_FORM_METADATA_TOKEN = /^[A-Za-z0-9][A-Za-z0-9_-]*(?:\[(?:[A-Za-z0-9][A-Za-z0-9_-]*)?\]){0,2}$/;
+const UNSAFE_FORM_METADATA_TEXT = /^\s*(?:javascript|data|https?|mailto|tel):/i;
+
+function isSafeFormMetadata(name: string, value: string): boolean {
+  return name === 'placeholder'
+    ? !UNSAFE_FORM_METADATA_TEXT.test(value)
+    : SAFE_FORM_METADATA_TOKEN.test(value);
+}
 
 function isAllowedAttribute(tag: string, name: string): boolean {
-  if (GLOBAL_ATTRIBUTES.has(name) || isAriaAttribute(name) || name === 'data-section-id') return true;
+  if (GLOBAL_ATTRIBUTES.has(name) || isAriaAttribute(name) || name === 'data-section-id' || name.startsWith('data-')) return true;
+  if (name.startsWith('on')) return true;
   if (TABLE_ATTRIBUTES.has(name)) return ['th', 'td'].includes(tag);
   if (name === 'datetime') return tag === 'time';
   if (IMAGE_ATTRIBUTES.has(name)) return ['img', 'source'].includes(tag);
   if (name === 'href') return tag === 'a';
   if (name === 'src') return ['img', 'source'].includes(tag);
+  if (name === 'type') return ['input', 'button', 'script'].includes(tag);
+  if (name === 'value') return ['input', 'button', 'option'].includes(tag);
+  if (name === 'name' || name === 'placeholder') return ['input', 'textarea', 'select', 'button'].includes(tag);
+  if (name === 'for') return tag === 'label';
+  if (name === 'label') return ['option', 'optgroup'].includes(tag);
+  if (name === 'required') return ['input', 'textarea', 'select', 'button'].includes(tag);
+  if (name === 'disabled') return ['input', 'textarea', 'select', 'option', 'optgroup', 'button'].includes(tag);
+  if (name === 'checked') return tag === 'input';
+  if (name === 'readonly') return ['input', 'textarea'].includes(tag);
+  if (name === 'selected') return tag === 'option';
+  if (name === 'multiple') return ['input', 'select'].includes(tag);
+  if (['min', 'max', 'step'].includes(name)) return tag === 'input';
   return false;
 }
 
 function hasReservedNamespace(attribute: Attribute): boolean {
   const name = attribute.name.toLowerCase();
   return name.startsWith('data-he-')
+    || name.startsWith('data-nai-')
     || attribute.prefix?.toLowerCase() === 'xlink'
     || attribute.namespace?.toLowerCase().includes('xlink') === true;
 }
@@ -385,7 +413,6 @@ function rejectDangerousAttribute(
   isAllowedAssetId: (src: string) => boolean,
 ): Failure | null {
   const name = attribute.name.toLowerCase();
-  if (name.startsWith('on')) return fail(HTML_VIOLATION_CODES.eventHandler, `event handler attribute ${name}`);
   if (hasReservedNamespace(attribute)) return fail(HTML_VIOLATION_CODES.reservedNamespace, `reserved attribute ${attribute.name}`);
   if (['srcset', 'poster', 'formaction', 'background', 'ping', 'action'].includes(name)) {
     return fail(HTML_VIOLATION_CODES.url, `URL attribute ${name}`);
@@ -431,8 +458,19 @@ function sanitizeAttributes(node: Node, tag: string, context: Context, survives:
       continue;
     }
     if (!survives) continue;
-    if (!isAllowedAttribute(tag, name) || ((name === 'width' || name === 'height') && !DIMENSION.test(attribute.value))) {
+    if (
+      !isAllowedAttribute(tag, name)
+      || ((name === 'width' || name === 'height') && !DIMENSION.test(attribute.value))
+      || (['for', 'name', 'placeholder'].includes(name) && !isSafeFormMetadata(name, attribute.value))
+      || (['min', 'max', 'step'].includes(name)
+        && !(name === 'step' && /^any$/i.test(attribute.value))
+        && !isSafeInputBound(attribute.value))
+    ) {
       context.stripped.push({ code: HTML_VIOLATION_CODES.attribute, detail: `attribute ${name} is not allowed on ${tag}` });
+      continue;
+    }
+    if (BOOLEAN_FORM_ATTRIBUTES.has(name)) {
+      output.push({ name, value: '' });
       continue;
     }
     output.push({ name, value: attribute.value });
@@ -488,6 +526,12 @@ function scanDiscardedNode(node: Node, context: Context): Failure | null {
     const result = sanitizeStylesheet(styleText(node), context.cssContext);
     if (!result.ok) context.stripped.push(...result.violations.map((v) => ({ code: cssRejectedCode(v.code), detail: v.detail })));
     else { context.stripped.push(...result.stripped.map((v) => ({ code: cssRejectedCode(v.code), detail: v.detail }))); context.stylesheetRules.push(result.css); }
+    return null;
+  }
+  if (name === 'script' && !attrs(node).some((attribute) => attribute.name.toLowerCase() === 'src')) {
+    const sanitized = sanitizeNode(node, context, null);
+    if (isFailure(sanitized)) return sanitized;
+    context.relocatedHeadScripts.push(...sanitized);
     return null;
   }
   const attributes = sanitizeAttributes(node, name, context, false);
@@ -652,6 +696,7 @@ export function sanitizeHtmlExport(options: HtmlExportSanitizeOptions): HtmlExpo
       isAllowedAssetId,
       stylesheetRules: [],
       inlineRules: [],
+      relocatedHeadScripts: [],
       nextInlineStyle: 0,
       cssContext,
       svgPlans,
@@ -667,6 +712,7 @@ export function sanitizeHtmlExport(options: HtmlExportSanitizeOptions): HtmlExpo
       if (isFailure(sanitized)) return { ok: false, violations: [sanitized.violation] };
       outputNodes.push(...sanitized);
     }
+    outputNodes.unshift(...context.relocatedHeadScripts);
     outputBody.childNodes = outputNodes as DefaultTreeAdapterTypes.ChildNode[];
     for (const child of outputBody.childNodes) child.parentNode = outputBody;
     context.stripped.push(...svgStripped);

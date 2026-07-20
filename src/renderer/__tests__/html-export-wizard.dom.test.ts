@@ -110,6 +110,7 @@ function lastRequest(deps: HtmlExportDeps): {
   model: { provider: string; id: string };
   viewport?: { width: number; height: number };
   reasoningEffort?: 'low';
+  mode?: 'slide' | 'scroll';
 } {
   const calls = (deps.generateHtmlExport as ReturnType<typeof vi.fn>).mock.calls;
   return calls[calls.length - 1][0];
@@ -196,7 +197,7 @@ describe('mountHtmlExportWizard — summary/chart mode + advanced knobs thread i
     expect(prompt).toContain('summary/chart strength: C');
     expect(prompt).toContain('Detailed brief');
     expect(prompt).toContain('readable width: WIDE reading measure');
-    expect(prompt).toContain('interactivity: allow tasteful CSS-only interactions');
+    expect(prompt).toContain('interactivity: inline JavaScript runs in the final document.');
     expect(prompt).toContain('board-ready digest');
   });
 });
@@ -437,6 +438,7 @@ describe('mountHtmlExportWizard — viewport + abandon invalidation', () => {
 
     expect(deps.generateHtmlExport).toHaveBeenCalledTimes(1);
     expect(lastRequest(deps).viewport).toEqual({ width: 720, height: 1280 });
+    expect(lastRequest(deps).mode).toBe('scroll');
   });
 
   it('sends landscape 1280×720 when orientation is horizontal', async () => {
@@ -449,6 +451,16 @@ describe('mountHtmlExportWizard — viewport + abandon invalidation', () => {
     await flush();
 
     expect(lastRequest(deps).viewport).toEqual({ width: 1280, height: 720 });
+  });
+  it('sends slide mode when the slides layout is selected', async () => {
+    const { host, deps } = setup();
+    click(host, 'orient-horizontal');
+    click(host, 'layout-slides');
+    click(host, 'design-default');
+    click(host, 'generate-submit');
+    await flush();
+
+    expect(lastRequest(deps).mode).toBe('slide');
   });
 
   it('abandon (destroy) after generated invokes cancelHtmlGeneration so main can invalidate the finalized attempt', async () => {

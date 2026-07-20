@@ -208,19 +208,39 @@ async function driveToResolved(
 }
 
 describe('HtmlExportPipelineService.finalize', () => {
-  it('transitions resolved -> finalized and returns a matching finalized ref', async () => {
+  it('injects the scroll runtime without slide navigation', async () => {
     const { service, registry } = serviceFor();
-    const { attemptId, resolvedId, resolvedBytes } = await driveToResolved(service, registry);
+    const { attemptId, resolvedId } = await driveToResolved(service, registry);
 
-    const finalized = service.finalize(1, attemptId, resolvedId);
+    const finalized = service.finalize(1, attemptId, resolvedId, 'scroll');
 
     expect(finalized.ok).toBe(true);
     if (!finalized.ok) return;
+    const bytes = registry.transitions.at(-1)?.bytes;
     expect(finalized.value.artifact.stage).toBe('finalized');
-    expect(finalized.value.artifact.sha256).toBe(digest(resolvedBytes));
-    expect(finalized.value.artifact.byteLength).toBe(resolvedBytes.byteLength);
-    expect(registry.transitions.at(-1)).toMatchObject({ priorId: resolvedId, stage: 'finalized' });
-    expect(registry.transitions.at(-1)?.bytes.equals(resolvedBytes)).toBe(true);
+    expect(finalized.value.artifact.sha256).toBe(digest(bytes!));
+    expect(finalized.value.artifact.byteLength).toBe(bytes!.byteLength);
+    expect(bytes?.toString('utf8')).toContain('id="nai-runtime"');
+    expect(bytes?.toString('utf8')).toContain('if(false)');
+  });
+  it('injects slide navigation for slide-mode requests', async () => {
+    const { service, registry } = serviceFor();
+    const { attemptId, resolvedId } = await driveToResolved(service, registry, 1, '<section class="slide">One</section>');
+
+    const finalized = service.finalize(1, attemptId, resolvedId, 'slide');
+
+    expect(finalized.ok).toBe(true);
+    expect(registry.transitions.at(-1)?.bytes.toString('utf8')).toContain('nai-slide-nav');
+  });
+  it('injects locale-specific labels', async () => {
+    const { service, registry } = serviceFor();
+    const { attemptId, resolvedId } = await driveToResolved(service, registry, 1, '<section class="slide">One</section>');
+
+    const finalized = service.finalize(1, attemptId, resolvedId, 'slide', 'ko');
+
+    expect(finalized.ok).toBe(true);
+    const html = registry.transitions.at(-1)?.bytes.toString('utf8') ?? '';
+    expect(html).toContain('어두운 테마로 전환');
   });
 
   it('returns typed pipeline errors for unknown, wrong-sender, and stale resolved ids', async () => {
@@ -285,22 +305,23 @@ describe('HtmlExportPipelineService.finalize', () => {
 
 describe('HtmlExportPipelineService.readFinalizedArtifact', () => {
   async function driveToFinalized(service: HtmlExportPipelineService, registry: FakeRegistry) {
-    const { attemptId, resolvedId, resolvedBytes } = await driveToResolved(service, registry);
+    const { attemptId, resolvedId } = await driveToResolved(service, registry);
     const finalized = valueOf(service.finalize(1, attemptId, resolvedId));
-    return { attemptId, finalizedId: finalized.artifact.id, resolvedBytes };
+    return { attemptId, finalizedId: finalized.artifact.id };
   }
 
   it('returns the exact main-held finalized bytes with a matching digest', async () => {
     const { service, registry } = serviceFor();
-    const { attemptId, finalizedId, resolvedBytes } = await driveToFinalized(service, registry);
+    const { attemptId, finalizedId } = await driveToFinalized(service, registry);
 
     const read = service.readFinalizedArtifact(1, attemptId, finalizedId);
 
     expect(read.ok).toBe(true);
     if (!read.ok) return;
-    expect(read.value.bytes.equals(resolvedBytes)).toBe(true);
-    expect(read.value.sha256).toBe(digest(resolvedBytes));
-    expect(read.value.byteLength).toBe(resolvedBytes.byteLength);
+    const finalizedBytes = registry.transitions.at(-1)?.bytes;
+    expect(read.value.bytes.equals(finalizedBytes!)).toBe(true);
+    expect(read.value.sha256).toBe(digest(finalizedBytes!));
+    expect(read.value.byteLength).toBe(finalizedBytes!.byteLength);
   });
 
   it('returns typed errors for unknown, wrong-sender, and stale finalized ids', async () => {

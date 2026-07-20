@@ -25,6 +25,8 @@ import {
   type HtmlExportPipelineServiceOptions,
   type HtmlExportSanitizedPayload,
 } from '../main/html-export-pipeline-service';
+import { bundleSanitizedHtml } from '../main/html-export-shell';
+import { htmlExportRuntimeSha256 } from '../main/html-export-runtime';
 
 type Artifact = {
   ref: HtmlExportArtifactRef;
@@ -778,5 +780,25 @@ describe('HtmlExportPipelineService', () => {
     expect(seen).toHaveLength(1);
     expect(seen[0].contentRootClass).toBe('dark');
     expect(seen[0].contentRootId).toBe('app');
+  });
+  it('injects the requested runtime before quarantine resolution and preserves final bytes', async () => {
+    for (const mode of ['slide', 'scroll'] as const) {
+      const { service, registry } = serviceFor(undefined, undefined, async (payload) => bundleSanitizedHtml(payload).html);
+      const attemptId = start(service);
+      const raw = valueOf(service.storeRawModelOutput(1, attemptId, '<section class="slide">one</section><section class="slide">two</section>'));
+      const sanitized = valueOf(await service.sanitize(1, attemptId, raw.id)).artifact;
+      const resolved = valueOf(await service.resolve(1, attemptId, sanitized.id, mode)).artifact;
+      const measured = registry.transitions.at(-1)!;
+      const finalized = valueOf(service.finalize(1, attemptId, resolved.id, mode)).artifact;
+      const finalArtifact = registry.transitions.at(-1)!;
+
+      expect(measured.stage).toBe('resolved');
+      const measuredHtml = measured.bytes.toString('utf8');
+      expect(measuredHtml).toContain('id="nai-runtime"');
+      expect(measuredHtml.includes('if(true){var deck=content||document.body,slides=')).toBe(mode === 'slide');
+      expect(measuredHtml).toContain(`"runtimeSha256":"${htmlExportRuntimeSha256(mode)}"`);
+      expect(finalArtifact.bytes).toEqual(measured.bytes);
+      expect(finalized.sha256).toBe(digest(finalArtifact.bytes));
+    }
   });
 });

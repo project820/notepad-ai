@@ -22,6 +22,7 @@ import type {
   ResolvedArtifactId,
   SanitizedArtifactId,
 } from '../shared/html-export-pipeline';
+import type { HtmlExportRuntimeLocale } from './html-export-runtime-labels';
 
 /** Renderer-safe route/model metadata (no secrets, no paths). */
 export type GenerationRoute = {
@@ -81,11 +82,15 @@ export type OrchestratorPipeline = {
     webContentsId: number,
     attemptId: HtmlExportAttemptId,
     sanitizedCandidateId: SanitizedArtifactId,
+    mode?: 'slide' | 'scroll',
+    locale?: HtmlExportRuntimeLocale,
   ): Promise<HtmlExportPipelineResult<{ artifact: HtmlExportArtifactRef<'resolved'> }>>;
   finalize(
     webContentsId: number,
     attemptId: HtmlExportAttemptId,
     resolvedArtifactId: ResolvedArtifactId,
+    mode?: 'slide' | 'scroll',
+    locale?: HtmlExportRuntimeLocale,
   ): HtmlExportPipelineResult<{ artifact: HtmlExportArtifactRef<'finalized'> }>;
   invalidateAttempt(webContentsId: number, attemptId: HtmlExportAttemptId): unknown;
 };
@@ -169,7 +174,7 @@ export class HtmlExportGenerationOrchestrator {
   async run(
     webContentsId: number,
     prompt: string,
-    opts?: { signal?: AbortSignal },
+    opts?: { signal?: AbortSignal; mode?: 'slide' | 'scroll'; locale?: HtmlExportRuntimeLocale },
   ): Promise<GenerationAttemptResult> {
     const signal = opts?.signal;
     if (signal?.aborted) {
@@ -266,7 +271,13 @@ export class HtmlExportGenerationOrchestrator {
 
       // (f) resolve
       stage = 'resolve';
-      const resolved = await this.pipeline.resolve(webContentsId, attemptId, sanitizedArtifactId);
+      const resolved = await this.pipeline.resolve(
+        webContentsId,
+        attemptId,
+        sanitizedArtifactId,
+        opts?.mode ?? 'scroll',
+        opts?.locale ?? 'en',
+      );
       if (!resolved.ok) {
         return failed('resolve', resolved.error.kind);
       }
@@ -306,7 +317,15 @@ export class HtmlExportGenerationOrchestrator {
 
       // (i) finalize
       stage = 'finalize';
-      const finalized = this.pipeline.finalize(webContentsId, attemptId, resolvedArtifactId);
+      const finalized = opts?.mode === undefined && opts?.locale === undefined
+        ? this.pipeline.finalize(webContentsId, attemptId, resolvedArtifactId)
+        : this.pipeline.finalize(
+          webContentsId,
+          attemptId,
+          resolvedArtifactId,
+          opts?.mode,
+          opts?.locale,
+        );
       if (!finalized.ok) {
         return failed('finalize', finalized.error.kind);
       }

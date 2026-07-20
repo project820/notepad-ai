@@ -90,6 +90,7 @@ function configDirectiveLines(config: DirectExportConfig): string[] {
     `- ${modeLine(config.mode)}`,
     `- ${densityLine(config.density)}`,
   ];
+  if (config.mode === 'slide') lines.push('- slide markup contract: every slide MUST be exactly <section class="slide">…</section>, and each slide MUST occupy one viewport.');
 
   if (config.customPurpose) {
     lines.push(`- custom purpose brief (weight heavily): ${config.customPurpose}`);
@@ -111,7 +112,7 @@ function configDirectiveLines(config: DirectExportConfig): string[] {
   if (typeof config.interactive === 'boolean') {
     lines.push(
       config.interactive
-        ? '- interactivity: allow tasteful CSS-only interactions (no JavaScript)'
+        ? '- interactivity: inline JavaScript runs in the final document. Author frontier-quality, self-contained interactions appropriate to the content (tabs, accordions, hover states, animated reveals, inline-SVG chart interactions, and counters). Network APIs are unavailable under CSP; keep everything inline.'
         : '- interactivity: static document only (no interactive affordances)',
     );
   }
@@ -164,9 +165,9 @@ const HTML_EXPORT_DIRECT_DESIGN_KNOWLEDGE = [
   '1. Classify the screen by reader task (narrative/marketing, report/dashboard, article/reference, instruction, or command) and turn the source into jobs — introduce, explain, substantiate, compare, decide, orient, retain — sequenced for that job, not for fashion.',
   '2. Preserve the source reading order and distinguish titles, prose, lists, tables, quotations, code, and data with real semantic HTML; keep evidence adjacent to its claim.',
   '3. Name the layout problem (flow, repetition, comparison, or primary/supporting context) and choose HTML structure + CSS that solves it: restrained flow for explanation, parallel items for repeated facts, tables for comparison.',
-  '4. Author complete, self-contained HTML with inline CSS — no scripts, no external fonts/assets. IMAGES: an <img> src may ONLY be an app-issued opaque asset ID (src="asset:…") explicitly listed in this prompt; NEVER emit data: URIs, remote URLs, or invented images. When no asset ID is provided, author without <img> and express any decoration in CSS. Every visual choice — layout, spacing, color, type scale — is yours to encode in CSS, honoring the design authority above.',
-  '5. Use only LITERAL CSS values. CSS custom properties (`--name`) and `var()` are NOT supported and will be rejected — write concrete values inline. Global element selectors (html/body/:root/*) are allowed (scoped to the export content root) but prefer authoring styles against document content. CSS font-size and the size token of the font shorthand must use 0, Npx, or absolute keywords only (xx-small through xxx-large); never rem, em, or % because relative font sizes are rejected by the sanitizer.',
-  '6. Use ONLY the supported HTML tag vocabulary (structural: section, article, main, aside, nav, header, footer, div, h1–h6, p, ul/ol/li, dl/dt/dd, figure/figcaption, blockquote, table/thead/tbody/tfoot/tr/th/td/caption, img/picture/source, svg; inline: span, strong/em/b/i/u/s, small, mark, sub/sup, code/pre/kbd/samp, abbr, time, a, br, hr). Attach classes, ids, and inline styles ONLY to these tags — unsupported tags are unwrapped and their attributes dropped, which orphans any CSS that targets them.',
+  '4. Author complete, self-contained HTML with inline CSS. Inline JavaScript is allowed only when interactivity is enabled; never use remote scripts, network APIs, external fonts, or external assets. IMAGES: an <img> src may ONLY be an app-issued opaque asset ID (src="asset:…") explicitly listed in this prompt; NEVER emit data: URIs, remote URLs, or invented images. When no asset ID is provided, author without <img> and express any decoration in CSS. Every visual choice — layout, spacing, color, type scale — is yours to encode in CSS, honoring the design authority above.',
+  '5. Define BOTH palettes with CSS custom properties under [data-theme="light"] and [data-theme="dark"]; route every authored color through var(). The app injects a theme toggle that switches data-theme. Global element selectors (html/body/:root/*) are allowed (scoped to the export content root) but prefer authoring styles against document content.',
+  '6. Use ONLY the supported HTML tag vocabulary (structural: section, article, main, aside, nav, header, footer, div, h1–h6, p, ul/ol/li, dl/dt/dd, figure/figcaption, blockquote, table/thead/tbody/tfoot/tr/th/td/caption, img/picture/source, svg, form/input/button/textarea/select/option/optgroup/label/fieldset/legend; inline: span, strong/em/b/i/u/s, small, mark, sub/sup, code/pre/kbd/samp, abbr, time, a, br, hr, script). Attach classes, ids, data attributes, inline styles, and event attributes only to these tags — unsupported tags are unwrapped and their attributes dropped, which orphans any CSS that targets them.',
   '7. Links: use <a href> only for non-empty same-document fragments (#id); render external/source URLs as plain text.',
 ].join('\n');
 
@@ -232,7 +233,7 @@ export function buildDirectHtmlPrompt(
     '- Treat design.md as visual authority when present; realize its hierarchy, mood, and signature elements in HTML/CSS.',
     '- Preserve critical facts, numbers, names, quotes, and code from the source.',
     '- Self-contained only: inline CSS, no external stylesheets, no remote scripts, no network fetches.',
-    '- CSS font-size and the font shorthand size must use px, 0, or absolute keywords only (medium, large, …). Never rem, em, or % for font size — relative font sizes are rejected.',
+    '- Use readable CSS font sizes; px, rem, em, and % are supported.',
     '- Images: an <img> src may ONLY be an app-issued asset ID (src="asset:…") explicitly provided in this prompt; never data: URIs, never remote or relative URLs. No provided asset IDs means no <img> elements.',
     '- Anchors: an <a href> may ONLY be a non-empty same-document fragment (#id). NEVER use https:, http:, mailto:, or any other scheme.',
     '- Render external/source links from Markdown as plain text (the URL may appear as visible text); NEVER use <a href="https://…">.',
@@ -337,7 +338,7 @@ export function buildSectionPrompt(
     '- Preserve facts from the section source; do not silently drop material in this range.',
     '- Self-contained styling preferences: inline styles or classes that compose with a later shell.',
     '- Images: an <img> src may ONLY be an app-issued asset ID (src="asset:…") explicitly provided in this prompt; never data: URIs, never remote or relative URLs. No provided asset IDs means no <img> elements.',
-    '- CSS font-size and the font shorthand size must use px, 0, or absolute keywords only (medium, large, …). Never rem, em, or % for font size — relative font sizes are rejected.',
+    '- Use readable CSS font sizes; px, rem, em, and % are supported.',
     '- Anchors: an <a href> may ONLY be a non-empty same-document fragment (#id). NEVER use https:, http:, mailto:, or any other scheme.',
     '- Render external/source links from Markdown as plain text (the URL may appear as visible text); NEVER use <a href="https://…">.',
     '',

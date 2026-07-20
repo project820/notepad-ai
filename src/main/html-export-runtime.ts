@@ -1,0 +1,53 @@
+import { sha256Base64 } from '../shared/sha256';
+import { findHtmlExportBodyEnd, findHtmlExportHeadCspMetaTags } from './html-export-document-markers';
+import { htmlExportRuntimeLabels, type HtmlExportRuntimeLabels } from './html-export-runtime-labels';
+
+export type HtmlExportRuntimeMode = 'scroll' | 'slide';
+
+const HTML_EXPORT_INTERACTIVE_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'";
+const HTML_EXPORT_INTERACTIVE_CSP_META = `<meta http-equiv="Content-Security-Policy" content="${HTML_EXPORT_INTERACTIVE_CSP}">`;
+
+function runtimeSource(mode: HtmlExportRuntimeMode, labels: HtmlExportRuntimeLabels): string {
+  const slide = mode === 'slide' ? 'true' : 'false';
+  return `(function(){var root=document.documentElement,content=document.querySelector('[data-he-content]'),labels=${JSON.stringify(labels)};if(root.dataset.naiRuntime)return;root.dataset.naiRuntime='true';var button=document.createElement('button'),style=document.createElement('style'),printStyle=document.createElement('style');printStyle.id='nai-print-controls';printStyle.textContent='@media print{#nai-runtime-toggle,#nai-slide-nav{display:none!important}}';document.head.appendChild(printStyle);button.id='nai-runtime-toggle';button.type='button';button.className='nai-theme-toggle';button.style.cssText='position:fixed;top:12px;right:12px;z-index:2147483647;border:0;border-radius:999px;padding:8px 10px;cursor:pointer;background:#111;color:#fff';function setTheme(theme){root.dataset.theme=theme;if(content)content.dataset.theme=theme;try{localStorage.setItem('nai-theme',theme)}catch(_e){}button.textContent=theme==='dark'?'☀':'🌙';var label=theme==='dark'?labels.switchToLightTheme:labels.switchToDarkTheme;button.setAttribute('aria-label',label);button.title=label}var saved;try{saved=localStorage.getItem('nai-theme')}catch(_e){}setTheme(saved==='light'||saved==='dark'?saved:(matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'));button.addEventListener('click',function(){setTheme(root.dataset.theme==='dark'?'light':'dark')});document.body.appendChild(button);function groupingRuleMatches(rule){try{if((typeof CSSMediaRule!='undefined'&&rule instanceof CSSMediaRule)||rule.type===4)return window.matchMedia(rule.conditionText).matches;if((typeof CSSSupportsRule!='undefined'&&rule instanceof CSSSupportsRule)||rule.type===12)return CSS.supports(rule.conditionText)}catch(_e){}return true}function hasAuthoredTheme(rule,themeValue){if(rule.cssRules&&rule.cssRules.length){if(!groupingRuleMatches(rule))return false;return Array.prototype.some.call(rule.cssRules,function(child){return hasAuthoredTheme(child,themeValue)})}if(!rule.selectorText||rule.selectorText.indexOf('data-he-content')===-1||rule.selectorText.toLowerCase().indexOf('data-theme')===-1||!Array.prototype.some.call(rule.style||[],function(name){return String(name).indexOf('--')===0}))return false;var selector=rule.selectorText.toLowerCase();if(selector.indexOf('=\"'+themeValue+'\"')===-1&&selector.indexOf("='"+themeValue+"'")===-1&&selector.indexOf('='+themeValue)===-1&&selector.indexOf('data-theme]')===-1)return false;var theme=content.dataset.theme;content.dataset.theme=themeValue;var matches=content.matches(rule.selectorText);content.dataset.theme=theme;return matches}var missingThemes=content?['light','dark'].filter(function(theme){return !Array.prototype.some.call(document.styleSheets,function(sheet){if(sheet.ownerNode&&(!sheet.ownerNode.isConnected||sheet.ownerNode.id==='nai-theme-fallback'))return false;try{return Array.prototype.some.call(sheet.cssRules||[],function(rule){return hasAuthoredTheme(rule,theme)})}catch(_e){return false}})}):['light','dark'];if(missingThemes.indexOf('dark')!==-1){style.id='nai-theme-fallback';style.textContent='[data-he-content][data-theme="dark"]{filter:invert(1) hue-rotate(180deg)}[data-he-content][data-theme="dark"] img,[data-he-content][data-theme="dark"] video{filter:invert(1) hue-rotate(180deg)}';document.head.appendChild(style)}if(${slide}){var deck=content||document.body,slides=Array.prototype.slice.call(deck.querySelectorAll('section.slide')).filter(function(candidate){var ancestor=candidate.parentElement&&candidate.parentElement.closest('section.slide');return !ancestor||!deck.contains(ancestor)});if(!slides.length){slides=Array.prototype.slice.call((content||document.body).children).filter(function(node){return node.tagName==='SECTION'})}if(!slides.length)return;var index=0,controls=document.createElement('div'),previous=document.createElement('button'),next=document.createElement('button'),indicator=document.createElement('span');controls.id='nai-slide-nav';controls.className='nai-slide-nav';controls.style.cssText='position:fixed;bottom:12px;right:12px;z-index:2147483647;display:flex;gap:8px;align-items:center;background:#111;color:#fff;padding:8px;border-radius:999px';previous.type=next.type='button';previous.textContent='‹';next.textContent='›';previous.setAttribute('aria-label',labels.previousSlide);previous.title=labels.previousSlide;next.setAttribute('aria-label',labels.nextSlide);next.title=labels.nextSlide;function show(n){index=(n+slides.length)%slides.length;slides.forEach(function(s,i){s.classList.toggle('active',i===index);if(i===index)s.style.removeProperty('display');else s.style.setProperty('display','none','important');s.style.minHeight='100vh'});indicator.textContent=(index+1)+'/'+slides.length;var indicatorLabel=labels.slideIndicator.replace('{current}',String(index+1)).replace('{total}',String(slides.length));indicator.setAttribute('aria-label',indicatorLabel);indicator.title=indicatorLabel;slides[index].scrollIntoView({block:'start'})}previous.addEventListener('click',function(){show(index-1)});next.addEventListener('click',function(){show(index+1)});function showForPrint(){slides.forEach(function(s){s.classList.add('active');s.style.removeProperty('display')})}window.addEventListener('beforeprint',showForPrint);window.addEventListener('afterprint',function(){show(index)});var printMedia=window.matchMedia&&window.matchMedia('print');if(printMedia){var printChange=function(event){if(event.matches)showForPrint();else show(index)};if(printMedia.addEventListener)printMedia.addEventListener('change',printChange);else if(printMedia.addListener)printMedia.addListener(printChange)}controls.append(previous,indicator,next);document.body.appendChild(controls);document.addEventListener('keydown',function(event){var target=event.target;if(target instanceof HTMLInputElement||target instanceof HTMLTextAreaElement||target instanceof HTMLButtonElement||target instanceof HTMLSelectElement||target&&target.tagName==='SUMMARY'||target&&target instanceof Element&&target.closest('[contenteditable]'))return;if(['ArrowRight','PageDown',' '].includes(event.key)){event.preventDefault();show(index+1)}else if(['ArrowLeft','PageUp'].includes(event.key)){event.preventDefault();show(index-1)}});show(0)}})();`;
+}
+
+export function htmlExportRuntimeSha256(
+  mode: HtmlExportRuntimeMode = 'scroll',
+  labels: HtmlExportRuntimeLabels = htmlExportRuntimeLabels(),
+): string {
+  return sha256Base64(runtimeSource(mode, labels));
+}
+
+/** Adds or replaces the app-owned runtime after sanitization. */
+export function injectHtmlExportRuntime(
+  html: string,
+  mode: HtmlExportRuntimeMode = 'scroll',
+  labels: HtmlExportRuntimeLabels = htmlExportRuntimeLabels(),
+): string {
+  const { cspMetaRanges, headContentStart } = findHtmlExportHeadCspMetaTags(html);
+  let output = html;
+  for (const { start, end } of [...cspMetaRanges].reverse()) {
+    output = `${output.slice(0, start)}${output.slice(end)}`;
+  }
+  if (headContentStart !== -1) {
+    output = `${output.slice(0, headContentStart)}${HTML_EXPORT_INTERACTIVE_CSP_META}${output.slice(headContentStart)}`;
+  } else {
+    output = `${HTML_EXPORT_INTERACTIVE_CSP_META}${output}`;
+  }
+  const script = `<script id="nai-runtime">${runtimeSource(mode, labels)}</script>`;
+  output = /<script\s+id=["']nai-runtime["'][^>]*>[\s\S]*?<\/script\s*>/i.test(output)
+    ? output.replace(/<script\s+id=["']nai-runtime["'][^>]*>[\s\S]*?<\/script\s*>/i, script)
+    : (() => {
+      const bodyEnd = findHtmlExportBodyEnd(output);
+      return bodyEnd === -1 ? `${output}${script}` : `${output.slice(0, bodyEnd)}${script}${output.slice(bodyEnd)}`;
+    })();
+  const manifestScript = /(<script\b(?=[^>]*\bid=["']he-manifest["'])[^>]*>)([\s\S]*?)(<\/script\s*>)/i;
+  return output.replace(manifestScript, (_match, open, manifest, close) => {
+    const patchedManifest = manifest.replace(
+      /("runtimeSha256"\s*:\s*")[^"]*(")/,
+      `$1${htmlExportRuntimeSha256(mode, labels)}$2`,
+    );
+    return `${open}${patchedManifest}${close}`;
+  });
+}
