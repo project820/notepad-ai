@@ -377,6 +377,10 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
   function authorizeCloseLease(id: string): boolean {
     return closeLease?.id === id && !closeLease.invalidated && !closeLease.consumed && closeLease.revision === ctx.docRevision;
   }
+  function canPersistShutdown(id: string, revision: number): boolean {
+    return authorizeCloseLease(id) && revision === ctx.docRevision && !previewSyncFailed;
+  }
+
 
   function consumeCloseLease(id: string): boolean {
     if (!authorizeCloseLease(id)) return false;
@@ -530,6 +534,7 @@ export function initDocLifecycle(ctx: AppContext, deps: DocLifecycleDeps) {
     beginCloseLease,
     consumeCloseLease,
     authorizeCloseLease,
+    canPersistShutdown,
     fenceDiscard,
     rollbackDiscardFence,
     setPreviewFlushGate,

@@ -139,6 +139,7 @@ async function setup(
   productionWindows = false,
   fileGrants: unknown = { release: () => {} },
   projectWizardRoots: unknown = { release: () => {} },
+  commitShutdownSession: (snapshots: readonly unknown[]) => Promise<void> = async () => {},
 ) {
 
   electron.reset();
@@ -174,6 +175,7 @@ async function setup(
     removeSessionWindows,
     commitQuitSession,
     showCloseDialog: async () => showCloseDialog(),
+    commitShutdownSession: commitShutdownSession as never,
   });
   electron.setOnSend((win, channel, payload) => {
     if (channel === 'close:query-state') {
@@ -356,6 +358,25 @@ describe('discard close IPC waiters', () => {
     expect(removeSessionWindow).toHaveBeenCalledTimes(1);
     expect(removeSessionWindow).toHaveBeenCalledWith(lateWindowKey);
     expect(coordinatedKeys).not.toContain(removeSessionWindow.mock.calls[0][0]);
+  });
+  it('uses removed-key semantics for relaunch without committing quit or shutdown state', async () => {
+    const commitQuitSession = vi.fn(async () => {});
+    const commitShutdownSession = vi.fn(async () => {});
+    const removeSessionWindows = vi.fn(async () => {});
+    const { appWindows } = await setup((win, channel, payload) => {
+      if (channel === 'close:discard') {
+        electron.emitIpc('close:discard-result', win, { requestId: payload.requestId, fenced: true });
+      }
+      if (channel === 'close:consume') {
+        electron.emitIpc('close:consume-result', win, { requestId: payload.requestId, consumed: true });
+      }
+    }, async () => 'discard', 1, () => true, commitQuitSession, async () => {}, removeSessionWindows, undefined, false, undefined, undefined, commitShutdownSession);
+
+    await expect(appWindows.approveAllForQuit('relaunch')).resolves.toBe(true);
+
+    expect(removeSessionWindows).toHaveBeenCalledWith(['window-1']);
+    expect(commitQuitSession).not.toHaveBeenCalled();
+    expect(commitShutdownSession).not.toHaveBeenCalled();
   });
 
   it('cancels a peer prepare and rolls back both targets when one prepare fails', async () => {
@@ -623,5 +644,115 @@ describe('discard close IPC waiters', () => {
 
     expect(rollbackResults).toEqual([false]);
     expect(appWindows.isSessionWriteFenced('window-1')).toBe(false);
+  });
+  describe('shutdown persistence', () => {
+    it('persists snapshots without opening a close dialog and accepts file-save fallback', async () => {
+      const showCloseDialog = vi.fn(async () => 'cancel' as const);
+      const commitShutdownSession = vi.fn(async () => {});
+      const sent: string[] = [];
+      const { appWindows } = await setup((win, channel, payload) => {
+        sent.push(channel);
+        if (channel === 'close:shutdown-persist:request') {
+          electron.emitIpc('close:shutdown-persist:result', win, {
+            id: payload.id,
+            ok: true,
+            fileSaved: false,
+            revision: payload.revision,
+            snapshot: { doc: 'latest', dirty: true, path: '/untrusted.md' },
+          });
+        }
+        if (channel === 'close:consume') {
+          electron.emitIpc('close:consume-result', win, { requestId: payload.requestId, consumed: true });
+        }
+      }, showCloseDialog, 1, () => true, async () => {}, async () => {}, async () => {}, undefined, false, undefined, undefined, commitShutdownSession);
+
+      await expect(appWindows.approveAllForQuit('shutdown')).resolves.toBe(true);
+
+      expect(showCloseDialog).not.toHaveBeenCalled();
+      expect(sent).not.toContain('close:save');
+      expect(commitShutdownSession).toHaveBeenCalledWith([expect.objectContaining({
+        id: 'window-1',
+        path: '/tmp/draft.md',
+        doc: 'latest',
+        dirty: true,
+      })]);
+    });
+    it('excludes an unready empty window from shutdown persistence', async () => {
+      const commitShutdownSession = vi.fn(async () => {});
+      const { appWindows, records } = await setup((win, channel, payload) => {
+        if (channel === 'close:shutdown-persist:request') {
+          electron.emitIpc('close:shutdown-persist:result', win, {
+            id: payload.id,
+            ok: true,
+            fileSaved: false,
+            revision: payload.revision,
+            snapshot: { doc: `latest-${win.id}`, dirty: true },
+          });
+        }
+        if (channel === 'close:consume') {
+          electron.emitIpc('close:consume-result', win, { requestId: payload.requestId, consumed: true });
+        }
+      }, async () => {
+        throw new Error('shutdown must not open a dialog');
+      }, 3, () => true, async () => {}, async () => {}, async () => {}, undefined, false, undefined, undefined, commitShutdownSession);
+      records[2].ready = false;
+      records[2].currentPath = null;
+
+      await expect(appWindows.approveAllForQuit('shutdown')).resolves.toBe(true);
+
+      expect(commitShutdownSession).toHaveBeenCalledWith([
+        expect.objectContaining({ id: 'window-1', doc: 'latest-1' }),
+        expect.objectContaining({ id: 'window-2', doc: 'latest-2' }),
+      ]);
+    });
+
+    it('denies stale shutdown snapshots without consuming a lease', async () => {
+      const commitShutdownSession = vi.fn(async () => {});
+      const consumed = vi.fn();
+      const { appWindows } = await setup((win, channel, payload) => {
+        if (channel === 'close:shutdown-persist:request') {
+          electron.emitIpc('close:shutdown-persist:result', win, {
+            id: payload.id,
+            ok: true,
+            fileSaved: true,
+            revision: payload.revision + 1,
+            snapshot: { doc: 'stale' },
+          });
+        }
+        if (channel === 'close:consume') consumed();
+      }, async () => {
+        throw new Error('shutdown must not open a dialog');
+      }, 1, () => true, async () => {}, async () => {}, async () => {}, undefined, false, undefined, undefined, commitShutdownSession);
+
+      await expect(appWindows.approveAllForQuit('shutdown')).resolves.toBe(false);
+
+      expect(consumed).not.toHaveBeenCalled();
+      expect(commitShutdownSession).not.toHaveBeenCalled();
+    });
+
+    it('denies and clears the session fence when shutdown session commit fails', async () => {
+      const commitShutdownSession = vi.fn(async () => { throw new Error('session write failed'); });
+      const { appWindows } = await setup((win, channel, payload) => {
+        if (channel === 'close:shutdown-persist:request') {
+          electron.emitIpc('close:shutdown-persist:result', win, {
+            id: payload.id,
+            ok: true,
+            fileSaved: true,
+            revision: payload.revision,
+            snapshot: { doc: 'latest' },
+          });
+        }
+        if (channel === 'close:consume') {
+          electron.emitIpc('close:consume-result', win, { requestId: payload.requestId, consumed: true });
+        }
+      }, async () => {
+        throw new Error('shutdown must not open a dialog');
+      }, 1, () => true, async () => {}, async () => {}, async () => {}, undefined, false, undefined, undefined, commitShutdownSession);
+
+      await expect(appWindows.approveAllForQuit('shutdown')).resolves.toBe(false);
+
+      expect(commitShutdownSession).toHaveBeenCalledOnce();
+      expect(appWindows.isSessionWriteFenced('window-1')).toBe(false);
+    });
   });
 });

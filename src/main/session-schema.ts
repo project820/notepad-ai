@@ -45,7 +45,36 @@ export type SessionSnapshotV2 = {
   version: 2;
   windows: SessionWindowSnapshot[];
   cleanExit?: boolean;
+  restoreReason?: 'shutdown';
 };
+export function isRestorableSessionWindow(snapshot: Pick<SessionWindowSnapshot, 'doc' | 'unifiedChatHistory'>): boolean {
+  return (snapshot.doc?.length ?? 0) > 0 || (snapshot.unifiedChatHistory?.length ?? 0) > 0;
+}
+
+export function normalizeWindowSnapshot(
+  id: string,
+  currentPath: string | null | undefined,
+  raw: unknown,
+): SessionWindowSnapshot {
+  const r = isRecord(raw) ? raw : {};
+  const win: SessionWindowSnapshot = {
+    id,
+    path: currentPath ?? null,
+    title: typeof r.title === 'string' ? r.title : null,
+    doc: typeof r.doc === 'string' ? r.doc : '',
+  };
+  if (typeof r.savedAt === 'number') win.savedAt = r.savedAt;
+  if (typeof r.splitRatio === 'number') win.splitRatio = r.splitRatio;
+  const view = asViewMode(r.view);
+  if (view) win.view = view;
+  const chat = cloneArray<SessionChatMessage>(r.chatHistory);
+  if (chat) win.chatHistory = chat;
+  const unified = cloneArray<SessionUnifiedChatEntry>(r.unifiedChatHistory);
+  if (unified) win.unifiedChatHistory = unified;
+  if (typeof r.model === 'string') win.model = r.model;
+  if (typeof r.dirty === 'boolean') win.dirty = r.dirty;
+  return win;
+}
 
 /** Deterministic id assigned to the single window produced by a legacy migration. */
 export const LEGACY_WINDOW_ID = 'legacy';
@@ -98,6 +127,7 @@ function normalizeV2(raw: Record<string, unknown>): SessionSnapshotV2 {
   }
   const out: SessionSnapshotV2 = { version: 2, windows };
   if (typeof raw.cleanExit === 'boolean') out.cleanExit = raw.cleanExit;
+  if (raw.restoreReason === 'shutdown') out.restoreReason = 'shutdown';
   return out;
 }
 

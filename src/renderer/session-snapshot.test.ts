@@ -27,8 +27,124 @@ afterEach(() => {
   setLocale('en');
   delete (window as any).confirm;
   vi.restoreAllMocks();
+  vi.useRealTimers();
+  document.body.replaceChildren();
+});
+function createRestoreHarness(response: unknown) {
+  const replaceDocument = vi.fn();
+  const applyPreviewMode = vi.fn();
+  const setUnifiedChatHistory = vi.fn();
+  const unifiedRestore = vi.fn();
+  const setStatus = vi.fn();
+  const ctx = {
+    currentPath: null,
+    pendingTitle: null,
+    previewMode: 'split',
+    dirty: false,
+    editor: { getDoc: () => 'draft' },
+    setStatus,
+  } as unknown as AppContext;
+  (window as any).api = {
+    sessionGet: vi.fn(async () => response),
+    sessionWrite: vi.fn(async () => {}),
+    sessionClear: vi.fn(async () => {}),
+  };
+  initSessionSnapshot(ctx, {
+    prefs: { theme: 'system', fontSize: 'md' },
+    unifiedChat: { restore: unifiedRestore } as never,
+    getUnifiedChatHistory: () => [{ type: 'separator', label: 'restored' }],
+    setUnifiedChatHistory,
+    setUnifiedChatOpen: vi.fn(),
+    applyPreviewMode,
+    replaceDocument,
+  });
+  return { replaceDocument, applyPreviewMode, setUnifiedChatHistory, unifiedRestore, sessionClear: (window as any).api.sessionClear };
+}
+
+describe('session restore mode', () => {
+  it('applies shutdown restores immediately without creating a banner', async () => {
+    vi.useFakeTimers();
+    const restore = createRestoreHarness({
+      snapshot: {
+        doc: 'shutdown draft',
+        path: '/restored.md',
+        title: 'Restored',
+        dirty: true,
+        view: 'preview-only',
+        unifiedChatHistory: [{ type: 'separator', label: 'restored' }],
+      },
+      restoreReason: 'shutdown',
+    });
+
+    await Promise.resolve();
+
+    expect(restore.replaceDocument).toHaveBeenCalledWith({
+      doc: 'shutdown draft',
+      currentPath: '/restored.md',
+      pendingTitle: 'Restored',
+      dirty: true,
+    });
+    expect(restore.applyPreviewMode).toHaveBeenCalledOnce();
+    expect(restore.setUnifiedChatHistory).toHaveBeenCalledOnce();
+    expect(restore.unifiedRestore).toHaveBeenCalledOnce();
+    expect(document.querySelector('.restore-yes')).toBeNull();
+  });
+
+  it('keeps crash restores behind the banner and clears on No', async () => {
+    vi.useFakeTimers();
+    const restore = createRestoreHarness({ snapshot: { doc: 'crash draft' } });
+
+    await Promise.resolve();
+    expect(restore.replaceDocument).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(400);
+
+    expect(document.querySelector('.restore-yes')).not.toBeNull();
+    (document.querySelector('.restore-no') as HTMLButtonElement).click();
+    expect(restore.sessionClear).toHaveBeenCalledOnce();
+    expect(restore.replaceDocument).not.toHaveBeenCalled();
+  });
+
+  it('applies crash restores only after Yes, including after a consumed shutdown marker', async () => {
+    vi.useFakeTimers();
+    createRestoreHarness({
+      snapshot: { doc: 'shutdown draft' },
+      restoreReason: 'shutdown',
+    });
+    await Promise.resolve();
+    document.body.replaceChildren();
+
+    const restore = createRestoreHarness({ snapshot: { doc: 'next crash draft' } });
+    await Promise.resolve();
+    expect(restore.replaceDocument).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(400);
+
+    (document.querySelector('.restore-yes') as HTMLButtonElement).click();
+    expect(restore.replaceDocument).toHaveBeenCalledWith({
+      doc: 'next crash draft',
+      currentPath: null,
+      pendingTitle: null,
+      dirty: false,
+    });
+  });
 });
 
+describe('buildSessionSnapshot', () => {
+  it('returns the same current payload used by scheduled writes', () => {
+    (window as any).api = { sessionGet: vi.fn(async () => undefined) };
+
+    const snapshot = createSessionSnapshot().buildSessionSnapshot();
+
+    expect(snapshot).toMatchObject({
+      path: null,
+      title: null,
+      doc: 'draft',
+      view: 'split',
+      unifiedChatHistory: [],
+      dirty: false,
+    });
+    expect(snapshot.savedAt).toEqual(expect.any(Number));
+  });
+});
 describe('requestLocaleRestart', () => {
   it('leaves locale and preferences untouched when restart is cancelled', async () => {
     const sessionWrite = vi.fn(async () => {});

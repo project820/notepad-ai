@@ -60,6 +60,19 @@ describe('document close lease and replacement lifecycle', () => {
     expect(sendCloseLeaseInvalidated).toHaveBeenCalledWith('lease-1', 1);
     expect(lifecycle.authorizeCloseLease('lease-1')).toBe(false);
   });
+  it('accepts shutdown persistence only for the current unfailed close lease revision', () => {
+    const { ctx, lifecycle } = setup();
+    lifecycle.beginCloseLease('shutdown-lease');
+
+    expect(lifecycle.canPersistShutdown('shutdown-lease', 0)).toBe(true);
+    expect(lifecycle.canPersistShutdown('shutdown-lease', 1)).toBe(false);
+
+    lifecycle.markPreviewSyncFailed();
+    expect(lifecycle.canPersistShutdown('shutdown-lease', 0)).toBe(false);
+
+    ctx.docRevision = 1;
+    expect(lifecycle.canPersistShutdown('shutdown-lease', 1)).toBe(false);
+  });
 
   it('records a preview input through the lifecycle and invalidates its close lease', () => {
     const { ctx, lifecycle, sendCloseLeaseInvalidated } = setup();

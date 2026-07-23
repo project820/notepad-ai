@@ -29,6 +29,32 @@ describe('session IPC discard fence', () => {
     electron.reset();
     sessionStore.mutateSessionAggregate.mockReset();
   });
+  it('returns the registry-owned transient shutdown restore reason with the snapshot', async () => {
+    const record: WindowRecord = {
+      windowId: 1,
+      webContentsId: 1001,
+      windowKey: 'shutdown-restore-window',
+      lastFocusedAt: 0,
+      ready: true,
+      pendingOutbound: [],
+      restoreSnapshot: { id: 'shutdown-restore-window', path: null, title: null, doc: 'restored draft' },
+      restoreReason: 'shutdown',
+    };
+    const { registerSessionIpc } = await import('../main/ipc/session-ipc');
+    registerSessionIpc({
+      registry: { getByWebContents: (id: number) => id === record.webContentsId ? record : null } as never,
+      sinkFor: () => (() => {}),
+    });
+
+    const get = electron.handler('session:get');
+    await expect(get!({
+      sender: { id: record.webContentsId },
+      senderFrame: { parent: null, url: 'file:///app/index.html' },
+    })).resolves.toEqual({
+      snapshot: record.restoreSnapshot,
+      restoreReason: 'shutdown',
+    });
+  });
 
   it('drops a queued write after a preserved target enters its pending commit fence', async () => {
     const record = {

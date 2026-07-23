@@ -18,6 +18,8 @@ import {
   migrateSessionSnapshot,
   upsertWindowSnapshot,
   removeWindowSnapshot,
+  isRestorableSessionWindow,
+  normalizeWindowSnapshot,
   LEGACY_WINDOW_ID,
   type SessionSnapshotV2,
   type SessionWindowSnapshot,
@@ -243,5 +245,24 @@ describe('input immutability', () => {
     expect(out).not.toBe(state);
     expect(out.windows).not.toBe(state.windows);
     expect(state.windows.map((w) => w.id)).toEqual(['a', 'b']); // unchanged
+  });
+});
+describe('shutdown session schema additions', () => {
+  it('keeps document and chat-only windows while excluding empty windows', () => {
+    expect(isRestorableSessionWindow(win('doc', { doc: 'text' }))).toBe(true);
+    expect(isRestorableSessionWindow(win('chat', { unifiedChatHistory: [{ type: 'separator', label: 'x' }] }))).toBe(true);
+    expect(isRestorableSessionWindow(win('empty'))).toBe(false);
+  });
+
+  it('uses main-owned path and normalizes the optional shutdown marker', () => {
+    const snapshot = normalizeWindowSnapshot('main-key', '/main-owned.md', {
+      path: '/renderer-untrusted.md',
+      doc: 'body',
+      title: 'title',
+    });
+    expect(snapshot).toMatchObject({ id: 'main-key', path: '/main-owned.md', doc: 'body' });
+    expect(migrateSessionSnapshot({ version: 2, windows: [], restoreReason: 'shutdown' }).restoreReason).toBe('shutdown');
+    expect(migrateSessionSnapshot({ version: 2, windows: [], restoreReason: 'quit' }).restoreReason).toBeUndefined();
+    expect(migrateSessionSnapshot({ version: 2, windows: [] }).version).toBe(2);
   });
 });

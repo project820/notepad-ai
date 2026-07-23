@@ -86,10 +86,11 @@ export class SessionQueue {
    */
   beginQuit(
     mutator: (current: SessionSnapshotV2) => SessionSnapshotV2,
+    opts: { supersede?: boolean } = {},
   ): Promise<SessionSnapshotV2> {
     const run = this.chain.then(async () => {
       const current = await this.ensureLoaded();
-      if (this.quitting) return current;
+      if (this.quitting && !opts.supersede) return current;
       const next = mutator(current);
       await this.io.persist(next);
       this.state = next;

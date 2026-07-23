@@ -1,4 +1,4 @@
-import { app, shell } from 'electron';
+import { app, powerMonitor, shell } from 'electron';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { prewarmCliSpawnPath } from './ai/cli-runner';
@@ -9,7 +9,7 @@ import { FileGrants } from './file-grants';
 import { KeyedMutex } from './keyed-mutex';
 import { type IdentityFs } from './path-identity';
 import { nodeAtomicBackend } from './atomic-write';
-import { getSessionAggregate, markCleanExitQueued, mutateSessionAggregate, resetSessionAggregate } from './session-store';
+import { consumeShutdownRestoreMarker, getSessionAggregate, markCleanExitQueued, mutateSessionAggregate, resetSessionAggregate } from './session-store';
 import { createWindowRegistry } from './window-registry';
 import { ProjectWizardRootStore } from './project-wizard/access';
 import { isAllowedExternalUrl } from './safe-external';
@@ -39,8 +39,8 @@ import { registerSessionIpc } from './ipc/session-ipc';
 import { registerWizardIpc } from './ipc/wizard-ipc';
 import { createConverterHost, convertDocument, registerConvertIpc } from './convert';
 import { createAppWindows, configureAppIdentity } from './app-windows';
-import { removeWindowSnapshot } from './session-schema';
-import { shouldUseMockKeychain } from './lifecycle-flags';
+import { isRestorableSessionWindow, removeWindowSnapshot } from './session-schema';
+import { createQuitApprovalController, shouldUseMockKeychain } from './lifecycle-flags';
 import { shouldPreventBeforeQuit } from './close-guard';
 import { buildMenu } from './menu';
 import { configureAppLog, logInfo, logWarn, logError } from './app-log';
@@ -171,8 +171,11 @@ const windows = createAppWindows({
   },
   commitQuitSession: (windowKeys) => markCleanExitQueued(windowKeys),
   showCloseDialog: process.env.NOTEPAD_AI_INTEGRATION_TEST === '1'
-    && (testCloseChoice === 'save' || testCloseChoice === 'discard' || testCloseChoice === 'cancel')
-    ? async () => testCloseChoice
+    ? testCloseChoice === 'fail'
+      ? async () => { throw new Error('close-dialog-smoke-failed'); }
+      : testCloseChoice === 'save' || testCloseChoice === 'discard' || testCloseChoice === 'cancel'
+        ? async () => testCloseChoice
+        : undefined
     : undefined,
 });
 
@@ -265,27 +268,60 @@ registerHtmlExportAssetIpc({
   attemptRegistry: htmlExportAttemptRegistry,
 });
 
-let quitGuardPending = false;
 let quitApproved = false;
 let relaunchApproved = false;
+let pendingQuitApproval: Promise<boolean> | null = null;
+
+const quitApprovalController = createQuitApprovalController({
+  waitForCloseTransaction: windows.waitForCloseTransaction,
+  approveAllForQuit: async (reason) => {
+    const startedAt = Date.now();
+    void logInfo('lifecycle', 'quit approval started', { reason, startedAt });
+    let approved = false;
+    try {
+      approved = await windows.approveAllForQuit(reason);
+      return approved;
+    } finally {
+      void logInfo('lifecycle', 'quit approval completed', {
+        reason,
+        approved,
+        elapsedMs: Date.now() - startedAt,
+      });
+    }
+  },
+  clearCloseApprovals: windows.clearCloseApprovals,
+});
+
+const requestQuitApproval = () => quitApprovalController.requestQuitApproval();
+
+const completeQuitApproval = (approval: Promise<boolean>) => {
+  if (pendingQuitApproval === approval) return;
+  pendingQuitApproval = approval;
+  void approval.then((approved) => {
+    if (!approved) return;
+    quitApproved = true;
+    app.quit();
+  }).finally(() => {
+    if (pendingQuitApproval === approval) pendingQuitApproval = null;
+  });
+};
+
+const beginSystemShutdown = () => {
+  const latchedAt = Date.now();
+  void logInfo('lifecycle', 'system shutdown latched', { latchedAt });
+  const approval = quitApprovalController.beginSystemShutdown();
+  completeQuitApproval(approval);
+  return approval;
+};
 
 app.on('before-quit', (event) => {
   if (!shouldPreventBeforeQuit({ quitApproved, relaunchApproved })) return;
   // This must happen synchronously: native dialogs are async and Electron would
   // otherwise start tearing windows down underneath the pending dialog.
   event.preventDefault();
-  if (quitGuardPending) return;
-  quitGuardPending = true;
-  void windows.approveAllForQuit('quit').then((approved) => {
-    if (!approved) return;
-    quitApproved = true;
-    app.quit();
-  }).catch((error) => {
-    windows.clearCloseApprovals();
-    console.error('[close] quit guard failed:', error);
-  }).finally(() => {
-    quitGuardPending = false;
-  });
+  const arrivedAt = Date.now();
+  void logInfo('lifecycle', 'before quit received', { arrivedAt });
+  completeQuitApproval(requestQuitApproval());
 });
 app.whenReady().then(async () => {
   void logInfo('boot', 'app ready', {
@@ -294,6 +330,22 @@ app.whenReady().then(async () => {
     log: 'ready',
   });
   void prewarmCliSpawnPath();
+  if (process.platform === 'darwin') {
+    // Electron's powerMonitor shutdown event type omits preventDefault despite supporting it on macOS.
+    const shutdownPowerMonitor = powerMonitor as unknown as {
+      on(event: 'shutdown', listener: (event: { preventDefault(): void }) => void): void;
+    };
+    shutdownPowerMonitor.on('shutdown', (event) => {
+      event.preventDefault();
+      void beginSystemShutdown();
+    });
+  }
+  if (
+    process.env.NOTEPAD_AI_INTEGRATION_TEST === '1'
+    && process.env.NOTEPAD_AI_CLOSE_SMOKE_TRIGGER === 'shutdown'
+  ) {
+    handleTrusted('close-smoke:begin-shutdown', () => beginSystemShutdown());
+  }
   // Construct the additive quarantine pool now that Electron is ready. It stays
   // unwired from the live wizard (PR-S3b); only the html:quarantine:measure IPC
   // reaches it.
@@ -329,9 +381,20 @@ app.whenReady().then(async () => {
 async function restorePreviousWindows(): Promise<boolean> {
   const prev = await getSessionAggregate();
   if (prev.cleanExit === true) { await resetSessionAggregate(); return false; }
-  const candidates = prev.windows.filter((w) => (w.doc?.length ?? 0) > 0 || (w.unifiedChatHistory?.length ?? 0) > 0);
+  const candidates = prev.windows.filter(isRestorableSessionWindow);
   if (candidates.length === 0) return false;
-  for (const snap of candidates) await windows.createWindow({ restore: snap });
+
+  let restoreReason: 'shutdown' | undefined;
+  if (prev.restoreReason === 'shutdown') {
+    try {
+      await consumeShutdownRestoreMarker();
+      restoreReason = 'shutdown';
+    } catch {
+      void logError('session', 'shutdown restore marker consumption failed', { operation: 'consume-shutdown-marker' });
+    }
+  }
+
+  for (const snap of candidates) await windows.createWindow({ restore: snap, restoreReason });
   console.log(`[session] restored windows=${candidates.length}`);
   return true;
 }

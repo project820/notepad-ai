@@ -240,6 +240,51 @@ window.api.onCloseQueryState((requestId) => {
     }),
   });
 });
+window.api.onShutdownPersistRequest(({ id, leaseId, revision }) => {
+  void (async () => {
+    if (!docLifecycle.canPersistShutdown(leaseId, revision)) {
+      window.api.sendShutdownPersistResult({
+        id,
+        ok: false,
+        fileSaved: false,
+        snapshot: null,
+        revision: ctx.docRevision,
+        error: docLifecycle.hasPreviewSyncFailure() ? 'preview-sync-failed' : 'invalid-lease',
+      });
+      return;
+    }
+
+    let fileSaved = false;
+    let error: string | undefined;
+    if (ctx.currentPath !== null && ctx.dirty) {
+      try {
+        const committedRevision = await docLifecycle.save();
+        fileSaved = committedRevision !== null && committedRevision >= revision;
+        if (!fileSaved) error = 'save-failed';
+      } catch {
+        error = 'save-failed';
+      }
+    }
+
+    window.api.sendShutdownPersistResult({
+      id,
+      ok: true,
+      fileSaved,
+      snapshot: sessionSnapshot.buildSessionSnapshot(),
+      revision: ctx.docRevision,
+      error,
+    });
+  })().catch(() => {
+    window.api.sendShutdownPersistResult({
+      id,
+      ok: false,
+      fileSaved: false,
+      snapshot: null,
+      revision: ctx.docRevision,
+      error: 'snapshot-failed',
+    });
+  });
+});
 window.api.onCloseQuiescePrepare(({ requestId, ttlMs }) => {
   void docLifecycle.prepareCloseQuiesce(requestId, ttlMs).then((prepared) => {
     window.api.sendCloseQuiesceResult(requestId, { prepared });

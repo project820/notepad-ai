@@ -52,6 +52,21 @@ export function initSessionSnapshot(ctx: AppContext, deps: SessionSnapshotDeps) 
     return true;
   }
 
+  function applySessionSnapshot(snap: any) {
+    deps.replaceDocument({
+      doc: snap.doc ?? '',
+      currentPath: typeof snap.path === 'string' ? snap.path : null,
+      pendingTitle: typeof snap.title === 'string' ? snap.title : null,
+      dirty: snap.dirty === true,
+    });
+    if (snap.view) { ctx.previewMode = snap.view as PreviewMode; deps.applyPreviewMode(); }
+    deps.setUnifiedChatHistory(restoreUnifiedThread(snap));
+    deps.unifiedChat.restore(snap);
+    if (deps.getUnifiedChatHistory().length > 0) deps.setUnifiedChatOpen(true);
+    scheduleSessionSnapshot();
+    ctx.setStatus(t('status.sessionRestored'));
+  }
+
   function showRestoreBanner(snap: any) {
     const root = buildRestoreBanner(
       { doc: snap.doc, savedAt: snap.savedAt },
@@ -59,20 +74,7 @@ export function initSessionSnapshot(ctx: AppContext, deps: SessionSnapshotDeps) 
     );
     document.body.appendChild(root);
     root.querySelector('.restore-yes')?.addEventListener('click', () => {
-      deps.replaceDocument({
-        doc: snap.doc ?? '',
-        currentPath: typeof snap.path === 'string' ? snap.path : null,
-        pendingTitle: typeof snap.title === 'string' ? snap.title : null,
-        dirty: snap.dirty === true,
-      });
-      if (snap.view) { ctx.previewMode = snap.view as PreviewMode; deps.applyPreviewMode(); }
-      if (snap) {
-        deps.setUnifiedChatHistory(restoreUnifiedThread(snap));
-        deps.unifiedChat.restore(snap);
-        if (deps.getUnifiedChatHistory().length > 0) deps.setUnifiedChatOpen(true);
-      }
-      scheduleSessionSnapshot();
-      ctx.setStatus(t('status.sessionRestored'));
+      applySessionSnapshot(snap);
       root.remove();
     });
     root.querySelector('.restore-no')?.addEventListener('click', () => {
@@ -84,10 +86,13 @@ export function initSessionSnapshot(ctx: AppContext, deps: SessionSnapshotDeps) 
   void (async () => {
     const res = await window.api.sessionGet();
     const snap = res?.snapshot;
-    if (snap && ((snap.doc?.length ?? 0) > 0 || (snap.unifiedChatHistory?.length ?? 0) > 0)) {
-      setTimeout(() => showRestoreBanner(snap), 400);
+    if (!snap || ((snap.doc?.length ?? 0) === 0 && (snap.unifiedChatHistory?.length ?? 0) === 0)) return;
+    if (res.restoreReason === 'shutdown') {
+      applySessionSnapshot(snap);
+      return;
     }
+    setTimeout(() => showRestoreBanner(snap), 400);
   })();
 
-  return { scheduleSessionSnapshot, flushSessionSnapshot, requestLocaleRestart };
+  return { buildSessionSnapshot, scheduleSessionSnapshot, flushSessionSnapshot, requestLocaleRestart };
 }

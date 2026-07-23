@@ -1,64 +1,109 @@
 import { describe, expect, it, vi } from 'vitest';
+import { createQuitApprovalController } from '../main/lifecycle-flags';
 
-import { queueOrOpenFile, shouldPublishLaunchWindow, shouldUseMockKeychain } from '../main/lifecycle-flags';
+function deferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((next) => { resolve = next; });
+  return { promise, resolve };
+}
 
-describe('main integration keychain gate', () => {
-  it('requires isolated userData and the exact integration-test marker', () => {
-    expect(shouldUseMockKeychain({ NOTEPAD_AI_USERDATA: '/tmp/notepad-ai-test' })).toBe(false);
-    expect(shouldUseMockKeychain({ NOTEPAD_AI_INTEGRATION_TEST: '1' })).toBe(false);
-    expect(shouldUseMockKeychain({ NOTEPAD_AI_USERDATA: '/tmp/notepad-ai-test', NOTEPAD_AI_INTEGRATION_TEST: 'true' })).toBe(false);
-    expect(shouldUseMockKeychain({ NOTEPAD_AI_USERDATA: '/tmp/notepad-ai-test', NOTEPAD_AI_INTEGRATION_TEST: '1' })).toBe(true);
+describe('quit approval lifecycle controller', () => {
+  it('waits for an unresolved close transaction then approves shutdown exactly once', async () => {
+    const close = deferred();
+    const approveAllForQuit = vi.fn(async () => true);
+    const controller = createQuitApprovalController({
+      waitForCloseTransaction: () => close.promise,
+      approveAllForQuit,
+      clearCloseApprovals: vi.fn(),
+    });
+
+    const pending = controller.requestQuitApproval();
+    const shutdown = controller.beginSystemShutdown();
+    await Promise.resolve();
+    expect(approveAllForQuit).not.toHaveBeenCalled();
+
+    close.resolve();
+    await expect(Promise.all([pending, shutdown])).resolves.toEqual([true, true]);
+    expect(approveAllForQuit).toHaveBeenCalledTimes(1);
+    expect(approveAllForQuit).toHaveBeenCalledWith('shutdown');
   });
-});
+  it('joins duplicate system shutdown requests into one pending approval', async () => {
+    const approval = deferred<boolean>();
+    const approveAllForQuit = vi.fn(() => approval.promise);
+    const controller = createQuitApprovalController({
+      waitForCloseTransaction: async () => {},
+      approveAllForQuit,
+      clearCloseApprovals: vi.fn(),
+    });
 
-describe('launch-window publication', () => {
-  it('does not promote a Cmd+N window into the open-file reuse target', () => {
-    expect(shouldPublishLaunchWindow({})).toBe(false);
+    const first = controller.beginSystemShutdown();
+    const second = controller.beginSystemShutdown();
+    await vi.waitFor(() => expect(approveAllForQuit).toHaveBeenCalledWith('shutdown'));
+    approval.resolve(true);
+
+    await expect(Promise.all([first, second])).resolves.toEqual([true, true]);
+    expect(approveAllForQuit).toHaveBeenCalledOnce();
   });
 
-  it('only publishes a blank lifecycle launch window', () => {
-    expect(shouldPublishLaunchWindow({ isLaunchWindow: true })).toBe(true);
-    expect(shouldPublishLaunchWindow({ isLaunchWindow: true, openFilePath: '/tmp/opened.md' })).toBe(false);
-    expect(shouldPublishLaunchWindow({ isLaunchWindow: true, restore: {} })).toBe(false);
-  });
-});
-describe('incoming file lifecycle', () => {
-  it('queues a pre-ready file once for startup and opens ready files immediately', () => {
-    const pending: string[] = [];
-    const openFile = vi.fn();
+  it('reruns after a shutdown latch makes a non-shutdown approval stale', async () => {
+    const approval = deferred<boolean>();
+    const approveAllForQuit = vi.fn(() => approval.promise);
+    const controller = createQuitApprovalController({
+      waitForCloseTransaction: async () => {},
+      approveAllForQuit,
+      clearCloseApprovals: vi.fn(),
+    });
 
-    queueOrOpenFile(false, '/tmp/pre-ready.md', pending, openFile);
+    const quit = controller.requestQuitApproval();
+    await vi.waitFor(() => expect(approveAllForQuit).toHaveBeenCalledWith('quit'));
+    const shutdown = controller.beginSystemShutdown();
+    approval.resolve(true);
 
-    expect(pending).toEqual(['/tmp/pre-ready.md']);
-    expect(openFile).not.toHaveBeenCalled();
-
-    for (const filePath of pending.splice(0)) openFile(filePath);
-    expect(openFile).toHaveBeenCalledTimes(1);
-    expect(openFile).toHaveBeenCalledWith('/tmp/pre-ready.md');
-
-    queueOrOpenFile(true, '/tmp/ready.md', pending, openFile);
-
-    expect(pending).toEqual([]);
-    expect(openFile).toHaveBeenCalledTimes(2);
-    expect(openFile).toHaveBeenLastCalledWith('/tmp/ready.md');
+    await vi.waitFor(() => expect(approveAllForQuit).toHaveBeenCalledWith('shutdown'));
+    await expect(Promise.all([quit, shutdown])).resolves.toEqual([true, true]);
+    expect(approveAllForQuit).toHaveBeenCalledTimes(2);
   });
 
-  it('deduplicates the same path delivered through both pre-ready sources (open-file + second-instance)', () => {
-    const pending: string[] = [];
-    const openFile = vi.fn();
+  it('clears approvals and denies when an approval fails', async () => {
+    const clearCloseApprovals = vi.fn();
+    const controller = createQuitApprovalController({
+      waitForCloseTransaction: async () => {},
+      approveAllForQuit: async () => { throw new Error('timed out'); },
+      clearCloseApprovals,
+    });
 
-    // Finder open-file and a second-instance argv can race the same document
-    // before readiness; the shared queue must hold it exactly once so the
-    // concurrent flush cannot create two windows.
-    queueOrOpenFile(false, '/tmp/same-doc.md', pending, openFile);
-    queueOrOpenFile(false, '/tmp/same-doc.md', pending, openFile);
-    queueOrOpenFile(false, '/tmp/other-doc.md', pending, openFile);
+    await expect(controller.requestQuitApproval()).resolves.toBe(false);
+    expect(clearCloseApprovals).toHaveBeenCalledOnce();
+  });
+  it('clears the shutdown latch after a denied shutdown approval', async () => {
+    const approveAllForQuit = vi.fn(async (reason: string) => reason !== 'shutdown');
+    const controller = createQuitApprovalController({
+      waitForCloseTransaction: async () => {},
+      approveAllForQuit,
+      clearCloseApprovals: vi.fn(),
+    });
 
-    expect(pending).toEqual(['/tmp/same-doc.md', '/tmp/other-doc.md']);
-    expect(openFile).not.toHaveBeenCalled();
+    await expect(controller.beginSystemShutdown()).resolves.toBe(false);
+    await expect(controller.requestQuitApproval()).resolves.toBe(true);
 
-    for (const filePath of pending.splice(0)) openFile(filePath);
-    expect(openFile).toHaveBeenCalledTimes(2);
-    expect(pending).toEqual([]);
+    expect(approveAllForQuit.mock.calls.map(([reason]) => reason)).toEqual(['shutdown', 'quit']);
+  });
+  it('clears the shutdown latch when a latched shutdown approval throws', async () => {
+    let calls = 0;
+    const approveAllForQuit = vi.fn(async (reason: string) => {
+      calls += 1;
+      if (calls === 1) throw new Error('timed out');
+      return reason === 'quit';
+    });
+    const controller = createQuitApprovalController({
+      waitForCloseTransaction: async () => {},
+      approveAllForQuit,
+      clearCloseApprovals: vi.fn(),
+    });
+
+    await expect(controller.beginSystemShutdown()).resolves.toBe(false);
+    await expect(controller.requestQuitApproval()).resolves.toBe(true);
+
+    expect(approveAllForQuit.mock.calls.map(([reason]) => reason)).toEqual(['shutdown', 'quit']);
   });
 });

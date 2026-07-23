@@ -1,4 +1,4 @@
-export type CloseIntent = 'close' | 'quit' | 'relaunch';
+export type CloseIntent = 'close' | 'quit' | 'relaunch' | 'shutdown';
 export type CloseDecision = 'allow' | 'discard' | 'cancel';
 
 export type CloseTarget = {
@@ -129,6 +129,9 @@ export async function runDecideCloseLoop({
 export class CloseCoordinator {
   private inFlight: Promise<CloseTransactionResult> | null = null;
   private inFlightIntent: CloseIntent | null = null;
+  waitForIdle(): Promise<void> {
+    return this.inFlight ? this.inFlight.then(() => {}) : Promise.resolve();
+  }
 
   request(
     intent: CloseIntent,
