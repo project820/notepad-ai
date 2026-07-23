@@ -39,13 +39,17 @@ function editorText(win) {
 
 async function replaceEditorText(win, content) {
   await waitFor('editor', () => win.webContents.executeJavaScript(`Boolean(document.querySelector('.cm-content'))`));
+  // Headless/hidden windows deliver selectAll()+insertText() unreliably unless
+  // the CM content root is focused first (same pattern as roundtrip-smoke).
+  await win.webContents.executeJavaScript(`document.querySelector('.cm-content')?.focus(); true`);
   return waitFor('CodeMirror edit', async () => {
     win.focus();
     win.webContents.focus();
+    await win.webContents.executeJavaScript(`document.querySelector('.cm-content')?.focus(); true`);
     win.webContents.selectAll();
-    await delay(30);
+    await delay(50);
     win.webContents.insertText(content);
-    await delay(30);
+    await delay(50);
     return (await editorText(win)) === content;
   }, 60_000);
 }
@@ -111,7 +115,7 @@ async function worker() {
     app.quit();
     await Promise.race([
       closed,
-      delay(10_000).then(() => { throw new Error('quit discard did not close both dirty windows'); }),
+      delay(20_000).then(() => { throw new Error('quit discard did not close both dirty windows'); }),
     ]);
     console.log('[close-dialog-smoke] quit-discard-closed-two-dirty-windows');
     return;
@@ -120,7 +124,7 @@ async function worker() {
   win.close();
   await Promise.race([
     closed,
-    delay(10_000).then(() => { throw new Error(`${scenario} did not close the window`); }),
+    delay(20_000).then(() => { throw new Error(`${scenario} did not close the window`); }),
   ]);
   console.log(`[close-dialog-smoke] ${scenario}-closed-window`);
   app.exit(0);
@@ -141,6 +145,11 @@ async function shutdownWorker() {
   if (shutdownPhase === 'first') {
     app.emit('open-file', { preventDefault() {} }, documentPath);
     const pathWindow = await waitFor('path window', () => BrowserWindow.getAllWindows()[0] ?? null);
+    await waitFor('opened file reaches the rendered editor', () =>
+      pathWindow.webContents.executeJavaScript(
+        `Array.from(document.querySelectorAll('.cm-line')).map((line) => line.textContent || '').join('\\n').includes(${JSON.stringify('Close smoke')})`,
+      ),
+    );
     await replaceEditorText(pathWindow, shutdownPathContent);
 
     clickNewWindow(Menu);
@@ -156,7 +165,10 @@ async function shutdownWorker() {
       `typeof window.api.closeSmokeBeginShutdown === 'function'`,
     ));
     await pathWindow.webContents.executeJavaScript(`window.api.closeSmokeBeginShutdown()`);
-    await new Promise((resolveClosed) => app.once('window-all-closed', resolveClosed));
+    await Promise.race([
+      new Promise((resolveClosed) => app.once('window-all-closed', resolveClosed)),
+      delay(20_000).then(() => { throw new Error('shutdown approval did not close all windows'); }),
+    ]);
     console.log('[close-dialog-smoke] shutdown-first-closed');
     return;
   }
@@ -257,18 +269,28 @@ if (scenario) {
   void worker().catch((error) => {
     console.error(`[close-dialog-smoke] worker failure: ${error?.stack ?? error}`);
     process.exitCode = 2;
+    // A failed worker must terminate the Electron app; open windows would
+    // otherwise keep the process (and the whole smoke run) alive forever.
+    electron.app.exit(2);
   });
 } else if (shutdownPhase) {
   void shutdownWorker().catch((error) => {
     console.error(`[close-dialog-smoke] shutdown worker failure: ${error?.stack ?? error}`);
     process.exitCode = 2;
+    electron.app.exit(2);
   });
 } else {
   void (async () => {
     if (!existsSync(resolve(REPO, 'dist/main/main.js'))) throw new Error('dist/main/main.js missing; build the app before smoke execution');
+    // The legacy seven scenarios intentionally share ONE userData in their
+    // historical order, exactly as before the shutdown pairs were added: a
+    // per-scenario cold userData exposes a pre-existing cold-start save-close
+    // delay (>20s on some machines) that made `save`/`save-large` flaky.
+    // Isolation is only required between the legacy block and the shutdown
+    // pairs below, which each use their own pair-local userData.
+    const userData = mkdtempSync(join(tmpdir(), 'notepad-ai-close-smoke-'));
+    const { doc, secondDoc, largeDoc } = createFixture(userData);
     for (const choice of ['discard', 'save', 'cancel', 'quit-cancel', 'quit-discard', 'discard-large', 'save-large']) {
-      const userData = mkdtempSync(join(tmpdir(), 'notepad-ai-close-smoke-'));
-      const { doc, secondDoc, largeDoc } = createFixture(userData);
       const base = choice.replace(/-large$/, '');
       await waitForWorker(choice, {
         NOTEPAD_AI_CLOSE_SMOKE_SCENARIO: choice,

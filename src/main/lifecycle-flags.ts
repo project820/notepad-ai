@@ -35,13 +35,22 @@ export function createQuitApprovalController({
     if (pending) return pending;
 
     pending = (async () => {
+      let supersededQuitApproved = false;
       try {
         for (;;) {
           await waitForCloseTransaction();
+          // Do not insert an await here: a shutdown after the wait must be
+          // observed before selecting the approval reason for this pass.
           const reason: QuitApprovalReason = shutdownLatched ? 'shutdown' : 'quit';
           const approved = await approveAllForQuit(reason);
-          if (shutdownLatched && reason !== 'shutdown') continue;
-          if (reason === 'shutdown' && !approved) shutdownLatched = false;
+          if (shutdownLatched && reason !== 'shutdown') {
+            supersededQuitApproved ||= approved;
+            continue;
+          }
+          if (reason === 'shutdown' && !approved) {
+            shutdownLatched = false;
+            if (supersededQuitApproved) return true;
+          }
           return approved;
         }
       } catch {

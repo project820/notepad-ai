@@ -63,6 +63,32 @@ describe('quit approval lifecycle controller', () => {
     await expect(Promise.all([quit, shutdown])).resolves.toEqual([true, true]);
     expect(approveAllForQuit).toHaveBeenCalledTimes(2);
   });
+  it('falls back to an approved quit when its shutdown rerun is denied without retaining it', async () => {
+    const approval = deferred<boolean>();
+    const clearCloseApprovals = vi.fn();
+    let calls = 0;
+    const approveAllForQuit = vi.fn(async () => {
+      calls += 1;
+      return calls === 1 ? approval.promise : false;
+    });
+    const controller = createQuitApprovalController({
+      waitForCloseTransaction: async () => {},
+      approveAllForQuit,
+      clearCloseApprovals,
+    });
+
+    const quit = controller.requestQuitApproval();
+    await vi.waitFor(() => expect(approveAllForQuit).toHaveBeenCalledWith('quit'));
+    const shutdown = controller.beginSystemShutdown();
+    approval.resolve(true);
+
+    await vi.waitFor(() => expect(approveAllForQuit).toHaveBeenCalledWith('shutdown'));
+    await expect(Promise.all([quit, shutdown])).resolves.toEqual([true, true]);
+    await expect(controller.requestQuitApproval()).resolves.toBe(false);
+
+    expect(approveAllForQuit.mock.calls.map(([reason]) => reason)).toEqual(['quit', 'shutdown', 'quit']);
+    expect(clearCloseApprovals).not.toHaveBeenCalled();
+  });
 
   it('clears approvals and denies when an approval fails', async () => {
     const clearCloseApprovals = vi.fn();
