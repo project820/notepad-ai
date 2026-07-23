@@ -59,7 +59,7 @@ export type ShutdownPersistRequest = {
   revision: number;
 };
 
-export type ShutdownSessionSnapshot = {
+type ShutdownSessionSnapshot = {
   savedAt: number;
   path: string | null;
   title: string | null;
