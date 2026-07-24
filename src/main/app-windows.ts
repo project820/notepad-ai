@@ -589,15 +589,15 @@ export function createAppWindows({
         if (!live) return 'cancel';
         const fromRenderer = normalizeWindowSnapshot(target.windowKey, live.currentPath, result.snapshot);
         // Crash-recovery windows keep restoreSnapshot until the user accepts or
-        // declines the banner. Prefer it whenever the live renderer still has an
-        // empty document — even if a file path alone would make the live
-        // snapshot "restorable".
+        // declines the banner. Prefer recovery whenever it still has document or
+        // chat content and the live renderer has neither (path alone does not
+        // count as live content here).
         const pendingRecovery = live.restoreSnapshot
           ? normalizeWindowSnapshot(target.windowKey, live.restoreSnapshot.path ?? live.currentPath, live.restoreSnapshot)
           : null;
-        const liveDocEmpty = (fromRenderer.doc?.length ?? 0) === 0;
-        const recoveryHasDoc = (pendingRecovery?.doc?.length ?? 0) > 0;
-        const chosen = pendingRecovery && recoveryHasDoc && liveDocEmpty
+        const hasContent = (snap: SessionWindowSnapshot | null | undefined) =>
+          (snap?.doc?.length ?? 0) > 0 || (snap?.unifiedChatHistory?.length ?? 0) > 0;
+        const chosen = pendingRecovery && hasContent(pendingRecovery) && !hasContent(fromRenderer)
           ? pendingRecovery
           : fromRenderer;
         shutdownSnapshots.set(target.windowKey, chosen);

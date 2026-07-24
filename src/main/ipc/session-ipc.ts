@@ -31,6 +31,10 @@ export function registerSessionIpc({ registry, sinkFor, isSessionWriteFenced = (
   });
   handleTrusted('session:clear', async (event) => {
     const rec = registry.getByWebContents(event.sender.id); if (!rec || isSessionWriteFenced(rec.windowKey)) return;
+    // User declined the recovery banner — drop the in-memory pending snapshot so
+    // a later shutdown cannot resurrect content they explicitly discarded.
+    rec.restoreSnapshot = undefined;
+    rec.restoreReason = undefined;
     await mutateSessionAggregate((cur) => isCurrentWritableRecord(event.sender.id, rec)
       ? removeWindowSnapshot(cur, rec.windowKey)
       : cur);

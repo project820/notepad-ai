@@ -93,7 +93,11 @@ export function initSessionSnapshot(ctx: AppContext, deps: SessionSnapshotDeps) 
     // windows remain excluded.
     if (!hasDoc && !path) return;
     if (res.restoreReason === 'shutdown') {
-      if (hasDoc) {
+      // Clean path-backed windows reopen from disk so cloud/git updates win.
+      // Dirty (or failed-save) recovery still applies the in-memory snapshot.
+      if (path && snap.dirty !== true) {
+        void window.api.openFileInCurrent(path);
+      } else if (hasDoc) {
         applySessionSnapshot(snap);
       } else if (path) {
         void window.api.openFileInCurrent(path);

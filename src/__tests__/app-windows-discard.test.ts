@@ -979,5 +979,51 @@ describe('discard close IPC waiters', () => {
         }),
       ]);
     });
+    it('preserves chat-only unanswered recovery over a blank live snapshot', async () => {
+      const commitShutdownSession = vi.fn(async () => {});
+      const { appWindows, records } = await setup((win, channel, payload) => {
+        if (channel === 'close:shutdown-persist:request') {
+          electron.emitIpc('close:shutdown-persist:result', win, {
+            id: payload.id,
+            ok: true,
+            fileSaved: false,
+            revision: payload.revision,
+            snapshot: { doc: '', dirty: false, path: null, unifiedChatHistory: [] },
+          });
+        }
+        if (channel === 'close:consume') {
+          electron.emitIpc('close:consume-result', win, { requestId: payload.requestId, consumed: true });
+        }
+      }, async () => {
+        throw new Error('shutdown must not open a dialog');
+      }, 1, () => true, async () => {}, async () => {}, async () => {}, (win, payload) => {
+        electron.emitIpc('close:state', win, {
+          ...payload,
+          dirty: false,
+          hasPath: false,
+          docEmpty: true,
+          revision: 0,
+          locale: 'en',
+        });
+      }, false, undefined, undefined, commitShutdownSession);
+      records[0].ready = true;
+      records[0].currentPath = null;
+      records[0].restoreSnapshot = {
+        id: 'window-1',
+        path: null,
+        title: null,
+        doc: '',
+        dirty: false,
+        unifiedChatHistory: [{ type: 'separator', label: 'recovered chat' }],
+      };
+
+      await expect(appWindows.approveAllForQuit('shutdown')).resolves.toBe(true);
+      expect(commitShutdownSession).toHaveBeenCalledWith([
+        expect.objectContaining({
+          id: 'window-1',
+          unifiedChatHistory: [{ type: 'separator', label: 'recovered chat' }],
+        }),
+      ]);
+    });
   });
 });

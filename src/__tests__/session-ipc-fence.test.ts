@@ -299,4 +299,32 @@ describe('session IPC discard fence', () => {
     expect(syncSnapshotPath).toHaveBeenCalledWith(record.windowId, expect.objectContaining({ path: null }));
     expect(claimPath).not.toHaveBeenCalled();
   });
+  it('clears in-memory restoreSnapshot when the user declines recovery', async () => {
+    const pending = { id: 'declined-recovery', path: null, title: null, doc: 'discarded draft' };
+    const record: WindowRecord = {
+      windowId: 1,
+      webContentsId: 1001,
+      windowKey: 'declined-recovery',
+      lastFocusedAt: 0,
+      ready: true,
+      pendingOutbound: [],
+      restoreSnapshot: pending,
+      restoreReason: undefined,
+    };
+    sessionStore.mutateSessionAggregate.mockImplementation(async (mutator: (state: SessionSnapshotV2) => SessionSnapshotV2) =>
+      mutator({ version: 2, windows: [pending] }));
+    const { registerSessionIpc } = await import('../main/ipc/session-ipc');
+    registerSessionIpc({
+      registry: { getByWebContents: (id: number) => id === record.webContentsId ? record : null } as never,
+      sinkFor: () => (() => {}),
+    });
+    const clear = electron.handler('session:clear');
+    await clear!({
+      sender: { id: record.webContentsId },
+      senderFrame: { parent: null, url: 'file:///app/index.html' },
+    });
+    expect(record.restoreSnapshot).toBeUndefined();
+    expect(record.restoreReason).toBeUndefined();
+  });
+
 });
