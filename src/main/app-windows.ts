@@ -120,6 +120,9 @@ export function createAppWindows({
   const pendingDiscardRollback = new Map<string, { webContentsId: number; resolve: (rolledBack: boolean) => void }>();
   const pendingConsume = new Map<string, { webContentsId: number; resolve: (consumed: boolean) => void }>();
   const closeLeases = new Map<number, { id: string; invalidated: boolean }>();
+  // Leases minted by main for unready restorable windows during shutdown: no
+  // renderer handshake is possible, so authorize/consume short-circuit true.
+  const mainOwnedShutdownLeases = new Set<string>();
   const pendingShutdownPersist = new Map<string, {
     webContentsId: number;
     leaseId: string;
@@ -345,6 +348,7 @@ export function createAppWindows({
   });
   const authorizeRendererClose = (win: BrowserWindow, leaseId: string | undefined): Promise<boolean> => {
     if (!activeLease(win, leaseId)) return Promise.resolve(false);
+    if (leaseId && mainOwnedShutdownLeases.has(leaseId)) return Promise.resolve(true);
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         pendingAuthorize.delete(leaseId!);
@@ -363,6 +367,7 @@ export function createAppWindows({
   };
   const consumeRendererClose = (win: BrowserWindow, leaseId: string | undefined): Promise<boolean> => {
     if (!activeLease(win, leaseId)) return Promise.resolve(false);
+    if (leaseId && mainOwnedShutdownLeases.has(leaseId)) return Promise.resolve(true);
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         pendingConsume.delete(leaseId!);
@@ -526,9 +531,40 @@ export function createAppWindows({
     });
   };
   const shutdownSnapshots = new Map<string, SessionWindowSnapshot>();
+  const durableSnapshotForShutdown = (rec: WindowRecord): SessionWindowSnapshot | null => {
+    if (rec.restoreSnapshot) {
+      return normalizeWindowSnapshot(rec.windowKey, rec.currentPath ?? rec.restoreSnapshot.path, rec.restoreSnapshot);
+    }
+    if (rec.lastSnapshot) {
+      return normalizeWindowSnapshot(rec.windowKey, rec.currentPath ?? rec.lastSnapshot.path, rec.lastSnapshot);
+    }
+    if (rec.currentPath != null) {
+      // File-backed window still loading: disk is source of truth.
+      return { id: rec.windowKey, path: rec.currentPath, title: null, doc: '', dirty: false };
+    }
+    return null;
+  };
+  const mintMainOwnedShutdownLease = (windowId: number): string => {
+    const id = `main-owned-shutdown:${windowId}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+    closeLeases.set(windowId, { id, invalidated: false });
+    mainOwnedShutdownLeases.add(id);
+    return id;
+  };
   const decideShutdown = async (target: CloseTarget, context: CloseAttemptContext): Promise<CloseDecision> => {
     const win = BrowserWindow.fromId(target.windowId);
     if (!win || win.isDestroyed()) return 'allow';
+
+    const rec = registry.get(target.windowId);
+    // Restored / file-backed windows that are still loading cannot complete the
+    // renderer lease handshake. Use the durable main-side snapshot instead so
+    // powerMonitor's preventDefault does not strand the OS power-off.
+    if (rec && !rec.ready) {
+      const durable = durableSnapshotForShutdown(rec);
+      if (!durable) return 'cancel';
+      shutdownSnapshots.set(target.windowKey, durable);
+      mintMainOwnedShutdownLease(target.windowId);
+      return 'allow';
+    }
 
     let state: (CloseGuardState & { leaseId: string | null }) | null = null;
     return runDecideCloseLoop({
@@ -549,9 +585,9 @@ export function createAppWindows({
         ) {
           return 'cancel';
         }
-        const rec = registry.get(target.windowId);
-        if (!rec) return 'cancel';
-        shutdownSnapshots.set(target.windowKey, normalizeWindowSnapshot(target.windowKey, rec.currentPath, result.snapshot));
+        const live = registry.get(target.windowId);
+        if (!live) return 'cancel';
+        shutdownSnapshots.set(target.windowKey, normalizeWindowSnapshot(target.windowKey, live.currentPath, result.snapshot));
         return 'allow';
       },
       authorize: () => authorizeRendererClose(win, leaseIdFor(win.id)),
@@ -704,7 +740,10 @@ export function createAppWindows({
       }
       return result.approved && result.intent === intent;
     } finally {
-      if (intent === 'shutdown') shutdownSnapshots.clear();
+      if (intent === 'shutdown') {
+        shutdownSnapshots.clear();
+        mainOwnedShutdownLeases.clear();
+      }
     }
   };
 

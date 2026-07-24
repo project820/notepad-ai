@@ -806,5 +806,82 @@ describe('discard close IPC waiters', () => {
         await expect(appWindows.approveClose(win as never)).resolves.toBe(true);
       }
     });
+    it('approves shutdown for an unready restored window using its durable snapshot', async () => {
+      const commitShutdownSession = vi.fn(async () => {});
+      const sent: string[] = [];
+      const { appWindows, records } = await setup(
+        (win, channel) => { sent.push(channel); },
+        async () => { throw new Error('shutdown must not open a dialog'); },
+        1,
+        () => true,
+        async () => {},
+        async () => {},
+        async () => {},
+        undefined,
+        false,
+        undefined,
+        undefined,
+        commitShutdownSession,
+      );
+      records[0].ready = false;
+      records[0].currentPath = '/tmp/restoring.md';
+      records[0].restoreSnapshot = {
+        id: 'window-1',
+        path: '/tmp/restoring.md',
+        title: 'restoring.md',
+        doc: 'durable restored body',
+        dirty: true,
+        unifiedChatHistory: [],
+      };
+      records[0].lastSnapshot = undefined;
+
+      await expect(appWindows.approveAllForQuit('shutdown')).resolves.toBe(true);
+
+      expect(commitShutdownSession).toHaveBeenCalledWith([
+        expect.objectContaining({
+          id: 'window-1',
+          path: '/tmp/restoring.md',
+          doc: 'durable restored body',
+          dirty: true,
+        }),
+      ]);
+      // No renderer handshake channels for the unready path.
+      expect(sent).not.toContain('close:query-state');
+      expect(sent).not.toContain('close:shutdown-persist:request');
+      expect(sent).not.toContain('close:authorize');
+      expect(sent).not.toContain('close:consume');
+    });
+
+    it('approves shutdown for an unready file-backed window without a snapshot', async () => {
+      const commitShutdownSession = vi.fn(async () => {});
+      const { appWindows, records } = await setup(
+        () => {},
+        async () => { throw new Error('shutdown must not open a dialog'); },
+        1,
+        () => true,
+        async () => {},
+        async () => {},
+        async () => {},
+        undefined,
+        false,
+        undefined,
+        undefined,
+        commitShutdownSession,
+      );
+      records[0].ready = false;
+      records[0].currentPath = '/tmp/opening.md';
+      records[0].restoreSnapshot = undefined;
+      records[0].lastSnapshot = undefined;
+
+      await expect(appWindows.approveAllForQuit('shutdown')).resolves.toBe(true);
+      expect(commitShutdownSession).toHaveBeenCalledWith([
+        expect.objectContaining({
+          id: 'window-1',
+          path: '/tmp/opening.md',
+          doc: '',
+          dirty: false,
+        }),
+      ]);
+    });
   });
 });
