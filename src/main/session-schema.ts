@@ -47,8 +47,12 @@ export type SessionSnapshotV2 = {
   cleanExit?: boolean;
   restoreReason?: 'shutdown';
 };
-export function isRestorableSessionWindow(snapshot: Pick<SessionWindowSnapshot, 'doc' | 'unifiedChatHistory'>): boolean {
-  return (snapshot.doc?.length ?? 0) > 0 || (snapshot.unifiedChatHistory?.length ?? 0) > 0;
+export function isRestorableSessionWindow(snapshot: Pick<SessionWindowSnapshot, 'doc' | 'unifiedChatHistory' | 'path'>): boolean {
+  // Path-only snapshots keep file-backed windows restorable when shutdown hits
+  // before the renderer has content (loading / unanswered recovery banner).
+  return (snapshot.doc?.length ?? 0) > 0
+    || (snapshot.unifiedChatHistory?.length ?? 0) > 0
+    || (typeof snapshot.path === 'string' && snapshot.path.length > 0);
 }
 
 export function normalizeWindowSnapshot(

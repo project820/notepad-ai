@@ -248,9 +248,10 @@ describe('input immutability', () => {
   });
 });
 describe('shutdown session schema additions', () => {
-  it('keeps document and chat-only windows while excluding empty windows', () => {
+  it('keeps document, chat-only, and path-backed windows while excluding empty untitled', () => {
     expect(isRestorableSessionWindow(win('doc', { doc: 'text' }))).toBe(true);
     expect(isRestorableSessionWindow(win('chat', { unifiedChatHistory: [{ type: 'separator', label: 'x' }] }))).toBe(true);
+    expect(isRestorableSessionWindow(win('path-only', { path: '/tmp/opening.md', doc: '' }))).toBe(true);
     expect(isRestorableSessionWindow(win('empty'))).toBe(false);
   });
 

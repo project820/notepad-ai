@@ -9,7 +9,7 @@ import { isTrustedAppUrl, SECURITY_REASON } from './security';
 import { isAllowedExternalUrl } from './safe-external';
 import { ProjectWizardRootStore } from './project-wizard/access';
 import { sendWhenReady, type OutboundSink, type WindowRecord, type WindowRegistry } from './window-registry';
-import { normalizeWindowSnapshot, type SessionWindowSnapshot } from './session-schema';
+import { isRestorableSessionWindow, normalizeWindowSnapshot, type SessionWindowSnapshot } from './session-schema';
 import { markShutdownRestoreQueued } from './session-store';
 import { queueOrOpenFile, shouldPublishLaunchWindow, type CreateWindowOptions } from './lifecycle-flags';
 import { logWarn } from './app-log';
@@ -587,7 +587,19 @@ export function createAppWindows({
         }
         const live = registry.get(target.windowId);
         if (!live) return 'cancel';
-        shutdownSnapshots.set(target.windowKey, normalizeWindowSnapshot(target.windowKey, live.currentPath, result.snapshot));
+        const fromRenderer = normalizeWindowSnapshot(target.windowKey, live.currentPath, result.snapshot);
+        // Crash-recovery windows keep restoreSnapshot until the user accepts or
+        // declines the banner. A ready renderer can still be blank; do not clobber
+        // the durable recovered draft with that empty live snapshot.
+        const pendingRecovery = live.restoreSnapshot
+          ? normalizeWindowSnapshot(target.windowKey, live.currentPath ?? live.restoreSnapshot.path, live.restoreSnapshot)
+          : null;
+        const chosen = pendingRecovery
+          && isRestorableSessionWindow(pendingRecovery)
+          && !isRestorableSessionWindow(fromRenderer)
+          ? pendingRecovery
+          : fromRenderer;
+        shutdownSnapshots.set(target.windowKey, chosen);
         return 'allow';
       },
       authorize: () => authorizeRendererClose(win, leaseIdFor(win.id)),

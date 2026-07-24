@@ -247,6 +247,20 @@ describe('session shutdown marker store', () => {
 
     await expect(getSessionAggregate()).resolves.toMatchObject({ windows: [] });
   });
+  it('keeps path-only shutdown snapshots so file-backed windows reopen', async () => {
+    sessionStoreHarness.disk = { version: 2, windows: [] };
+    sessionStoreHarness.persists = 0;
+    sessionStoreHarness.failPersist = false;
+    vi.resetModules();
+    const { markShutdownRestoreQueued, getSessionAggregate } = await import('../main/session-store');
+
+    await markShutdownRestoreQueued([{ id: 'path-only', path: '/tmp/opening.md', title: null, doc: '', dirty: false }]);
+
+    await expect(getSessionAggregate()).resolves.toMatchObject({
+      restoreReason: 'shutdown',
+      windows: [{ id: 'path-only', path: '/tmp/opening.md', doc: '' }],
+    });
+  });
   it('clears the shutdown marker for a clean quit', async () => {
     sessionStoreHarness.disk = {
       version: 2,
