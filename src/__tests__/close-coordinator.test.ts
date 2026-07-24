@@ -152,4 +152,67 @@ describe('CloseCoordinator', () => {
 
     expect(Date.now() - started).toBeLessThan(100);
   });
+  it('waits for the current in-flight transaction and resolves immediately while idle', async () => {
+    const coordinator = new CloseCoordinator();
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    const request = coordinator.request('close', [first], async () => {
+      await blocked;
+      return 'allow';
+    }, async () => true);
+
+    let idle = false;
+    const wait = coordinator.waitForIdle().then(() => { idle = true; });
+    await Promise.resolve();
+    expect(idle).toBe(false);
+    release();
+    await request;
+    await wait;
+    expect(idle).toBe(true);
+    await expect(coordinator.waitForIdle()).resolves.toBeUndefined();
+  });
+
+  it('rejects a conflicting shutdown transaction without changing existing conflict policy', async () => {
+    const coordinator = new CloseCoordinator();
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    const close = coordinator.request('close', [first], async () => {
+      await blocked;
+      return 'allow';
+    }, async () => true);
+
+    await expect(coordinator.request('shutdown', [first], async () => 'allow', async () => true))
+      .resolves.toEqual({ approved: false, intent: 'shutdown' });
+    release();
+    await close;
+  });
+  it('approves an empty shutdown transaction after committing the empty session', async () => {
+    const coordinator = new CloseCoordinator();
+    const commit = vi.fn(async () => true);
+
+    await expect(coordinator.request('shutdown', [], async () => 'allow', commit))
+      .resolves.toEqual({ approved: true, intent: 'shutdown' });
+    expect(commit).toHaveBeenCalledOnce();
+    expect(commit.mock.calls[0][0]).toMatchObject({ intent: 'shutdown', targets: [], discards: [] });
+  });
+
+  it('still denies empty non-shutdown transactions', async () => {
+    const coordinator = new CloseCoordinator();
+    const commit = vi.fn(async () => true);
+
+    await expect(coordinator.request('quit', [], async () => 'allow', commit))
+      .resolves.toEqual({ approved: false, intent: 'quit' });
+    await expect(coordinator.request('close', [], async () => 'allow', commit))
+      .resolves.toEqual({ approved: false, intent: 'close' });
+    expect(commit).not.toHaveBeenCalled();
+  });
+
+  it('denies empty shutdown when the empty commit fails', async () => {
+    const coordinator = new CloseCoordinator();
+    const commit = vi.fn(async () => false);
+
+    await expect(coordinator.request('shutdown', [], async () => 'allow', commit))
+      .resolves.toEqual({ approved: false, intent: 'shutdown' });
+    expect(commit).toHaveBeenCalledOnce();
+  });
 });

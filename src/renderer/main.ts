@@ -240,6 +240,59 @@ window.api.onCloseQueryState((requestId) => {
     }),
   });
 });
+window.api.onShutdownPersistRequest(({ id, leaseId, revision }) => {
+  void (async () => {
+    if (!docLifecycle.canPersistShutdown(leaseId, revision)) {
+      window.api.sendShutdownPersistResult({
+        id,
+        ok: false,
+        fileSaved: false,
+        snapshot: null,
+        revision: ctx.docRevision,
+        error: docLifecycle.hasPreviewSyncFailure() ? 'preview-sync-failed' : 'invalid-lease',
+      });
+      return;
+    }
+
+    // Bound the file-save wait so a slow disk cannot exceed main's shutdown
+    // deadline and strand power-off. Always return a snapshot either way.
+    let fileSaved = false;
+    let error: string | undefined;
+    if (ctx.currentPath !== null && ctx.dirty) {
+      try {
+        const saveBudgetMs = 3_500;
+        const committedRevision = await Promise.race([
+          docLifecycle.save(),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), saveBudgetMs)),
+        ]);
+        fileSaved = committedRevision !== null && committedRevision >= revision;
+        if (!fileSaved) error = 'save-failed';
+      } catch {
+        error = 'save-failed';
+      }
+    }
+
+    // Build after the save attempt so a successful write clears dirty; a timed-
+    // out/failed save still returns the latest editor content as fallback.
+    window.api.sendShutdownPersistResult({
+      id,
+      ok: true,
+      fileSaved,
+      snapshot: sessionSnapshot.buildSessionSnapshot(),
+      revision: ctx.docRevision,
+      error,
+    });
+  })().catch(() => {
+    window.api.sendShutdownPersistResult({
+      id,
+      ok: false,
+      fileSaved: false,
+      snapshot: null,
+      revision: ctx.docRevision,
+      error: 'snapshot-failed',
+    });
+  });
+});
 window.api.onCloseQuiescePrepare(({ requestId, ttlMs }) => {
   void docLifecycle.prepareCloseQuiesce(requestId, ttlMs).then((prepared) => {
     window.api.sendCloseQuiesceResult(requestId, { prepared });

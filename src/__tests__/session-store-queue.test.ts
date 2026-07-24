@@ -7,7 +7,7 @@
  * late renderer write could overwrite the before-quit cleanExit marker.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { SessionQueue, type SessionQueueIO } from '../main/session-queue';
 import {
   upsertWindowSnapshot,
@@ -15,9 +15,30 @@ import {
   type SessionSnapshotV2,
   type SessionWindowSnapshot,
 } from '../main/session-schema';
+const sessionStoreHarness = vi.hoisted(() => ({
+  disk: { version: 2 as const, windows: [] as unknown[] },
+  persists: 0,
+  failPersist: false,
+}));
+
+vi.mock('electron', () => ({ app: { getPath: () => '/session-test' } }));
+vi.mock('node:fs', () => ({
+  promises: {
+    readFile: async () => JSON.stringify(sessionStoreHarness.disk),
+    rename: async () => {},
+  },
+}));
+vi.mock('../main/atomic-write', () => ({
+  nodeAtomicBackend: () => ({}),
+  atomicWrite: async (_target: string, contents: string) => {
+    sessionStoreHarness.persists += 1;
+    if (sessionStoreHarness.failPersist) throw new Error('disk full');
+    sessionStoreHarness.disk = JSON.parse(contents);
+  },
+}));
 
 function win(id: string, doc = `doc-${id}`): SessionWindowSnapshot {
-  return { id, path: null, doc, pendingTitle: null } as SessionWindowSnapshot;
+  return { id, path: null, doc, title: null } as SessionWindowSnapshot;
 }
 
 /** In-memory IO that records load/persist activity and can inject a failure. */
@@ -143,6 +164,14 @@ describe('SessionQueue — quit transaction', () => {
     await q.beginQuit((s) => ({ ...s, cleanExit: true }));
     expect(q.isQuitting()).toBe(true);
   });
+  it('supersedes a committed quit with a durable shutdown snapshot', async () => {
+    const h = makeIO();
+    const q = new SessionQueue(h.io);
+    await q.beginQuit((s) => ({ ...s, cleanExit: true }));
+    await q.beginQuit((s) => ({ ...s, cleanExit: false, restoreReason: 'shutdown' }), { supersede: true });
+    expect(h.disk).toMatchObject({ cleanExit: false, restoreReason: 'shutdown' });
+    expect(q.isQuitting()).toBe(true);
+  });
 });
 
 describe('SessionQueue — a persist failure does not wedge later writes', () => {
@@ -155,5 +184,122 @@ describe('SessionQueue — a persist failure does not wedge later writes', () =>
     await q.mutate((s) => upsertWindowSnapshot(s, win('w2')));
     expect(h.disk.windows.map((w) => w.id)).toContain('w2');
     expect(h.disk.windows.map((w) => w.id)).not.toContain('w1');
+  });
+});
+describe('session shutdown marker store', () => {
+  it('writes filtered shutdown snapshots and its marker in one durable transaction', async () => {
+    sessionStoreHarness.disk = {
+      version: 2,
+      windows: [win('stale-empty', '')],
+    };
+    sessionStoreHarness.persists = 0;
+    vi.resetModules();
+    const { markShutdownRestoreQueued, getSessionAggregate } = await import('../main/session-store');
+
+    await markShutdownRestoreQueued([win('saved', 'body'), win('empty', '')]);
+
+    expect(sessionStoreHarness.persists).toBe(1);
+    await expect(getSessionAggregate()).resolves.toMatchObject({
+      cleanExit: false,
+      restoreReason: 'shutdown',
+      windows: [{ id: 'saved', doc: 'body' }],
+    });
+  });
+  it('supersedes a committed quit instead of silently accepting shutdown persistence', async () => {
+    sessionStoreHarness.disk = { version: 2, windows: [win('saved', 'before')] };
+    sessionStoreHarness.persists = 0;
+    sessionStoreHarness.failPersist = false;
+    vi.resetModules();
+    const { markCleanExitQueued, markShutdownRestoreQueued, getSessionAggregate } = await import('../main/session-store');
+
+    await markCleanExitQueued();
+    await markShutdownRestoreQueued([win('saved', 'shutdown snapshot')]);
+
+    expect(sessionStoreHarness.persists).toBe(2);
+    await expect(getSessionAggregate()).resolves.toMatchObject({
+      cleanExit: false,
+      restoreReason: 'shutdown',
+      windows: [{ id: 'saved', doc: 'shutdown snapshot' }],
+    });
+  });
+  it('rejects a shutdown supersession when durable persistence fails', async () => {
+    sessionStoreHarness.disk = { version: 2, windows: [win('saved', 'before')] };
+    sessionStoreHarness.persists = 0;
+    sessionStoreHarness.failPersist = false;
+    vi.resetModules();
+    const { markCleanExitQueued, markShutdownRestoreQueued, getSessionAggregate } = await import('../main/session-store');
+
+    await markCleanExitQueued();
+    sessionStoreHarness.failPersist = true;
+    await expect(markShutdownRestoreQueued([win('saved', 'shutdown snapshot')])).rejects.toThrow('disk full');
+    sessionStoreHarness.failPersist = false;
+
+    await expect(getSessionAggregate()).resolves.toMatchObject({ cleanExit: true, windows: [{ id: 'saved', doc: 'before' }] });
+  });
+  it('removes a stale snapshot when its shutdown replacement is empty', async () => {
+    sessionStoreHarness.disk = { version: 2, windows: [win('same-id', 'stale body')] };
+    sessionStoreHarness.persists = 0;
+    sessionStoreHarness.failPersist = false;
+    vi.resetModules();
+    const { markShutdownRestoreQueued, getSessionAggregate } = await import('../main/session-store');
+
+    await markShutdownRestoreQueued([win('same-id', '')]);
+
+    await expect(getSessionAggregate()).resolves.toMatchObject({ windows: [] });
+  });
+  it('keeps path-only shutdown snapshots so file-backed windows reopen', async () => {
+    sessionStoreHarness.disk = { version: 2, windows: [] };
+    sessionStoreHarness.persists = 0;
+    sessionStoreHarness.failPersist = false;
+    vi.resetModules();
+    const { markShutdownRestoreQueued, getSessionAggregate } = await import('../main/session-store');
+
+    await markShutdownRestoreQueued([{ id: 'path-only', path: '/tmp/opening.md', title: null, doc: '', dirty: false }]);
+
+    await expect(getSessionAggregate()).resolves.toMatchObject({
+      restoreReason: 'shutdown',
+      windows: [{ id: 'path-only', path: '/tmp/opening.md', doc: '' }],
+    });
+  });
+  it('clears the shutdown marker for a clean quit', async () => {
+    sessionStoreHarness.disk = {
+      version: 2,
+      windows: [win('saved', 'body')],
+      cleanExit: false,
+      restoreReason: 'shutdown',
+    };
+    sessionStoreHarness.persists = 0;
+    vi.resetModules();
+    const { markCleanExitQueued, getSessionAggregate } = await import('../main/session-store');
+
+    await markCleanExitQueued();
+
+    expect(sessionStoreHarness.persists).toBe(1);
+    await expect(getSessionAggregate()).resolves.toMatchObject({
+      cleanExit: true,
+      windows: [{ id: 'saved', doc: 'body' }],
+    });
+    expect((await getSessionAggregate()).restoreReason).toBeUndefined();
+  });
+
+  it('consumes only the marker and retains snapshots when consumption persistence fails', async () => {
+    sessionStoreHarness.disk = {
+      version: 2,
+      windows: [win('saved', 'body')],
+      cleanExit: false,
+      restoreReason: 'shutdown',
+    };
+    sessionStoreHarness.persists = 0;
+    sessionStoreHarness.failPersist = false;
+    vi.resetModules();
+    const { consumeShutdownRestoreMarker, getSessionAggregate } = await import('../main/session-store');
+
+    sessionStoreHarness.failPersist = true;
+    await expect(consumeShutdownRestoreMarker()).rejects.toThrow('disk full');
+    sessionStoreHarness.failPersist = false;
+    await expect(getSessionAggregate()).resolves.toMatchObject({
+      restoreReason: 'shutdown',
+      windows: [{ id: 'saved', doc: 'body' }],
+    });
   });
 });

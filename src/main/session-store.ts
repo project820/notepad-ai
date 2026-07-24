@@ -1,7 +1,14 @@
 import { app } from 'electron';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { migrateSessionSnapshot, removeWindowSnapshot, type SessionSnapshotV2 } from './session-schema';
+import {
+  isRestorableSessionWindow,
+  migrateSessionSnapshot,
+  removeWindowSnapshot,
+  upsertWindowSnapshot,
+  type SessionSnapshotV2,
+  type SessionWindowSnapshot,
+} from './session-schema';
 import { SessionQueue } from './session-queue';
 import { atomicWrite as atomicWriteFile, nodeAtomicBackend } from './atomic-write';
 
@@ -70,7 +77,10 @@ export function getSessionAggregate(): Promise<SessionSnapshotV2> {
 export function mutateSessionAggregate(
   mutator: (current: SessionSnapshotV2) => SessionSnapshotV2,
 ): Promise<SessionSnapshotV2> {
-  return sessionQueue.mutate(mutator);
+  return sessionQueue.mutate((current) => {
+    const { restoreReason: _restoreReason, ...withoutRestoreReason } = current;
+    return mutator(withoutRestoreReason);
+  });
 }
 
 /**
@@ -78,10 +88,29 @@ export function mutateSessionAggregate(
  * writes. Discarded windows and the clean-exit marker are one durable change.
  */
 export async function markCleanExitQueued(windowKeys: readonly string[] = []): Promise<void> {
-  await sessionQueue.beginQuit((state) => ({
-    ...windowKeys.reduce(removeWindowSnapshot, state),
-    cleanExit: true,
-  }));
+  await sessionQueue.beginQuit((state) => {
+    const { restoreReason: _restoreReason, ...withoutRestoreReason } = state;
+    return {
+      ...windowKeys.reduce(removeWindowSnapshot, withoutRestoreReason),
+      cleanExit: true,
+    };
+  });
+}
+
+/** Persist restorable shutdown snapshots and fence late renderer writes as one transaction. */
+export async function markShutdownRestoreQueued(snapshots: readonly SessionWindowSnapshot[]): Promise<void> {
+  await sessionQueue.beginQuit((state) => {
+    const windows = snapshots
+      .reduce((current, snapshot) => upsertWindowSnapshot(current, snapshot), state)
+      .windows
+      .filter(isRestorableSessionWindow);
+    return { version: 2, windows, cleanExit: false, restoreReason: 'shutdown' };
+  }, { supersede: true });
+}
+
+/** Consume the one-shot shutdown restore marker without deleting its snapshots. */
+export function consumeShutdownRestoreMarker(): Promise<SessionSnapshotV2> {
+  return mutateSessionAggregate((state) => state);
 }
 
 /** Reset the aggregate to a clean empty state (after a clean-exit restore check). */

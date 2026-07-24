@@ -41,6 +41,8 @@ export type WindowRecord = {
   pendingOutbound: OutboundMessage[];
   /** Snapshot to restore into this window on launch (session aggregate). */
   restoreSnapshot?: SessionWindowSnapshot;
+  /** One-shot restore mode assigned by main for this window only. */
+  restoreReason?: 'shutdown';
   /** Most recent snapshot reported by this window's renderer. */
   lastSnapshot?: SessionWindowSnapshot;
 };

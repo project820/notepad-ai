@@ -74,6 +74,12 @@ export function registerFileIpc({ registry, fileGrants, identityFs, saveMutex, b
             if (!(await fileGrants.validateWriteAuthorization(authorization))) {
               throw new Error('not-authorized');
             }
+            if (
+              process.env.NOTEPAD_AI_INTEGRATION_TEST === '1'
+              && process.env.NOTEPAD_AI_SMOKE_FAIL_FILE_SAVE === '1'
+            ) {
+              throw new Error('smoke-file-save-failed');
+            }
           },
           beforeRename: async (temp) => {
             if (!(await fileGrants.validateWriteAuthorization(authorization))) {

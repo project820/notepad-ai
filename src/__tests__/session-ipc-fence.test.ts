@@ -29,6 +29,32 @@ describe('session IPC discard fence', () => {
     electron.reset();
     sessionStore.mutateSessionAggregate.mockReset();
   });
+  it('returns the registry-owned transient shutdown restore reason with the snapshot', async () => {
+    const record: WindowRecord = {
+      windowId: 1,
+      webContentsId: 1001,
+      windowKey: 'shutdown-restore-window',
+      lastFocusedAt: 0,
+      ready: true,
+      pendingOutbound: [],
+      restoreSnapshot: { id: 'shutdown-restore-window', path: null, title: null, doc: 'restored draft' },
+      restoreReason: 'shutdown',
+    };
+    const { registerSessionIpc } = await import('../main/ipc/session-ipc');
+    registerSessionIpc({
+      registry: { getByWebContents: (id: number) => id === record.webContentsId ? record : null } as never,
+      sinkFor: () => (() => {}),
+    });
+
+    const get = electron.handler('session:get');
+    await expect(get!({
+      sender: { id: record.webContentsId },
+      senderFrame: { parent: null, url: 'file:///app/index.html' },
+    })).resolves.toEqual({
+      snapshot: record.restoreSnapshot,
+      restoreReason: 'shutdown',
+    });
+  });
 
   it('drops a queued write after a preserved target enters its pending commit fence', async () => {
     const record = {
@@ -273,4 +299,63 @@ describe('session IPC discard fence', () => {
     expect(syncSnapshotPath).toHaveBeenCalledWith(record.windowId, expect.objectContaining({ path: null }));
     expect(claimPath).not.toHaveBeenCalled();
   });
+  it('clears in-memory restoreSnapshot when the user declines recovery', async () => {
+    const pending = { id: 'declined-recovery', path: null, title: null, doc: 'discarded draft' };
+    const record: WindowRecord = {
+      windowId: 1,
+      webContentsId: 1001,
+      windowKey: 'declined-recovery',
+      lastFocusedAt: 0,
+      ready: true,
+      pendingOutbound: [],
+      restoreSnapshot: pending,
+      restoreReason: undefined,
+    };
+    sessionStore.mutateSessionAggregate.mockImplementation(async (mutator: (state: SessionSnapshotV2) => SessionSnapshotV2) =>
+      mutator({ version: 2, windows: [pending] }));
+    const { registerSessionIpc } = await import('../main/ipc/session-ipc');
+    registerSessionIpc({
+      registry: { getByWebContents: (id: number) => id === record.webContentsId ? record : null } as never,
+      sinkFor: () => (() => {}),
+    });
+    const clear = electron.handler('session:clear');
+    await clear!({
+      sender: { id: record.webContentsId },
+      senderFrame: { parent: null, url: 'file:///app/index.html' },
+    });
+    expect(record.restoreSnapshot).toBeUndefined();
+    expect(record.restoreReason).toBeUndefined();
+  });
+
+  it('clears restoreSnapshot after a live session write', async () => {
+    const record: WindowRecord = {
+      windowId: 1,
+      webContentsId: 1001,
+      windowKey: 'applied-recovery',
+      lastFocusedAt: 0,
+      ready: true,
+      pendingOutbound: [],
+      currentPath: null,
+      restoreSnapshot: { id: 'applied-recovery', path: null, title: null, doc: 'applied draft' },
+      restoreReason: 'shutdown',
+    };
+    sessionStore.mutateSessionAggregate.mockImplementation(async (mutator: (state: SessionSnapshotV2) => SessionSnapshotV2) =>
+      mutator({ version: 2, windows: [] }));
+    const { registerSessionIpc } = await import('../main/ipc/session-ipc');
+    registerSessionIpc({
+      registry: {
+        getByWebContents: (id: number) => id === record.webContentsId ? record : null,
+        syncSnapshotPath: vi.fn(),
+      } as never,
+      sinkFor: () => (() => {}),
+    });
+    const write = electron.handler('session:write');
+    await write!({
+      sender: { id: record.webContentsId },
+      senderFrame: { parent: null, url: 'file:///app/index.html' },
+    }, { doc: 'live', path: null });
+    expect(record.restoreSnapshot).toBeUndefined();
+    expect(record.restoreReason).toBeUndefined();
+  });
+
 });

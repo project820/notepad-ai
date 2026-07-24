@@ -4,6 +4,7 @@ import type { FileTreeEntry } from '../shared/file-types';
 import type { HtmlExportPipelineApi, SaveFinalizedRequest, SaveFinalizedResult } from '../shared/html-export-pipeline';
 import type { GenerationAttemptResult } from '../main/html-export-generation-orchestrator';
 import type { HtmlExportAssetApi } from '../shared/html-export-assets';
+import type { UnifiedChatItem } from './unified-chat-history';
 
 type ProjectWizardSaveApprovedDraftInput = {
   projectFolder: string;
@@ -52,6 +53,32 @@ type ReasoningCapabilitiesSnapshot = {
   models: Array<{ modelId: string; efforts: ReasoningEffort[] }>;
   accountModels: string[];
 };
+export type ShutdownPersistRequest = {
+  id: string;
+  leaseId: string;
+  revision: number;
+};
+
+type ShutdownSessionSnapshot = {
+  savedAt: number;
+  path: string | null;
+  title: string | null;
+  doc: string;
+  view: 'split' | 'editor-only' | 'preview-only';
+  unifiedChatHistory: UnifiedChatItem[];
+  model?: string;
+  dirty: boolean;
+};
+
+export type ShutdownPersistResult = {
+  id: string;
+  ok: boolean;
+  fileSaved: boolean;
+  snapshot: ShutdownSessionSnapshot | null;
+  revision: number;
+  error?: string;
+};
+
 
 
 export type Api = HtmlExportPipelineApi & HtmlExportAssetApi & {
@@ -115,6 +142,10 @@ export type Api = HtmlExportPipelineApi & HtmlExportAssetApi & {
   sendCloseQuiesceResult: (requestId: string, result: { prepared?: boolean; rolledBack?: boolean }) => void;
   sendCloseQuiesceReady: () => void;
   setCloseLocale: (locale: 'en' | 'ko' | 'zh-Hans' | 'zh-Hant' | 'ja') => void;
+  onShutdownPersistRequest: (cb: (request: ShutdownPersistRequest) => void) => () => void;
+  sendShutdownPersistResult: (result: ShutdownPersistResult) => void;
+  /** Integration-only smoke bridge; present only when the shutdown smoke trigger env is active. */
+  closeSmokeBeginShutdown?: () => Promise<void>;
   checkForUpdate: () => Promise<{ updateAvailable: boolean; currentVersion: string; latestVersion: string; url: string } | null>;
   openExternal: (url: string) => Promise<void>;
   appVersion: () => Promise<string>;

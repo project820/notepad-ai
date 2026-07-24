@@ -9,8 +9,10 @@ import { isTrustedAppUrl, SECURITY_REASON } from './security';
 import { isAllowedExternalUrl } from './safe-external';
 import { ProjectWizardRootStore } from './project-wizard/access';
 import { sendWhenReady, type OutboundSink, type WindowRecord, type WindowRegistry } from './window-registry';
-import type { SessionWindowSnapshot } from './session-schema';
+import { isRestorableSessionWindow, normalizeWindowSnapshot, type SessionWindowSnapshot } from './session-schema';
+import { markShutdownRestoreQueued } from './session-store';
 import { queueOrOpenFile, shouldPublishLaunchWindow, type CreateWindowOptions } from './lifecycle-flags';
+import { logWarn } from './app-log';
 import type { ConvertDocument } from './convert';
 import {
   closeGuardChoiceFromButton,
@@ -41,11 +43,12 @@ type AppWindowsDeps = {
   removeSessionWindow: (windowKey: string) => Promise<void>;
   removeSessionWindows: (windowKeys: readonly string[]) => Promise<void>;
   commitQuitSession: (discardedWindowKeys: readonly string[]) => Promise<void>;
+  commitShutdownSession?: (snapshots: readonly SessionWindowSnapshot[]) => Promise<void>;
   showCloseDialog?: (win: BrowserWindow, labels: { title: string; message: string; save: string; discard: string; cancel: string; saveAllowed?: boolean }) => Promise<CloseGuardChoice>;
 };
 
 type AppWindows = {
-  createWindow: (opts?: CreateWindowOptions & { restore?: SessionWindowSnapshot }) => Promise<BrowserWindow>;
+  createWindow: (opts?: CreateWindowOptions & { restore?: SessionWindowSnapshot; restoreReason?: 'shutdown' }) => Promise<BrowserWindow>;
   openFilePath: (path: string, win: BrowserWindow, enrollment?: OpenEnrollmentPolicy) => Promise<void>;
   handleOpen: () => Promise<void>;
   setReady: () => void;
@@ -55,7 +58,8 @@ type AppWindows = {
   sinkFor: (win: BrowserWindow) => OutboundSink;
   sendToFocused: (channel: string) => void;
   approveClose: (win: BrowserWindow) => Promise<boolean>;
-  approveAllForQuit: (intent: 'quit' | 'relaunch') => Promise<boolean>;
+  approveAllForQuit: (intent: 'quit' | 'relaunch' | 'shutdown') => Promise<boolean>;
+  waitForCloseTransaction: () => Promise<void>;
   clearCloseApprovals: () => void;
   isSessionWriteFenced: (windowKey: string) => boolean;
 };
@@ -84,6 +88,7 @@ export function createAppWindows({
   removeSessionWindow,
   removeSessionWindows,
   commitQuitSession,
+  commitShutdownSession = markShutdownRestoreQueued,
   showCloseDialog = async (win, labels) => {
     const buttons = labels.saveAllowed === false
       ? [labels.discard, labels.cancel]
@@ -115,6 +120,14 @@ export function createAppWindows({
   const pendingDiscardRollback = new Map<string, { webContentsId: number; resolve: (rolledBack: boolean) => void }>();
   const pendingConsume = new Map<string, { webContentsId: number; resolve: (consumed: boolean) => void }>();
   const closeLeases = new Map<number, { id: string; invalidated: boolean }>();
+  // Leases minted by main for unready restorable windows during shutdown: no
+  // renderer handshake is possible, so authorize/consume short-circuit true.
+  const mainOwnedShutdownLeases = new Set<string>();
+  const pendingShutdownPersist = new Map<string, {
+    webContentsId: number;
+    leaseId: string;
+    resolve: (result: { ok: boolean; revision: number; snapshot: unknown; fileSaved: boolean; error?: string }) => void;
+  }>();
   const quiesceReady = new Set<number>();
   const pendingQuiesce = new Map<string, {
     webContentsId: number;
@@ -184,6 +197,27 @@ export function createAppWindows({
         : null,
     });
   });
+  onTrusted('close:shutdown-persist:result', (event, raw: unknown) => {
+    const value = raw as Record<string, unknown>;
+    const id = typeof value?.id === 'string' ? value.id : '';
+    const pending = pendingShutdownPersist.get(id);
+    if (!pending || pending.webContentsId !== event.sender.id) return;
+    pendingShutdownPersist.delete(id);
+    const fileSaved = value.fileSaved === true;
+    const error = typeof value.error === 'string' ? value.error : undefined;
+    if (error) {
+      void logWarn('lifecycle', 'shutdown persistence reported a failed save', { fileSaved, error, webContentsId: event.sender.id });
+    }
+    pending.resolve({
+      ok: value.ok === true,
+      revision: Number.isSafeInteger(value.revision) && (value.revision as number) >= 0
+        ? value.revision as number
+        : -1,
+      snapshot: value.snapshot,
+      fileSaved,
+      error,
+    });
+  });
   onTrusted('close:authorize-result', (event, raw: unknown) => {
     const value = raw as Record<string, unknown>;
     const id = typeof value?.requestId === 'string' ? value.requestId : '';
@@ -240,6 +274,11 @@ export function createAppWindows({
     for (const pending of pendingDiscardPrepare.values()) {
       if (pending.webContentsId === event.sender.id && pending.leaseId === id) pending.resolve(false);
     }
+    for (const pending of pendingShutdownPersist.values()) {
+      if (pending.webContentsId === event.sender.id && pending.leaseId === id) {
+        pending.resolve({ ok: false, revision: -1, snapshot: null, fileSaved: false });
+      }
+    }
   });
   onTrusted('close:locale', (event, locale: unknown) => {
     const rec = registry.getByWebContents(event.sender.id);
@@ -284,8 +323,32 @@ export function createAppWindows({
     const lease = closeLeases.get(win.id);
     return !!leaseId && !!lease && lease.id === leaseId && !lease.invalidated && !win.isDestroyed();
   };
+  const persistShutdownFromRenderer = (
+    win: BrowserWindow,
+    leaseId: string,
+    revision: number,
+    deadline: number,
+  ) => new Promise<{ ok: boolean; revision: number; snapshot: unknown; fileSaved: boolean; error?: string }>((resolve) => {
+    if (!activeLease(win, leaseId) || Date.now() >= deadline) {
+      resolve({ ok: false, revision: -1, snapshot: null, fileSaved: false });
+      return;
+    }
+    const id = requestId('shutdown-persist', win);
+    const onDestroyed = () => settle({ ok: false, revision: -1, snapshot: null, fileSaved: false });
+    const settle = (result: { ok: boolean; revision: number; snapshot: unknown; fileSaved: boolean; error?: string }) => {
+      clearTimeout(timer);
+      win.removeListener('closed', onDestroyed);
+      pendingShutdownPersist.delete(id);
+      resolve(result);
+    };
+    const timer = setTimeout(() => settle({ ok: false, revision: -1, snapshot: null, fileSaved: false }), Math.max(0, deadline - Date.now()));
+    pendingShutdownPersist.set(id, { webContentsId: win.webContents.id, leaseId, resolve: settle });
+    win.once('closed', onDestroyed);
+    win.webContents.send('close:shutdown-persist:request', { id, leaseId, revision });
+  });
   const authorizeRendererClose = (win: BrowserWindow, leaseId: string | undefined): Promise<boolean> => {
     if (!activeLease(win, leaseId)) return Promise.resolve(false);
+    if (leaseId && mainOwnedShutdownLeases.has(leaseId)) return Promise.resolve(true);
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         pendingAuthorize.delete(leaseId!);
@@ -304,6 +367,7 @@ export function createAppWindows({
   };
   const consumeRendererClose = (win: BrowserWindow, leaseId: string | undefined): Promise<boolean> => {
     if (!activeLease(win, leaseId)) return Promise.resolve(false);
+    if (leaseId && mainOwnedShutdownLeases.has(leaseId)) return Promise.resolve(true);
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         pendingConsume.delete(leaseId!);
@@ -466,11 +530,87 @@ export function createAppWindows({
       authorize: () => authorizeRendererClose(win, leaseIdFor(win.id)),
     });
   };
+  const shutdownSnapshots = new Map<string, SessionWindowSnapshot>();
+  const durableSnapshotForShutdown = (rec: WindowRecord): SessionWindowSnapshot | null => {
+    if (rec.restoreSnapshot) {
+      return normalizeWindowSnapshot(rec.windowKey, rec.currentPath ?? rec.restoreSnapshot.path, rec.restoreSnapshot);
+    }
+    if (rec.lastSnapshot) {
+      return normalizeWindowSnapshot(rec.windowKey, rec.currentPath ?? rec.lastSnapshot.path, rec.lastSnapshot);
+    }
+    if (rec.currentPath != null) {
+      // File-backed window still loading: disk is source of truth.
+      return { id: rec.windowKey, path: rec.currentPath, title: null, doc: '', dirty: false };
+    }
+    return null;
+  };
+  const mintMainOwnedShutdownLease = (windowId: number): string => {
+    const id = `main-owned-shutdown:${windowId}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+    closeLeases.set(windowId, { id, invalidated: false });
+    mainOwnedShutdownLeases.add(id);
+    return id;
+  };
+  const decideShutdown = async (target: CloseTarget, context: CloseAttemptContext): Promise<CloseDecision> => {
+    const win = BrowserWindow.fromId(target.windowId);
+    if (!win || win.isDestroyed()) return 'allow';
+
+    const rec = registry.get(target.windowId);
+    // Restored / file-backed windows that are still loading cannot complete the
+    // renderer lease handshake. Use the durable main-side snapshot instead so
+    // powerMonitor's preventDefault does not strand the OS power-off.
+    if (rec && !rec.ready) {
+      const durable = durableSnapshotForShutdown(rec);
+      if (!durable) return 'cancel';
+      shutdownSnapshots.set(target.windowKey, durable);
+      mintMainOwnedShutdownLease(target.windowId);
+      return 'allow';
+    }
+
+    let state: (CloseGuardState & { leaseId: string | null }) | null = null;
+    return runDecideCloseLoop({
+      context,
+      queryState: async () => {
+        shutdownSnapshots.delete(target.windowKey);
+        state = await queryCloseState(win);
+      },
+      resolveGuard: async () => {
+        if (!state?.leaseId || !state.known || state.syncFailed) return 'cancel';
+        const result = await persistShutdownFromRenderer(win, state.leaseId, state.revision, context.forwardDeadline);
+        if (
+          !result.ok
+          || result.revision !== state.revision
+          || result.snapshot == null
+          || typeof result.snapshot !== 'object'
+          || !activeLease(win, state.leaseId)
+        ) {
+          return 'cancel';
+        }
+        const live = registry.get(target.windowId);
+        if (!live) return 'cancel';
+        const fromRenderer = normalizeWindowSnapshot(target.windowKey, live.currentPath, result.snapshot);
+        // Crash-recovery windows keep restoreSnapshot until the user accepts or
+        // declines the banner. Prefer recovery whenever it still has document or
+        // chat content and the live renderer has neither (path alone does not
+        // count as live content here).
+        const pendingRecovery = live.restoreSnapshot
+          ? normalizeWindowSnapshot(target.windowKey, live.restoreSnapshot.path ?? live.currentPath, live.restoreSnapshot)
+          : null;
+        const hasContent = (snap: SessionWindowSnapshot | null | undefined) =>
+          (snap?.doc?.length ?? 0) > 0 || (snap?.unifiedChatHistory?.length ?? 0) > 0;
+        const chosen = pendingRecovery && hasContent(pendingRecovery) && !hasContent(fromRenderer)
+          ? pendingRecovery
+          : fromRenderer;
+        shutdownSnapshots.set(target.windowKey, chosen);
+        return 'allow';
+      },
+      authorize: () => authorizeRendererClose(win, leaseIdFor(win.id)),
+    });
+  };
 
   const targetsFor = (records: readonly WindowRecord[]): CloseTarget[] => records.map((rec) => ({ windowId: rec.windowId, windowKey: rec.windowKey }));
 
   const commitCloseTransaction = async (
-    transaction: { intent: 'close' | 'quit' | 'relaunch'; targets: readonly CloseTarget[]; discards: readonly CloseTarget[]; context: CloseAttemptContext },
+    transaction: { intent: 'close' | 'quit' | 'relaunch' | 'shutdown'; targets: readonly CloseTarget[]; discards: readonly CloseTarget[]; context: CloseAttemptContext },
   ): Promise<CloseCommitResult> => {
     // A discard request fences autosave before its active save drains. Track it
     // before waiting so every partial prepare is explicitly rolled back.
@@ -527,6 +667,14 @@ export function createAppWindows({
       return { retry: [...new Map([...invalid, ...requestedDiscards].map((target) => [target.windowId, target])).values()] };
     }
 
+    const snapshots = transaction.intent === 'shutdown'
+      ? transaction.targets.map((target) => shutdownSnapshots.get(target.windowKey))
+      : [];
+    if (transaction.intent === 'shutdown' && snapshots.some((snapshot) => !snapshot)) {
+      await rollback(transaction.targets);
+      return { retry: transaction.targets };
+    }
+
     // Consume every already-authorized lease before any persistent or teardown
     // side effect. The renderer rejects later document mutations for a consumed
     // lease, closing the final validation-to-close race.
@@ -553,6 +701,8 @@ export function createAppWindows({
     try {
       if (transaction.intent === 'quit') {
         await commitQuitSession(discardedKeys);
+      } else if (transaction.intent === 'shutdown') {
+        await commitShutdownSession(snapshots as SessionWindowSnapshot[]);
       } else if (removedSessionKeys.length > 0) {
         await removeSessionWindows(removedSessionKeys);
       }
@@ -585,9 +735,29 @@ export function createAppWindows({
     return result.approved;
   };
 
-  const approveAllForQuit = async (intent: 'quit' | 'relaunch') => {
-    const result = await coordinator.request(intent, targetsFor(registry.all()), decideClose, commitCloseTransaction, quiesceTransaction);
-    return result.approved && result.intent === intent;
+  const approveAllForQuit = async (intent: 'quit' | 'relaunch' | 'shutdown') => {
+    const records = registry.all();
+    const unreadyBlankRecords = intent === 'shutdown'
+      ? records.filter((rec) => !rec.ready && rec.currentPath == null && !rec.restoreSnapshot && !rec.lastSnapshot)
+      : [];
+    try {
+      const result = await coordinator.request(
+        intent,
+        targetsFor(intent === 'shutdown' ? records.filter((rec) => !unreadyBlankRecords.includes(rec)) : records),
+        intent === 'shutdown' ? decideShutdown : decideClose,
+        commitCloseTransaction,
+        quiesceTransaction,
+      );
+      if (result.approved && result.intent === 'shutdown') {
+        for (const rec of unreadyBlankRecords) approvedCloseWindowIds.add(rec.windowId);
+      }
+      return result.approved && result.intent === intent;
+    } finally {
+      if (intent === 'shutdown') {
+        shutdownSnapshots.clear();
+        mainOwnedShutdownLeases.clear();
+      }
+    }
   };
 
   const windowFromRecord = (rec: WindowRecord | null) => {
@@ -717,7 +887,7 @@ export function createAppWindows({
     if (rec) registry.claimPath(rec.windowId, canonicalPath);
   };
 
-  const createWindow = async (opts: CreateWindowOptions & { restore?: SessionWindowSnapshot } = {}) => {
+  const createWindow = async (opts: CreateWindowOptions & { restore?: SessionWindowSnapshot; restoreReason?: 'shutdown' } = {}) => {
     // NOTEPAD_AI_HIDE_WINDOWS is a main-process-only seam for integration
     // runners: real windows still exist and render, but never steal the
     // user's screen or focus during automated runs.
@@ -748,6 +918,7 @@ export function createAppWindows({
       ready: false,
       pendingOutbound: [],
       restoreSnapshot: opts.restore,
+      restoreReason: opts.restoreReason,
     };
     registry.register(record);
     // Electron can deliver an open-file event while the initial window is loading.
@@ -862,6 +1033,7 @@ export function createAppWindows({
     sendToFocused,
     approveClose,
     approveAllForQuit,
+    waitForCloseTransaction: () => coordinator.waitForIdle(),
     clearCloseApprovals: () => approvedCloseWindowIds.clear(),
     isSessionWriteFenced: (windowKey) => sessionTargetStates.has(windowKey),
   };

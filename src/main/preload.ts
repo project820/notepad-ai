@@ -21,6 +21,7 @@ import type {
   PickHtmlAssetsRequest,
   PickHtmlAssetsResponse,
 } from '../shared/html-export-assets';
+import type { ShutdownPersistRequest, ShutdownPersistResult } from '../renderer/api-types';
 
 type OpenedFile = {
   filePath: string | null;
@@ -277,6 +278,28 @@ const api = {
   sendCloseQuiesceReady: (): void => ipcRenderer.send('close:quiesce-ready'),
   setCloseLocale: (locale: 'en' | 'ko' | 'zh-Hans' | 'zh-Hant' | 'ja'): void =>
     ipcRenderer.send('close:locale', locale),
+  onShutdownPersistRequest: (cb: (request: ShutdownPersistRequest) => void): (() => void) => {
+    const listener = (_e: unknown, request: Partial<ShutdownPersistRequest>) => {
+      if (
+        typeof request?.id === 'string' &&
+        typeof request.leaseId === 'string' &&
+        typeof request.revision === 'number' &&
+        Number.isSafeInteger(request.revision) &&
+        request.revision >= -1
+      ) {
+        cb({ id: request.id, leaseId: request.leaseId, revision: request.revision });
+      }
+    };
+    ipcRenderer.on('close:shutdown-persist:request', listener);
+    return () => ipcRenderer.removeListener('close:shutdown-persist:request', listener);
+  },
+  sendShutdownPersistResult: (result: ShutdownPersistResult): void => {
+    ipcRenderer.send('close:shutdown-persist:result', result);
+  },
+  ...(process.env.NOTEPAD_AI_INTEGRATION_TEST === '1'
+    && process.env.NOTEPAD_AI_CLOSE_SMOKE_TRIGGER === 'shutdown'
+    ? { closeSmokeBeginShutdown: (): Promise<void> => ipcRenderer.invoke('close-smoke:begin-shutdown') }
+    : {}),
 
   checkForUpdate: (): Promise<{ updateAvailable: boolean; currentVersion: string; latestVersion: string; url: string } | null> =>
     ipcRenderer.invoke('update:check'),

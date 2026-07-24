@@ -1,4 +1,4 @@
-export type CloseIntent = 'close' | 'quit' | 'relaunch';
+export type CloseIntent = 'close' | 'quit' | 'relaunch' | 'shutdown';
 export type CloseDecision = 'allow' | 'discard' | 'cancel';
 
 export type CloseTarget = {
@@ -129,6 +129,9 @@ export async function runDecideCloseLoop({
 export class CloseCoordinator {
   private inFlight: Promise<CloseTransactionResult> | null = null;
   private inFlightIntent: CloseIntent | null = null;
+  waitForIdle(): Promise<void> {
+    return this.inFlight ? this.inFlight.then(() => {}) : Promise.resolve();
+  }
 
   request(
     intent: CloseIntent,
@@ -153,6 +156,22 @@ export class CloseCoordinator {
       const decisions = new Map<number, CloseDecision>();
       let pending = [...targets];
       let approved = false;
+      // Empty shutdown targets must still approve: macOS powerMonitor has already
+      // preventDefault()'d, so a denial would strand the app and block power-off.
+      // Persist the empty shutdown commit (marker + empty windows) then return.
+      if (pending.length === 0) {
+        if (intent !== 'shutdown') return { approved: false, intent };
+        try {
+          const committed = await commit({ intent, targets: [], discards: [], context });
+          if (committed !== false && !(typeof committed === 'object' && 'retry' in committed)) {
+            approved = true;
+            return { approved: true, intent };
+          }
+          return { approved: false, intent };
+        } catch {
+          return { approved: false, intent };
+        }
+      }
       try {
         while (pending.length > 0 && Date.now() < context.forwardDeadline) {
           const epoch = await Promise.all(pending.map(async (target) => ({
