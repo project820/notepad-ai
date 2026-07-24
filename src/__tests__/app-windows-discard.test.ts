@@ -754,5 +754,57 @@ describe('discard close IPC waiters', () => {
       expect(commitShutdownSession).toHaveBeenCalledOnce();
       expect(appWindows.isSessionWriteFenced('window-1')).toBe(false);
     });
+    it('approves shutdown with zero windows so power-off is not stranded', async () => {
+      const commitShutdownSession = vi.fn(async () => {});
+      const { appWindows } = await setup(
+        () => {},
+        async () => { throw new Error('shutdown must not open a dialog'); },
+        0,
+        () => true,
+        async () => {},
+        async () => {},
+        async () => {},
+        undefined,
+        false,
+        undefined,
+        undefined,
+        commitShutdownSession,
+      );
+
+      await expect(appWindows.approveAllForQuit('shutdown')).resolves.toBe(true);
+      expect(commitShutdownSession).toHaveBeenCalledWith([]);
+    });
+
+    it('approves shutdown when every window is an unready blank', async () => {
+      const commitShutdownSession = vi.fn(async () => {});
+      const { appWindows, wins, records } = await setup(
+        () => {},
+        async () => { throw new Error('shutdown must not open a dialog'); },
+        2,
+        () => true,
+        async () => {},
+        async () => {},
+        async () => {},
+        undefined,
+        false,
+        undefined,
+        undefined,
+        commitShutdownSession,
+      );
+      for (const record of records) {
+        record.ready = false;
+        record.currentPath = null;
+        record.restoreSnapshot = undefined;
+        record.lastSnapshot = undefined;
+      }
+
+      await expect(appWindows.approveAllForQuit('shutdown')).resolves.toBe(true);
+      expect(commitShutdownSession).toHaveBeenCalledWith([]);
+      // Unready blanks are force-approved after the empty shutdown commit so
+      // window close-guards do not re-enter the denied empty-target path.
+      for (const win of wins) {
+        await expect(appWindows.approveClose(win as never)).resolves.toBe(true);
+      }
+    });
   });
 });
