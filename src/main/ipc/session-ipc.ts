@@ -23,6 +23,10 @@ export function registerSessionIpc({ registry, sinkFor, isSessionWriteFenced = (
       if (!isCurrentWritableRecord(event.sender.id, rec)) return cur;
       const win = normalizeWindowSnapshot(rec.windowKey, rec.currentPath, snap);
       rec.lastSnapshot = win;
+      // Live write means the user owns the document now — drop any pending
+      // recovery snapshot so later empty shutdown cannot resurrect it.
+      rec.restoreSnapshot = undefined;
+      rec.restoreReason = undefined;
       registry.syncSnapshotPath(rec.windowId, win);
       written = true;
       return { ...upsertWindowSnapshot(cur, win), cleanExit: false };

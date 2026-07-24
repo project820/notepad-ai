@@ -52,6 +52,13 @@ export function initSessionSnapshot(ctx: AppContext, deps: SessionSnapshotDeps) 
     return true;
   }
 
+  function applySessionMetadata(snap: any) {
+    if (snap.view) { ctx.previewMode = snap.view as PreviewMode; deps.applyPreviewMode(); }
+    deps.setUnifiedChatHistory(restoreUnifiedThread(snap));
+    deps.unifiedChat.restore(snap);
+    if (deps.getUnifiedChatHistory().length > 0) deps.setUnifiedChatOpen(true);
+  }
+
   function applySessionSnapshot(snap: any) {
     deps.replaceDocument({
       doc: snap.doc ?? '',
@@ -59,10 +66,7 @@ export function initSessionSnapshot(ctx: AppContext, deps: SessionSnapshotDeps) 
       pendingTitle: typeof snap.title === 'string' ? snap.title : null,
       dirty: snap.dirty === true,
     });
-    if (snap.view) { ctx.previewMode = snap.view as PreviewMode; deps.applyPreviewMode(); }
-    deps.setUnifiedChatHistory(restoreUnifiedThread(snap));
-    deps.unifiedChat.restore(snap);
-    if (deps.getUnifiedChatHistory().length > 0) deps.setUnifiedChatOpen(true);
+    applySessionMetadata(snap);
     scheduleSessionSnapshot();
     ctx.setStatus(t('status.sessionRestored'));
   }
@@ -89,14 +93,17 @@ export function initSessionSnapshot(ctx: AppContext, deps: SessionSnapshotDeps) 
     if (!snap) return;
     const hasDoc = (snap.doc?.length ?? 0) > 0 || (snap.unifiedChatHistory?.length ?? 0) > 0;
     const path = typeof snap.path === 'string' && snap.path.length > 0 ? snap.path : null;
-    // Path-only shutdown snapshots must still reopen the file; empty untitled
-    // windows remain excluded.
+    // Path-only snapshots must still reopen the file; empty untitled remain excluded.
     if (!hasDoc && !path) return;
     if (res.restoreReason === 'shutdown') {
       // Clean path-backed windows reopen from disk so cloud/git updates win.
-      // Dirty (or failed-save) recovery still applies the in-memory snapshot.
+      // Non-document session state (chat/view) is still restored from the snapshot.
+      // Dirty (or failed-save) recovery still applies the full in-memory snapshot.
       if (path && snap.dirty !== true) {
         void window.api.openFileInCurrent(path);
+        applySessionMetadata(snap);
+        scheduleSessionSnapshot();
+        ctx.setStatus(t('status.sessionRestored'));
       } else if (hasDoc) {
         applySessionSnapshot(snap);
       } else if (path) {
@@ -104,7 +111,11 @@ export function initSessionSnapshot(ctx: AppContext, deps: SessionSnapshotDeps) 
       }
       return;
     }
-    if (!hasDoc) return;
+    // Ordinary crash recovery: path-only still reopens the file; content uses banner.
+    if (!hasDoc) {
+      if (path) void window.api.openFileInCurrent(path);
+      return;
+    }
     setTimeout(() => showRestoreBanner(snap), 400);
   })();
 

@@ -327,4 +327,35 @@ describe('session IPC discard fence', () => {
     expect(record.restoreReason).toBeUndefined();
   });
 
+  it('clears restoreSnapshot after a live session write', async () => {
+    const record: WindowRecord = {
+      windowId: 1,
+      webContentsId: 1001,
+      windowKey: 'applied-recovery',
+      lastFocusedAt: 0,
+      ready: true,
+      pendingOutbound: [],
+      currentPath: null,
+      restoreSnapshot: { id: 'applied-recovery', path: null, title: null, doc: 'applied draft' },
+      restoreReason: 'shutdown',
+    };
+    sessionStore.mutateSessionAggregate.mockImplementation(async (mutator: (state: SessionSnapshotV2) => SessionSnapshotV2) =>
+      mutator({ version: 2, windows: [] }));
+    const { registerSessionIpc } = await import('../main/ipc/session-ipc');
+    registerSessionIpc({
+      registry: {
+        getByWebContents: (id: number) => id === record.webContentsId ? record : null,
+        syncSnapshotPath: vi.fn(),
+      } as never,
+      sinkFor: () => (() => {}),
+    });
+    const write = electron.handler('session:write');
+    await write!({
+      sender: { id: record.webContentsId },
+      senderFrame: { parent: null, url: 'file:///app/index.html' },
+    }, { doc: 'live', path: null });
+    expect(record.restoreSnapshot).toBeUndefined();
+    expect(record.restoreReason).toBeUndefined();
+  });
+
 });

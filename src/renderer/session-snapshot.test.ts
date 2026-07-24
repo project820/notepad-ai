@@ -194,6 +194,90 @@ describe('session restore mode', () => {
     expect(openFileInCurrent).toHaveBeenCalledWith('/tmp/clean.md');
     expect(replaceDocument).not.toHaveBeenCalled();
   });
+  it('restores chat metadata when reopening a clean path-backed shutdown snapshot', async () => {
+    const openFileInCurrent = vi.fn(async () => ({ opened: true }));
+    const setUnifiedChatHistory = vi.fn();
+    const unifiedRestore = vi.fn();
+    const setUnifiedChatOpen = vi.fn();
+    const applyPreviewMode = vi.fn();
+    const replaceDocument = vi.fn();
+    const setStatus = vi.fn();
+    const ctx = {
+      currentPath: null,
+      pendingTitle: null,
+      previewMode: 'split',
+      dirty: false,
+      editor: { getDoc: () => '' },
+      setStatus,
+    } as unknown as AppContext;
+    (window as any).api = {
+      sessionGet: vi.fn(async () => ({
+        snapshot: {
+          path: '/tmp/clean-chat.md',
+          doc: 'stale',
+          title: null,
+          dirty: false,
+          view: 'preview-only',
+          unifiedChatHistory: [{ type: 'separator', label: 'kept chat' }],
+        },
+        restoreReason: 'shutdown',
+      })),
+      sessionWrite: vi.fn(async () => {}),
+      sessionClear: vi.fn(async () => {}),
+      openFileInCurrent,
+    };
+    initSessionSnapshot(ctx, {
+      prefs: { theme: 'system', fontSize: 'md' },
+      unifiedChat: { restore: unifiedRestore } as never,
+      getUnifiedChatHistory: () => [{ type: 'separator', label: 'kept chat' }],
+      setUnifiedChatHistory,
+      setUnifiedChatOpen,
+      applyPreviewMode,
+      replaceDocument,
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(openFileInCurrent).toHaveBeenCalledWith('/tmp/clean-chat.md');
+    expect(replaceDocument).not.toHaveBeenCalled();
+    expect(setUnifiedChatHistory).toHaveBeenCalled();
+    expect(unifiedRestore).toHaveBeenCalled();
+    expect(applyPreviewMode).toHaveBeenCalled();
+  });
+
+  it('reopens path-only crash restores without a banner', async () => {
+    const openFileInCurrent = vi.fn(async () => ({ opened: true }));
+    const replaceDocument = vi.fn();
+    const ctx = {
+      currentPath: null,
+      pendingTitle: null,
+      previewMode: 'split',
+      dirty: false,
+      editor: { getDoc: () => '' },
+      setStatus: vi.fn(),
+    } as unknown as AppContext;
+    (window as any).api = {
+      sessionGet: vi.fn(async () => ({
+        snapshot: { path: '/tmp/crash-path.md', doc: '', title: null, dirty: false },
+      })),
+      sessionWrite: vi.fn(async () => {}),
+      sessionClear: vi.fn(async () => {}),
+      openFileInCurrent,
+    };
+    initSessionSnapshot(ctx, {
+      prefs: { theme: 'system', fontSize: 'md' },
+      unifiedChat: { restore: vi.fn() } as never,
+      getUnifiedChatHistory: () => [],
+      setUnifiedChatHistory: vi.fn(),
+      setUnifiedChatOpen: vi.fn(),
+      applyPreviewMode: vi.fn(),
+      replaceDocument,
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(openFileInCurrent).toHaveBeenCalledWith('/tmp/crash-path.md');
+    expect(document.querySelector('.restore-yes')).toBeNull();
+    expect(replaceDocument).not.toHaveBeenCalled();
+  });
 });
 
 describe('buildSessionSnapshot', () => {
