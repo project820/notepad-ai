@@ -589,14 +589,15 @@ export function createAppWindows({
         if (!live) return 'cancel';
         const fromRenderer = normalizeWindowSnapshot(target.windowKey, live.currentPath, result.snapshot);
         // Crash-recovery windows keep restoreSnapshot until the user accepts or
-        // declines the banner. A ready renderer can still be blank; do not clobber
-        // the durable recovered draft with that empty live snapshot.
+        // declines the banner. Prefer it whenever the live renderer still has an
+        // empty document — even if a file path alone would make the live
+        // snapshot "restorable".
         const pendingRecovery = live.restoreSnapshot
-          ? normalizeWindowSnapshot(target.windowKey, live.currentPath ?? live.restoreSnapshot.path, live.restoreSnapshot)
+          ? normalizeWindowSnapshot(target.windowKey, live.restoreSnapshot.path ?? live.currentPath, live.restoreSnapshot)
           : null;
-        const chosen = pendingRecovery
-          && isRestorableSessionWindow(pendingRecovery)
-          && !isRestorableSessionWindow(fromRenderer)
+        const liveDocEmpty = (fromRenderer.doc?.length ?? 0) === 0;
+        const recoveryHasDoc = (pendingRecovery?.doc?.length ?? 0) > 0;
+        const chosen = pendingRecovery && recoveryHasDoc && liveDocEmpty
           ? pendingRecovery
           : fromRenderer;
         shutdownSnapshots.set(target.windowKey, chosen);

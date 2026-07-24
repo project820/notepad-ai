@@ -126,6 +126,40 @@ describe('session restore mode', () => {
       dirty: false,
     });
   });
+  it('reopens path-only shutdown restores via openFileInCurrent', async () => {
+    const openFileInCurrent = vi.fn(async () => ({ opened: true }));
+    const replaceDocument = vi.fn();
+    const ctx = {
+      currentPath: null,
+      pendingTitle: null,
+      previewMode: 'split',
+      dirty: false,
+      editor: { getDoc: () => '' },
+      setStatus: vi.fn(),
+    } as unknown as AppContext;
+    (window as any).api = {
+      sessionGet: vi.fn(async () => ({
+        snapshot: { path: '/tmp/opening.md', doc: '', title: null, dirty: false },
+        restoreReason: 'shutdown',
+      })),
+      sessionWrite: vi.fn(async () => {}),
+      sessionClear: vi.fn(async () => {}),
+      openFileInCurrent,
+    };
+    initSessionSnapshot(ctx, {
+      prefs: { theme: 'system', fontSize: 'md' },
+      unifiedChat: { restore: vi.fn() } as never,
+      getUnifiedChatHistory: () => [],
+      setUnifiedChatHistory: vi.fn(),
+      setUnifiedChatOpen: vi.fn(),
+      applyPreviewMode: vi.fn(),
+      replaceDocument,
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(openFileInCurrent).toHaveBeenCalledWith('/tmp/opening.md');
+    expect(replaceDocument).not.toHaveBeenCalled();
+  });
 });
 
 describe('buildSessionSnapshot', () => {

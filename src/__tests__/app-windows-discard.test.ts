@@ -931,5 +931,53 @@ describe('discard close IPC waiters', () => {
         }),
       ]);
     });
+    it('preserves path-backed unanswered recovery over a blank path-only live snapshot', async () => {
+      const commitShutdownSession = vi.fn(async () => {});
+      const { appWindows, records } = await setup((win, channel, payload) => {
+        if (channel === 'close:shutdown-persist:request') {
+          electron.emitIpc('close:shutdown-persist:result', win, {
+            id: payload.id,
+            ok: true,
+            fileSaved: false,
+            revision: payload.revision,
+            snapshot: { doc: '', dirty: false, path: '/tmp/recovered.md' },
+          });
+        }
+        if (channel === 'close:consume') {
+          electron.emitIpc('close:consume-result', win, { requestId: payload.requestId, consumed: true });
+        }
+      }, async () => {
+        throw new Error('shutdown must not open a dialog');
+      }, 1, () => true, async () => {}, async () => {}, async () => {}, (win, payload) => {
+        electron.emitIpc('close:state', win, {
+          ...payload,
+          dirty: false,
+          hasPath: true,
+          docEmpty: true,
+          revision: 0,
+          locale: 'en',
+        });
+      }, false, undefined, undefined, commitShutdownSession);
+      records[0].ready = true;
+      records[0].currentPath = '/tmp/recovered.md';
+      records[0].restoreSnapshot = {
+        id: 'window-1',
+        path: '/tmp/recovered.md',
+        title: 'recovered.md',
+        doc: 'recovered file-backed draft',
+        dirty: true,
+        unifiedChatHistory: [],
+      };
+
+      await expect(appWindows.approveAllForQuit('shutdown')).resolves.toBe(true);
+      expect(commitShutdownSession).toHaveBeenCalledWith([
+        expect.objectContaining({
+          id: 'window-1',
+          path: '/tmp/recovered.md',
+          doc: 'recovered file-backed draft',
+          dirty: true,
+        }),
+      ]);
+    });
   });
 });

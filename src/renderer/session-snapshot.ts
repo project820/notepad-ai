@@ -86,11 +86,21 @@ export function initSessionSnapshot(ctx: AppContext, deps: SessionSnapshotDeps) 
   void (async () => {
     const res = await window.api.sessionGet();
     const snap = res?.snapshot;
-    if (!snap || ((snap.doc?.length ?? 0) === 0 && (snap.unifiedChatHistory?.length ?? 0) === 0)) return;
+    if (!snap) return;
+    const hasDoc = (snap.doc?.length ?? 0) > 0 || (snap.unifiedChatHistory?.length ?? 0) > 0;
+    const path = typeof snap.path === 'string' && snap.path.length > 0 ? snap.path : null;
+    // Path-only shutdown snapshots must still reopen the file; empty untitled
+    // windows remain excluded.
+    if (!hasDoc && !path) return;
     if (res.restoreReason === 'shutdown') {
-      applySessionSnapshot(snap);
+      if (hasDoc) {
+        applySessionSnapshot(snap);
+      } else if (path) {
+        void window.api.openFileInCurrent(path);
+      }
       return;
     }
+    if (!hasDoc) return;
     setTimeout(() => showRestoreBanner(snap), 400);
   })();
 
