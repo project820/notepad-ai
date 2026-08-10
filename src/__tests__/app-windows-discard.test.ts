@@ -91,7 +91,12 @@ const electron = vi.hoisted(() => {
   };
 });
 
+const appLog = vi.hoisted(() => ({
+  logWarn: vi.fn(),
+}));
+
 vi.mock('electron', () => electron);
+vi.mock('../main/app-log', () => appLog);
 
 import type { WindowRecord } from '../main/window-registry';
 
@@ -203,7 +208,10 @@ async function setup(
 }
 
 describe('discard close IPC waiters', () => {
-  beforeEach(() => electron.reset());
+  beforeEach(() => {
+    electron.reset();
+    appLog.logWarn.mockReset();
+  });
   it('approves a save only after a fresh matching post-save revision', async () => {
     let stateQueries = 0;
     const commitQuitSession = vi.fn(async () => {});
@@ -504,6 +512,23 @@ describe('discard close IPC waiters', () => {
       await vi.advanceTimersByTimeAsync(50);
       await expect(approval).resolves.toBe(true);
       expect(appWindows.isSessionWriteFenced('window-1')).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it('logs a renderer state timeout while keeping close approval denied', async () => {
+    vi.useFakeTimers();
+    try {
+      const { appWindows } = await setup(() => {}, async () => 'cancel', 1, () => true, async () => {}, async () => {}, async () => {}, () => {});
+      const approval = appWindows.approveAllForQuit('quit');
+
+      await vi.advanceTimersByTimeAsync(400);
+      await expect(approval).resolves.toBe(false);
+      expect(appLog.logWarn).toHaveBeenCalledWith(
+        'close',
+        'renderer state response timed out',
+        expect.objectContaining({ webContentsId: 1001, timeoutMs: 400 }),
+      );
     } finally {
       vi.useRealTimers();
     }

@@ -54,6 +54,16 @@ async function replaceEditorText(win, content) {
   }, 60_000);
 }
 
+async function appendEditorText(win, marker) {
+  await waitFor('editor', () => win.webContents.executeJavaScript(`Boolean(document.querySelector('.cm-content'))`));
+  await win.webContents.executeJavaScript(`document.querySelector('.cm-content')?.focus(); true`);
+  win.focus();
+  win.webContents.focus();
+  await win.webContents.executeJavaScript(`document.querySelector('.cm-content')?.focus(); true`);
+  win.webContents.insertText(`\n${marker}\n`);
+  await waitFor('CodeMirror append', async () => (await editorText(win)).includes(marker), 60_000);
+}
+
 function createFixture(userData) {
   const doc = join(userData, 'close-smoke.md');
   const secondDoc = join(userData, 'close-smoke-second.md');
@@ -68,6 +78,17 @@ function createFixture(userData) {
   return { doc, secondDoc, largeDoc };
 }
 
+function assertPersistedDocument(filePath, expected) {
+  const actual = readFileSync(filePath, 'utf8');
+  if (expected.kind === 'large') {
+    if (!actual.includes(expected.marker) || actual.length <= expected.originalLength) {
+      throw new Error(`large save did not persist the edited marker for ${filePath}`);
+    }
+    return;
+  }
+  if (actual !== expected.content) throw new Error(`save did not persist ${filePath}`);
+}
+
 async function worker() {
   const { app, BrowserWindow, Menu } = electron;
   require(resolve(REPO, 'dist/main/main.js'));
@@ -79,18 +100,27 @@ async function worker() {
   const dirtyWindows = base.startsWith('quit')
     ? await waitFor('two windows', () => BrowserWindow.getAllWindows().filter((candidate) => !candidate.isDestroyed()).length === 2 ? BrowserWindow.getAllWindows() : null)
     : [win];
+  const expectedByPath = new Map();
   await Promise.all(dirtyWindows.map((dirtyWindow) => waitFor('editor', () =>
     dirtyWindow.webContents.executeJavaScript(`Boolean(document.querySelector('.cm-content'))`),
   )));
-  for (const dirtyWindow of dirtyWindows) {
+  if (scenario.endsWith('-large')) {
+    await Promise.all(dirtyWindows.map((dirtyWindow) => waitFor('large document content', async () =>
+      (await editorText(dirtyWindow)).includes('# Close smoke large'),
+    )));
+  }
+  for (const [index, dirtyWindow] of dirtyWindows.entries()) {
+    const marker = `close smoke ${scenario} ${dirtyWindow.id}`;
+    const path = index === 0 ? documentPath : secondDocumentPath;
+    const originalLength = scenario.endsWith('-large') ? readFileSync(path, 'utf8').length : null;
     if (scenario.endsWith('-large')) {
-      dirtyWindow.webContents.insertText(`\nclose smoke ${scenario} ${dirtyWindow.id}\n`);
+      await appendEditorText(dirtyWindow, marker);
+      expectedByPath.set(path, { kind: 'large', marker, originalLength });
     } else {
-      dirtyWindow.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'A', modifiers: ['meta'] });
-      dirtyWindow.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'A', modifiers: ['meta'] });
-      await delay(30);
-      dirtyWindow.webContents.insertText(`close smoke ${scenario} ${dirtyWindow.id}`);
+      await replaceEditorText(dirtyWindow, marker);
+      expectedByPath.set(path, { kind: 'exact', content: marker });
     }
+    if (!(await editorText(dirtyWindow)).includes(marker)) throw new Error(`${scenario} edit marker was not applied`);
   }
   await delay(100);
 
@@ -120,12 +150,27 @@ async function worker() {
     console.log('[close-dialog-smoke] quit-discard-closed-two-dirty-windows');
     return;
   }
+  if (base === 'quit-save') {
+    const closed = new Promise((resolveClosed) => app.once('window-all-closed', resolveClosed));
+    app.quit();
+    await Promise.race([
+      closed,
+      delay(20_000).then(() => { throw new Error('quit save did not close both dirty windows'); }),
+    ]);
+    for (const [path, expected] of expectedByPath) assertPersistedDocument(path, expected);
+    console.log('[close-dialog-smoke] quit-save-closed-two-dirty-windows');
+    return;
+  }
   const closed = new Promise((resolveClosed) => win.once('closed', resolveClosed));
   win.close();
   await Promise.race([
     closed,
     delay(20_000).then(() => { throw new Error(`${scenario} did not close the window`); }),
   ]);
+  if (base === 'save') {
+    const expected = expectedByPath.get(documentPath);
+    if (expected != null) assertPersistedDocument(documentPath, expected);
+  }
   console.log(`[close-dialog-smoke] ${scenario}-closed-window`);
   app.exit(0);
 }
@@ -282,7 +327,7 @@ if (scenario) {
 } else {
   void (async () => {
     if (!existsSync(resolve(REPO, 'dist/main/main.js'))) throw new Error('dist/main/main.js missing; build the app before smoke execution');
-    // The legacy seven scenarios intentionally share ONE userData in their
+    // The legacy scenarios intentionally share ONE userData in their
     // historical order, exactly as before the shutdown pairs were added: a
     // per-scenario cold userData exposes a pre-existing cold-start save-close
     // delay (>20s on some machines) that made `save`/`save-large` flaky.
@@ -290,13 +335,13 @@ if (scenario) {
     // pairs below, which each use their own pair-local userData.
     const userData = mkdtempSync(join(tmpdir(), 'notepad-ai-close-smoke-'));
     const { doc, secondDoc, largeDoc } = createFixture(userData);
-    for (const choice of ['discard', 'save', 'cancel', 'quit-cancel', 'quit-discard', 'discard-large', 'save-large']) {
+    for (const choice of ['discard', 'save', 'cancel', 'quit-cancel', 'quit-discard', 'quit-save', 'discard-large', 'save-large']) {
       const base = choice.replace(/-large$/, '');
       await waitForWorker(choice, {
         NOTEPAD_AI_CLOSE_SMOKE_SCENARIO: choice,
         NOTEPAD_AI_CLOSE_SMOKE_DOCUMENT: choice.endsWith('-large') ? largeDoc : doc,
         NOTEPAD_AI_CLOSE_SMOKE_SECOND_DOCUMENT: secondDoc,
-        NOTEPAD_AI_CLOSE_DIALOG_CHOICE: base === 'quit-discard' ? 'discard' : base === 'quit-cancel' ? 'cancel' : base,
+        NOTEPAD_AI_CLOSE_DIALOG_CHOICE: base === 'quit-discard' ? 'discard' : base === 'quit-cancel' ? 'cancel' : base === 'quit-save' ? 'save' : base,
         NOTEPAD_AI_USERDATA: userData,
       });
       console.log(`[close-dialog-smoke] ${choice}=PASS`);
