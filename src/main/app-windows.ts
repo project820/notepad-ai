@@ -143,10 +143,12 @@ export function createAppWindows({
     webContentsId: number,
     send: () => void,
   ) => new Promise<CloseGuardState | null>((resolve) => {
+    const timeoutMs = 400;
     const timer = setTimeout(() => {
       pendingState.delete(id);
+      void logWarn('close', 'renderer state response timed out', { requestId: id, webContentsId, timeoutMs });
       resolve(null);
-    }, 400);
+    }, timeoutMs);
     pendingState.set(id, {
       webContentsId,
       resolve: (value) => {
@@ -315,7 +317,11 @@ export function createAppWindows({
       };
       pendingSave.set(id, pending);
       win.once('closed', onDestroyed);
-      timer = setTimeout(() => pending.resolve({ saved: false, committedRevision: null }), Math.max(0, deadline - Date.now()));
+      const timeoutMs = Math.max(0, deadline - Date.now());
+      timer = setTimeout(() => {
+        void logWarn('close', 'renderer save response timed out', { requestId: id, webContentsId: pending.webContentsId, timeoutMs });
+        pending.resolve({ saved: false, committedRevision: null });
+      }, timeoutMs);
       win.webContents.send('close:save', { requestId: id, revision });
     });
   };
@@ -350,10 +356,12 @@ export function createAppWindows({
     if (!activeLease(win, leaseId)) return Promise.resolve(false);
     if (leaseId && mainOwnedShutdownLeases.has(leaseId)) return Promise.resolve(true);
     return new Promise((resolve) => {
+      const timeoutMs = 400;
       const timer = setTimeout(() => {
         pendingAuthorize.delete(leaseId!);
+        void logWarn('close', 'renderer authorize response timed out', { requestId: leaseId, webContentsId: win.webContents.id, timeoutMs });
         resolve(false);
-      }, 400);
+      }, timeoutMs);
       pendingAuthorize.set(leaseId!, {
         webContentsId: win.webContents.id,
         resolve: (valid) => {
@@ -369,10 +377,12 @@ export function createAppWindows({
     if (!activeLease(win, leaseId)) return Promise.resolve(false);
     if (leaseId && mainOwnedShutdownLeases.has(leaseId)) return Promise.resolve(true);
     return new Promise((resolve) => {
+      const timeoutMs = 400;
       const timer = setTimeout(() => {
         pendingConsume.delete(leaseId!);
+        void logWarn('close', 'renderer consume response timed out', { requestId: leaseId, webContentsId: win.webContents.id, timeoutMs });
         resolve(false);
-      }, 400);
+      }, timeoutMs);
       pendingConsume.set(leaseId!, {
         webContentsId: win.webContents.id,
         resolve: (consumed) => {

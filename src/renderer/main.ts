@@ -30,6 +30,7 @@ import { folderFromFilePath, initProjectWizardFlow } from './project-wizard-flow
 import { initSessionSnapshot } from './session-snapshot';
 import { initUpdateBanner } from './update-banner';
 import { handleCloseQueryState } from './close-query-state';
+import { handleCloseSaveRequest } from './close-save-handler';
 
 const workspace = document.querySelector('.workspace') as HTMLElement;
 const editorHost = document.getElementById('editor-host') as HTMLDivElement;
@@ -308,17 +309,14 @@ window.api.onCloseQuiesceRollback(({ requestId }) => {
 });
 window.api.sendCloseQuiesceReady();
 window.api.onCloseSave((requestId, requestedRevision) => {
-  void (async () => {
-    const committedRevision = await docLifecycle.save();
-    const saved = committedRevision !== null && committedRevision >= requestedRevision;
-    if (saved && !ctx.dirty && sessionSnapshot) await sessionSnapshot.flushSessionSnapshot();
-    window.api.sendCloseSaveResult(requestId, {
-      saved,
-      // This is the actual document revision written, not merely the request.
-      committedRevision: saved ? committedRevision : null,
-    });
-  })().catch(() => {
-    window.api.sendCloseSaveResult(requestId, { saved: false, committedRevision: null });
+  void handleCloseSaveRequest({
+    requestId,
+    requestedRevision,
+    save: () => docLifecycle.save(),
+    isDirty: () => ctx.dirty,
+    flushSessionSnapshot: () => sessionSnapshot.flushSessionSnapshot(),
+    onSnapshotFlushError: (error) => console.warn('[session] close snapshot flush failed:', error),
+    send: window.api.sendCloseSaveResult,
   });
 });
 window.api.onCloseAuthorize((requestId) => {
