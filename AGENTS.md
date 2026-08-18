@@ -56,3 +56,36 @@ GJC 컨트리뷰션 워크스페이스의 운영 규칙을 이 저장소가 **�
 - 저장소 전체 상시 모니터링, 무관한 PR 관찰
 - 상시 백그라운드 데몬/감시 프로세스 상주
 - 자동화 인프라(이벤트 wiring, 스캔 스크립트, council 자동화)의 즉시 구축 — 필요해질 때 별도 PR로 진행
+
+## Code Review Rules
+
+Review for precision, not maximum comment volume.
+
+Report only serious defects introduced or worsened by the current diff:
+- crashes or broken execution;
+- incorrect behavior or corrupted results;
+- security vulnerabilities;
+- data loss or corruption;
+- broken compatibility;
+- likely production incidents.
+
+Before posting a comment, prove:
+
+trigger → failure → impact
+
+Every finding must cite the changed line or changed behavior and explain why the issue is caused by this diff.
+
+Do not report:
+- style, naming, formatting, or readability;
+- optional refactors;
+- speculative edge cases;
+- hypothetical future requirements;
+- test coverage alone;
+- minor performance concerns;
+- pre-existing issues;
+- subjective design preferences;
+- multiple comments for the same root cause.
+
+Do not post P2, P3, minor, or nit-level findings.
+
+If no serious defect is proven, post no inline comments and approve the review.
