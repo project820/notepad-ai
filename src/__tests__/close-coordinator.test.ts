@@ -196,12 +196,22 @@ describe('CloseCoordinator', () => {
     expect(commit.mock.calls[0][0]).toMatchObject({ intent: 'shutdown', targets: [], discards: [] });
   });
 
-  it('still denies empty non-shutdown transactions', async () => {
+  it('approves an empty quit or relaunch after committing the empty session', async () => {
+    for (const intent of ['quit', 'relaunch'] as const) {
+      const coordinator = new CloseCoordinator();
+      const commit = vi.fn(async () => true);
+
+      await expect(coordinator.request(intent, [], async () => 'allow', commit))
+        .resolves.toEqual({ approved: true, intent });
+      expect(commit).toHaveBeenCalledOnce();
+      expect(commit.mock.calls[0][0]).toMatchObject({ intent, targets: [], discards: [] });
+    }
+  });
+
+  it('still denies an empty window-close transaction', async () => {
     const coordinator = new CloseCoordinator();
     const commit = vi.fn(async () => true);
 
-    await expect(coordinator.request('quit', [], async () => 'allow', commit))
-      .resolves.toEqual({ approved: false, intent: 'quit' });
     await expect(coordinator.request('close', [], async () => 'allow', commit))
       .resolves.toEqual({ approved: false, intent: 'close' });
     expect(commit).not.toHaveBeenCalled();

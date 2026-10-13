@@ -161,6 +161,24 @@ async function worker() {
     console.log('[close-dialog-smoke] quit-save-closed-two-dirty-windows');
     return;
   }
+  if (base === 'last-window-quit') {
+    // macOS keeps the app alive after its last window closes; Cmd+Q must
+    // still terminate it instead of being denied for having no targets.
+    const windowClosed = new Promise((resolveClosed) => win.once('closed', resolveClosed));
+    win.close();
+    await Promise.race([
+      windowClosed,
+      delay(20_000).then(() => { throw new Error('last window did not close'); }),
+    ]);
+    const willQuit = new Promise((resolveQuit) => app.once('will-quit', resolveQuit));
+    app.quit();
+    await Promise.race([
+      willQuit,
+      delay(10_000).then(() => { throw new Error('quit with no open windows was denied'); }),
+    ]);
+    console.log('[close-dialog-smoke] last-window-quit-exited');
+    return;
+  }
   const closed = new Promise((resolveClosed) => win.once('closed', resolveClosed));
   win.close();
   await Promise.race([
@@ -335,13 +353,13 @@ if (scenario) {
     // pairs below, which each use their own pair-local userData.
     const userData = mkdtempSync(join(tmpdir(), 'notepad-ai-close-smoke-'));
     const { doc, secondDoc, largeDoc } = createFixture(userData);
-    for (const choice of ['discard', 'save', 'cancel', 'quit-cancel', 'quit-discard', 'quit-save', 'discard-large', 'save-large']) {
+    for (const choice of ['discard', 'save', 'cancel', 'quit-cancel', 'quit-discard', 'quit-save', 'last-window-quit', 'discard-large', 'save-large']) {
       const base = choice.replace(/-large$/, '');
       await waitForWorker(choice, {
         NOTEPAD_AI_CLOSE_SMOKE_SCENARIO: choice,
         NOTEPAD_AI_CLOSE_SMOKE_DOCUMENT: choice.endsWith('-large') ? largeDoc : doc,
         NOTEPAD_AI_CLOSE_SMOKE_SECOND_DOCUMENT: secondDoc,
-        NOTEPAD_AI_CLOSE_DIALOG_CHOICE: base === 'quit-discard' ? 'discard' : base === 'quit-cancel' ? 'cancel' : base === 'quit-save' ? 'save' : base,
+        NOTEPAD_AI_CLOSE_DIALOG_CHOICE: base === 'quit-discard' || base === 'last-window-quit' ? 'discard' : base === 'quit-cancel' ? 'cancel' : base === 'quit-save' ? 'save' : base,
         NOTEPAD_AI_USERDATA: userData,
       });
       console.log(`[close-dialog-smoke] ${choice}=PASS`);

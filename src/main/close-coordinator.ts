@@ -156,11 +156,12 @@ export class CloseCoordinator {
       const decisions = new Map<number, CloseDecision>();
       let pending = [...targets];
       let approved = false;
-      // Empty shutdown targets must still approve: macOS powerMonitor has already
-      // preventDefault()'d, so a denial would strand the app and block power-off.
-      // Persist the empty shutdown commit (marker + empty windows) then return.
+      // Empty app-level teardown must still approve. On macOS the app keeps
+      // running after its last window closes, so denying an empty quit makes
+      // Cmd+Q a no-op; powerMonitor shutdown has already preventDefault()'d.
+      // Persist the empty commit (clean-exit or shutdown marker) then return.
       if (pending.length === 0) {
-        if (intent !== 'shutdown') return { approved: false, intent };
+        if (intent === 'close') return { approved: false, intent };
         try {
           const committed = await commit({ intent, targets: [], discards: [], context });
           if (committed !== false && !(typeof committed === 'object' && 'retry' in committed)) {
