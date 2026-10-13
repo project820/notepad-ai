@@ -22,6 +22,9 @@ const require = createRequire(import.meta.url);
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const { app, BrowserWindow, Menu, dialog, ipcMain } = electron;
 const MENU_LABELS = { en: 'Export as PDF…', ko: 'PDF로 내보내기…', 'zh-Hans': '导出为 PDF…', 'zh-Hant': '匯出為 PDF…', ja: 'PDF として書き出す…' };
+// Success status prefixes per locale. The status line is rendered with the
+// renderer's active i18n locale, which <html lang> does not reliably reflect.
+const SAVED_STATUS = { en: 'PDF exported', ko: 'PDF 내보냄', 'zh-Hans': '已导出 PDF', 'zh-Hant': '已匯出 PDF', ja: 'PDF を書き出しました' };
 
 const delay = (ms) => new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
 async function waitFor(name, predicate, timeoutMs = 30_000) {
@@ -97,6 +100,9 @@ async function main() {
   nextChoice = { canceled: false, filePath: target };
   win.webContents.send('menu:export-pdf');
   await waitFor('pdf written', async () => existsSync(target) && (await status()).includes('exported.pdf'));
+  const savedStatus = await status();
+  const locale = Object.keys(SAVED_STATUS).find((key) => savedStatus.startsWith(SAVED_STATUS[key]));
+  if (!locale) throw new Error(`unrecognized success status: ${savedStatus}`);
   const pdf = readFileSync(target);
   const text = pdf.toString('latin1');
   if (!text.startsWith('%PDF-')) throw new Error('output is not a PDF');
@@ -136,9 +142,7 @@ async function main() {
   if (!exportedHtml.at(-1)?.includes(marker)) throw new Error('export omitted a pending rich-preview edit');
   console.log('[pdf-export-e2e] pending-preview-edit=PASS');
 
-  const lang = await win.webContents.executeJavaScript('document.documentElement.lang') || 'en';
-  const expectedLabel = MENU_LABELS[lang];
-  if (!expectedLabel) throw new Error(`unexpected renderer locale ${lang}`);
+  const expectedLabel = MENU_LABELS[locale];
   const localized = await waitFor(`menu label ${expectedLabel}`, async () => {
     const current = Menu.getApplicationMenu()?.items.flatMap((top) => top.submenu?.items ?? [])
       .find((entry) => entry.accelerator === 'Shift+CmdOrCtrl+E');
