@@ -710,7 +710,9 @@ export function createAppWindows({
       : discardedKeys;
     try {
       if (transaction.intent === 'quit') {
-        await commitQuitSession(discardedKeys);
+        // Until the initial restore has run, the stored session may hold an
+        // unpresented recovery snapshot; an empty quit must not mark it clean.
+        if (ready || transaction.targets.length > 0) await commitQuitSession(discardedKeys);
       } else if (transaction.intent === 'shutdown') {
         await commitShutdownSession(snapshots as SessionWindowSnapshot[]);
       } else if (removedSessionKeys.length > 0) {
