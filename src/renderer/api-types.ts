@@ -87,6 +87,8 @@ export type Api = HtmlExportPipelineApi & HtmlExportAssetApi & {
   onMenuSave: (cb: () => void) => void;
   onMenuSaveAs: (cb: () => void) => void;
   onTogglePreview: (cb: () => void) => void;
+  onMenuExportPdf: (cb: () => void) => void;
+  exportPdf: (request: { html: string; lang: string }) => Promise<{ status: 'saved'; fileName: string } | { status: 'canceled' } | { status: 'failed' }>;
   windowReady: () => void;
   saveFile: (filePath: string | null, content: string) => Promise<{ saved: boolean; filePath?: string; error?: string; ownerWindowId?: number }>;
   openFolder: () => Promise<string | null>;

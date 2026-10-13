@@ -97,6 +97,11 @@ const api = {
   onTogglePreview: (cb: () => void) => {
     ipcRenderer.on('menu:toggle-preview', () => cb());
   },
+  onMenuExportPdf: (cb: () => void) => {
+    ipcRenderer.on('menu:export-pdf', () => cb());
+  },
+  exportPdf: (request: { html: string; lang: string }): Promise<{ status: 'saved'; fileName: string } | { status: 'canceled' } | { status: 'failed' }> =>
+    ipcRenderer.invoke('pdf:export', request),
   /** Tell main this renderer is ready to receive `file:opened` (flushes any queued payloads). */
   windowReady: (): void => ipcRenderer.send('window:ready'),
   saveFile: (

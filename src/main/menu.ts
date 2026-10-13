@@ -46,6 +46,12 @@ export function buildMenu({ createWindow, handleOpen, sendToFocused }: MenuDeps)
           accelerator: 'Shift+CmdOrCtrl+S',
           click: () => sendToFocused('menu:save-as'),
         },
+        { type: 'separator' },
+        {
+          label: 'Export as PDF…',
+          accelerator: 'Shift+CmdOrCtrl+E',
+          click: () => sendToFocused('menu:export-pdf'),
+        },
       ],
     },
     {

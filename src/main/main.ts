@@ -35,6 +35,7 @@ import {
   type ResolvedArtifactId,
 } from '../shared/html-export-pipeline';
 import { registerOsIpc } from './ipc/os-ipc';
+import { registerPdfExportIpc } from './ipc/pdf-export-ipc';
 import { registerSessionIpc } from './ipc/session-ipc';
 import { registerWizardIpc } from './ipc/wizard-ipc';
 import { createConverterHost, convertDocument, registerConvertIpc } from './convert';
@@ -181,6 +182,7 @@ const windows = createAppWindows({
 
 // All IPC handlers are registered at module load, before app.whenReady().
 registerFileIpc({ registry, fileGrants, identityFs: nodeIdentityFs, saveMutex, backend: documentAtomicBackend, windowFromRecord: windows.windowFromRecord, openFilePath: windows.openFilePath });
+registerPdfExportIpc({ documentPathFor: (windowId) => registry.get(windowId)?.currentPath ?? null });
 registerAuthIpc({ getRegistry });
 registerAiIpc({ getRegistry });
 registerProviderAuthIpc({ getRegistry });

@@ -8,6 +8,7 @@
     "scripts/converter-e2e-runner.mjs",
     "scripts/html-export-quarantine-smoke-runner.mjs",
     "scripts/html-export-direct-harness.mjs",
+    "scripts/pdf-export-e2e-runner.mjs",
     "scripts/security-e2e-runner.mjs"
   ],
   "project": [

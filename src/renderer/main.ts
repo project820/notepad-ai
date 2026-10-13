@@ -10,6 +10,7 @@ import { buildConvertedHtmlFrame } from './sanitize-html';
 import { openLoginModal } from './login-modal';
 import { applyTypography } from './typography';
 import { wirePreviewLinks, installDocumentLinkBackstop } from './preview-links';
+import { wirePdfExport } from './pdf-export';
 import type { AuthSnapshot } from '../shared/auth-protocol';
 import { parseModelKey } from './model-key';
 import { installBlockAi } from './block-ai';
@@ -147,6 +148,7 @@ wirePreviewLinks(ctx.preview.el, {
 });
 
 installDocumentLinkBackstop(ctx.preview.el, (url) => void window.api.openExternal(url));
+wirePdfExport(window.api, () => ctx.editor.getDoc(), ctx.setStatus);
 
 const leftPanelHost = document.getElementById('left-panel') as HTMLDivElement;
 layoutChrome = initLayoutChrome(ctx, {
