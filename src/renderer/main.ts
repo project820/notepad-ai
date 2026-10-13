@@ -10,6 +10,7 @@ import { buildConvertedHtmlFrame } from './sanitize-html';
 import { openLoginModal } from './login-modal';
 import { applyTypography } from './typography';
 import { wirePreviewLinks, installDocumentLinkBackstop } from './preview-links';
+import { wirePdfExport } from './pdf-export';
 import type { AuthSnapshot } from '../shared/auth-protocol';
 import { parseModelKey } from './model-key';
 import { installBlockAi } from './block-ai';
@@ -185,6 +186,18 @@ docLifecycle.setPreviewQuiesceHooks({
   pause: pausePreviewSyncTimer,
   resume: resumePreviewSyncTimer,
 });
+// Export must include DOM-only preview edits still waiting on the sync debounce.
+wirePdfExport(window.api, () => {
+  if (docLifecycle.isSaveFenced()) return null;
+  try {
+    flushPendingPreviewToSource();
+  } catch (error) {
+    console.warn('[pdf-export] preview flush failed:', error);
+    docLifecycle.markPreviewSyncFailed();
+    return null;
+  }
+  return docLifecycle.isSaveFenced() ? null : ctx.editor.getDoc();
+}, ctx.setStatus);
 updateHtmlViewToggle = createHtmlViewToggle(ctx, { selectionSync, scheduleLineAlign });
 
 editorHost.addEventListener('focusin', () => {

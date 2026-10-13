@@ -4,7 +4,7 @@ import path from 'node:path';
 import { prewarmCliSpawnPath } from './ai/cli-runner';
 import { resolveOcrAssetPaths, configureOcr } from './ai/ocr';
 import { getRegistry } from './ai/provider-registry';
-import { handleTrusted } from './ipc-guard';
+import { handleTrusted, onTrusted } from './ipc-guard';
 import { FileGrants } from './file-grants';
 import { KeyedMutex } from './keyed-mutex';
 import { type IdentityFs } from './path-identity';
@@ -35,6 +35,7 @@ import {
   type ResolvedArtifactId,
 } from '../shared/html-export-pipeline';
 import { registerOsIpc } from './ipc/os-ipc';
+import { registerPdfExportIpc } from './ipc/pdf-export-ipc';
 import { registerSessionIpc } from './ipc/session-ipc';
 import { registerWizardIpc } from './ipc/wizard-ipc';
 import { createConverterHost, convertDocument, registerConvertIpc } from './convert';
@@ -181,6 +182,7 @@ const windows = createAppWindows({
 
 // All IPC handlers are registered at module load, before app.whenReady().
 registerFileIpc({ registry, fileGrants, identityFs: nodeIdentityFs, saveMutex, backend: documentAtomicBackend, windowFromRecord: windows.windowFromRecord, openFilePath: windows.openFilePath });
+registerPdfExportIpc({ documentPathFor: (windowId) => registry.get(windowId)?.currentPath ?? null });
 registerAuthIpc({ getRegistry });
 registerAiIpc({ getRegistry });
 registerProviderAuthIpc({ getRegistry });
@@ -360,7 +362,12 @@ app.whenReady().then(async () => {
   } catch {
     /* OCR stays unconfigured; runOcr will surface an actionable error if invoked */
   }
-  buildMenu({ createWindow: windows.createWindow, handleOpen: windows.handleOpen, sendToFocused: windows.sendToFocused });
+  const menuDeps = { createWindow: windows.createWindow, handleOpen: windows.handleOpen, sendToFocused: windows.sendToFocused };
+  buildMenu(menuDeps);
+  onTrusted('menu:labels', (_event, labels: unknown) => {
+    const exportPdf = (labels as { exportPdf?: unknown } | null)?.exportPdf;
+    if (typeof exportPdf === 'string' && exportPdf.length > 0 && exportPdf.length <= 80) buildMenu(menuDeps, { exportPdf });
+  });
   const restored = await restorePreviousWindows();
   if (windows.hasPendingOpenFiles()) {
     windows.setReady();
