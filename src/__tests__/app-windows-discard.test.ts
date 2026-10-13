@@ -800,6 +800,26 @@ describe('discard close IPC waiters', () => {
       expect(commitShutdownSession).toHaveBeenCalledWith([]);
     });
 
+    it('quits with zero windows without clearing an unrestored session', async () => {
+      const commitQuitSession = vi.fn(async () => {});
+      const { appWindows } = await setup(
+        () => {},
+        async () => { throw new Error('an empty quit must not open a dialog'); },
+        0,
+        () => true,
+        commitQuitSession,
+      );
+
+      // Quit before the initial restore presented the stored session.
+      await expect(appWindows.approveAllForQuit('quit')).resolves.toBe(true);
+      expect(commitQuitSession).not.toHaveBeenCalled();
+
+      // After startup, closing every window and quitting is a clean exit.
+      appWindows.setReady();
+      await expect(appWindows.approveAllForQuit('quit')).resolves.toBe(true);
+      expect(commitQuitSession).toHaveBeenCalledWith([]);
+    });
+
     it('approves shutdown when every window is an unready blank', async () => {
       const commitShutdownSession = vi.fn(async () => {});
       const { appWindows, wins, records } = await setup(
