@@ -6,7 +6,11 @@ type MenuDeps = {
   sendToFocused: (channel: string) => void;
 };
 
-export function buildMenu({ createWindow, handleOpen, sendToFocused }: MenuDeps): void {
+/** Localized labels supplied by the renderer's i18n dictionaries. */
+export type MenuLabels = { exportPdf: string };
+const DEFAULT_LABELS: MenuLabels = { exportPdf: 'Export as PDF…' };
+
+export function buildMenu({ createWindow, handleOpen, sendToFocused }: MenuDeps, labels: MenuLabels = DEFAULT_LABELS): void {
   const template: Electron.MenuItemConstructorOptions[] = [
     {
       label: app.name,
@@ -48,7 +52,7 @@ export function buildMenu({ createWindow, handleOpen, sendToFocused }: MenuDeps)
         },
         { type: 'separator' },
         {
-          label: 'Export as PDF…',
+          label: labels.exportPdf,
           accelerator: 'Shift+CmdOrCtrl+E',
           click: () => sendToFocused('menu:export-pdf'),
         },

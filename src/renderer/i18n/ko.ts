@@ -91,6 +91,7 @@ export const ko: Dict = {
     'status.pdfExporting': 'PDF로 내보내는 중…',
     'status.pdfExported': 'PDF 내보냄 · {fileName}',
     'status.pdfExportFailed': '⚠ PDF를 내보내지 못했어요.',
+    'menu.exportPdf': 'PDF로 내보내기…',
     'status.view': '보기 · {mode}',
     'status.view.split': '분할',
     'status.view.preview': '서식 미리보기',

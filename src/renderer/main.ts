@@ -148,7 +148,6 @@ wirePreviewLinks(ctx.preview.el, {
 });
 
 installDocumentLinkBackstop(ctx.preview.el, (url) => void window.api.openExternal(url));
-wirePdfExport(window.api, () => ctx.editor.getDoc(), ctx.setStatus);
 
 const leftPanelHost = document.getElementById('left-panel') as HTMLDivElement;
 layoutChrome = initLayoutChrome(ctx, {
@@ -187,6 +186,18 @@ docLifecycle.setPreviewQuiesceHooks({
   pause: pausePreviewSyncTimer,
   resume: resumePreviewSyncTimer,
 });
+// Export must include DOM-only preview edits still waiting on the sync debounce.
+wirePdfExport(window.api, () => {
+  if (docLifecycle.isSaveFenced()) return null;
+  try {
+    flushPendingPreviewToSource();
+  } catch (error) {
+    console.warn('[pdf-export] preview flush failed:', error);
+    docLifecycle.markPreviewSyncFailed();
+    return null;
+  }
+  return docLifecycle.isSaveFenced() ? null : ctx.editor.getDoc();
+}, ctx.setStatus);
 updateHtmlViewToggle = createHtmlViewToggle(ctx, { selectionSync, scheduleLineAlign });
 
 editorHost.addEventListener('focusin', () => {

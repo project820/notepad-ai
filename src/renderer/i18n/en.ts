@@ -98,6 +98,7 @@ export const en: Dict = {
     'status.pdfExporting': 'Exporting PDF…',
     'status.pdfExported': 'PDF exported • {fileName}',
     'status.pdfExportFailed': '⚠ Could not export the PDF.',
+    'menu.exportPdf': 'Export as PDF…',
     'status.view': 'View • {mode}',
     'status.view.split': 'split',
     'status.view.preview': 'rich preview',

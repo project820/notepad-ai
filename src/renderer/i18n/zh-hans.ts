@@ -28,6 +28,7 @@ export const zhHans: Dict = {
     'status.pdfExporting': '正在导出 PDF…',
     'status.pdfExported': '已导出 PDF · {fileName}',
     'status.pdfExportFailed': '⚠ 无法导出 PDF。',
+    'menu.exportPdf': '导出为 PDF…',
     'status.view': '视图 · {mode}',
     'status.view.split': '分屏',
     'status.view.preview': '富文本预览',

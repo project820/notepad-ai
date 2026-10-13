@@ -28,6 +28,7 @@ export const ja: Dict = {
     'status.pdfExporting': 'PDF を書き出しています…',
     'status.pdfExported': 'PDF を書き出しました · {fileName}',
     'status.pdfExportFailed': '⚠ PDF を書き出せませんでした。',
+    'menu.exportPdf': 'PDF として書き出す…',
     'status.view': '表示 · {mode}',
     'status.view.split': '分割',
     'status.view.preview': 'リッチプレビュー',

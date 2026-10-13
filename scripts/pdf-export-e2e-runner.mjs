@@ -7,7 +7,9 @@
  *   - a canceled dialog writes nothing,
  *   - a saved export produces a multi-page A4 PDF at the chosen path,
  *   - the status line reports success,
- *   - the Markdown source on disk is unchanged.
+ *   - the Markdown source on disk is unchanged,
+ *   - a rich-preview edit still inside the sync debounce reaches the export,
+ *   - the File menu item carries a localized label.
  */
 import electron from 'electron';
 import { createRequire } from 'node:module';
@@ -18,7 +20,8 @@ import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const { app, BrowserWindow, dialog } = electron;
+const { app, BrowserWindow, Menu, dialog, ipcMain } = electron;
+const MENU_LABELS = { en: 'Export as PDF…', ko: 'PDF로 내보내기…', 'zh-Hans': '导出为 PDF…', 'zh-Hant': '匯出為 PDF…', ja: 'PDF として書き出す…' };
 
 const delay = (ms) => new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
 async function waitFor(name, predicate, timeoutMs = 30_000) {
@@ -68,6 +71,12 @@ async function main() {
     lastDefaultPath = options?.defaultPath ?? null;
     return nextChoice;
   };
+  const exportedHtml = [];
+  const originalHandle = ipcMain.handle.bind(ipcMain);
+  ipcMain.handle = (channel, listener) => originalHandle(channel, channel !== 'pdf:export' ? listener : (event, request, ...rest) => {
+    exportedHtml.push(typeof request?.html === 'string' ? request.html : '');
+    return listener(event, request, ...rest);
+  });
 
   require(resolve(REPO, 'dist/main/main.js'));
   app.emit('open-file', { preventDefault() {} }, docPath);
@@ -100,6 +109,42 @@ async function main() {
   if (readFileSync(docPath, 'utf8') !== markdown) throw new Error('export modified the Markdown source');
   console.log(`[pdf-export-e2e] save=PASS pages=${pages}`);
   if (process.env.NOTEPAD_AI_PDF_E2E_KEEP) writeFileSync(process.env.NOTEPAD_AI_PDF_E2E_KEEP, pdf);
+
+  const marker = 'PDFLIVEEDIT';
+  const liveTarget = join(userData, 'live-edit.pdf');
+  nextChoice = { canceled: false, filePath: liveTarget };
+  win.focus();
+  win.webContents.focus();
+  await win.webContents.executeJavaScript(`(() => {
+    const preview = document.querySelector('.preview');
+    const paragraph = preview?.querySelector('p');
+    if (!preview || !paragraph) return false;
+    preview.focus();
+    const range = document.createRange();
+    range.selectNodeContents(paragraph);
+    range.collapse(false);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    return true;
+  })()`);
+  win.webContents.insertText(` ${marker}`);
+  await waitFor('preview edit applied', () => win.webContents.executeJavaScript(`document.querySelector('.preview')?.textContent.includes('${marker}')`), 5_000);
+  // Export inside the 350 ms preview-to-source debounce.
+  win.webContents.send('menu:export-pdf');
+  await waitFor('live-edit pdf written', async () => existsSync(liveTarget));
+  if (!exportedHtml.at(-1)?.includes(marker)) throw new Error('export omitted a pending rich-preview edit');
+  console.log('[pdf-export-e2e] pending-preview-edit=PASS');
+
+  const lang = await win.webContents.executeJavaScript('document.documentElement.lang') || 'en';
+  const expectedLabel = MENU_LABELS[lang];
+  if (!expectedLabel) throw new Error(`unexpected renderer locale ${lang}`);
+  const localized = await waitFor(`menu label ${expectedLabel}`, async () => {
+    const current = Menu.getApplicationMenu()?.items.flatMap((top) => top.submenu?.items ?? [])
+      .find((entry) => entry.accelerator === 'Shift+CmdOrCtrl+E');
+    return current?.label === expectedLabel ? current.label : null;
+  });
+  console.log(`[pdf-export-e2e] menu-label=PASS (${localized})`);
   app.exit(0);
 }
 
